@@ -31,6 +31,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'cpainc2026')
 # In production (Railway), DATA_DIR points to the mounted persistent volume.
 # Locally it defaults to the project folder.
 _DATA_DIR = os.environ.get('DATA_DIR', os.path.dirname(__file__))
+os.makedirs(_DATA_DIR, exist_ok=True)
 DATABASE = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
 
 def get_db():
@@ -3036,8 +3037,11 @@ def ensure_pickup_tables():
         pass
 
 
-with app.app_context():
-    ensure_pickup_tables()
+try:
+    with app.app_context():
+        ensure_pickup_tables()
+except Exception:
+    pass
 
 
 # ── Auth tables & seeding ─────────────────────────────────────────────────────
@@ -3126,8 +3130,11 @@ def _seed_users(db):
             db.commit()
 
 
-with app.app_context():
-    ensure_auth_tables()
+try:
+    with app.app_context():
+        ensure_auth_tables()
+except Exception:
+    pass
 
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
