@@ -335,7 +335,13 @@ def admin_db_check():
     import os as _os
     exists = _os.path.exists(DATABASE)
     size = _os.path.getsize(DATABASE) if exists else 0
-    return f'DATABASE={DATABASE} exists={exists} size={size} Tables={tables}', 200
+    try:
+        with open('/proc/mounts') as _f:
+            mounts = [l for l in _f.read().splitlines() if '/data' in l or 'volume' in l.lower()]
+    except Exception as e:
+        mounts = [str(e)]
+    data_contents = _os.listdir('/data') if _os.path.exists('/data') else []
+    return f'DATABASE={DATABASE}\nexists={exists}\nsize={size}\nTables={tables}\nMounts={mounts}\n/data contents={data_contents}', 200
 
 # ── Temporary DB Upload ───────────────────────────────────────────────────────
 
