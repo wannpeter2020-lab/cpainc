@@ -4890,8 +4890,18 @@ def rfp_dashboard():
     db = get_db()
     show_archived = request.args.get('archived') == '1'
     rfps = db.execute(
-        'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
-        'FROM rfp r WHERE r.archived=? ORDER BY r.created_at DESC',
+        '''SELECT r.*,
+            (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count,
+            COALESCE(r.start_date,    p.StartDate)       AS eff_start_date,
+            COALESCE(r.end_date,      p.EndDate)         AS eff_end_date,
+            COALESCE(r.event_name,    p.EventName)       AS eff_event_name,
+            COALESCE(r.peak_rooms,    p.PeakRooms)       AS eff_peak_rooms,
+            COALESCE(r.total_room_nights, p.TotalRoomNights) AS eff_total_room_nights,
+            p.AccountName AS booking_account,
+            p.Customer    AS booking_hotel
+           FROM rfp r
+           LEFT JOIN ReportPipeline p ON CAST(r.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
+           WHERE r.archived=? ORDER BY r.created_at DESC''',
         (1 if show_archived else 0,)
     ).fetchall()
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,
