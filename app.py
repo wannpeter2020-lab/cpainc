@@ -3081,13 +3081,16 @@ def _hash_password(password):
 
 def _seed_users(db):
     for name, email, username, password, role in _SEED_USERS:
-        existing = db.execute('SELECT id FROM Users WHERE email = ?', (email,)).fetchone()
+        existing = db.execute('SELECT id FROM Users WHERE email = ? OR username = ?', (email, username)).fetchone()
         if not existing:
             ph = _hash_password(password)
-            db.execute(
-                'INSERT INTO Users (name, email, username, password_hash, role) VALUES (?,?,?,?,?)',
-                (name, email, username, ph, role)
-            )
+            try:
+                db.execute(
+                    'INSERT INTO Users (name, email, username, password_hash, role) VALUES (?,?,?,?,?)',
+                    (name, email, username, ph, role)
+                )
+            except Exception:
+                continue
             db.commit()
             user = db.execute('SELECT id FROM Users WHERE email = ?', (email,)).fetchone()
             uid = user['id']
