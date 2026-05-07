@@ -326,6 +326,17 @@ def dashboard():
         meetings_next30=meetings_next30, missing_commission_count=missing_commission_count,
         upcoming=upcoming, now=datetime.today(), who=who, title_suffix=title_suffix)
 
+# ── Temporary DB Diagnostics ─────────────────────────────────────────────────
+
+@app.route('/admin/db-check')
+def admin_db_check():
+    db = get_db()
+    tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    import os as _os
+    exists = _os.path.exists(DATABASE)
+    size = _os.path.getsize(DATABASE) if exists else 0
+    return f'DATABASE={DATABASE} exists={exists} size={size} Tables={tables}', 200
+
 # ── Temporary DB Upload ───────────────────────────────────────────────────────
 
 @app.route('/admin/upload-db', methods=['POST'])
@@ -3178,7 +3189,7 @@ def get_user_account_filter(user=None):
 
 @app.before_request
 def require_login():
-    exempt = {'login', 'logout', 'static', 'admin_upload_db'}
+    exempt = {'login', 'logout', 'static', 'admin_upload_db', 'admin_db_check'}
     if request.endpoint in exempt or request.endpoint is None:
         return
     uid = session.get('user_id')
