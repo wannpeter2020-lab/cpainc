@@ -325,6 +325,20 @@ def dashboard():
         meetings_next30=meetings_next30, missing_commission_count=missing_commission_count,
         upcoming=upcoming, now=datetime.today(), who=who, title_suffix=title_suffix)
 
+# ── Temporary DB Upload (remove after one-time use) ───────────────────────────
+
+@app.route('/admin/upload-db', methods=['POST'])
+def admin_upload_db():
+    token = request.headers.get('X-Upload-Token', '')
+    if token != 'cpainc-upload-2026':
+        return 'Unauthorized', 401
+    f = request.files.get('db')
+    if not f:
+        return 'No file', 400
+    dest = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
+    f.save(dest)
+    return f'Saved to {dest}', 200
+
 # ── Home / Bookings List ──────────────────────────────────────────────────────
 
 @app.route('/')
