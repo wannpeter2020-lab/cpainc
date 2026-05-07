@@ -3937,24 +3937,16 @@ def pickup_new_event():
         attrition_raw = f.get('attrition_pct', '')
         attrition = float(attrition_raw) / 100 if attrition_raw else None
         ota_url = f.get('ota_url', '').strip() or None
-        # Dynamic hotel contacts (hc_name_N / hc_email_N)
-        hotel_contacts = []
-        for i in range(20):
-            e_val = f.get(f'hc_email_{i}', '').strip()
-            n_val = f.get(f'hc_name_{i}', '').strip()
-            if e_val or n_val:
-                hotel_contacts.append({'name': n_val, 'email': e_val})
-        primary_hc_name  = hotel_contacts[0]['name']  if hotel_contacts else None
-        primary_hc_email = hotel_contacts[0]['email'] if hotel_contacts else None
-        # Dynamic client contacts (cc_name_N / cc_email_N)
+        hc_name  = f.get('hotel_contact', '').strip() or None
+        hc_email = f.get('hotel_contact_email', '').strip() or None
+        gc_name  = f.get('group_contact', '').strip() or None
+        gc_email = f.get('group_contact_email', '').strip() or None
+        hotel_contacts = [{'name': hc_name or '', 'email': hc_email or ''}] if (hc_name or hc_email) else []
+        # Additional CC recipients
         cc_emails = []
-        for i in range(20):
-            e_val = f.get(f'cc_email_{i}', '').strip()
-            n_val = f.get(f'cc_name_{i}', '').strip()
-            if e_val or n_val:
-                cc_emails.append({'name': n_val, 'email': e_val})
-        primary_gc_name  = cc_emails[0]['name']  if cc_emails else None
-        primary_gc_email = cc_emails[0]['email'] if cc_emails else None
+        for n, e in zip(f.getlist('cc_name[]'), f.getlist('cc_email[]')):
+            if n.strip() or e.strip():
+                cc_emails.append({'name': n.strip(), 'email': e.strip()})
         db = get_db()
         db.execute('''
             INSERT INTO pickup_config
@@ -3965,9 +3957,9 @@ def pickup_new_event():
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
-            f.get('event_name'), f.get('hotel'), primary_hc_name,
-            primary_hc_email, json.dumps(hotel_contacts), primary_gc_name,
-            primary_gc_email, f.get('cutoff_date'),
+            f.get('event_name'), f.get('hotel'), hc_name,
+            hc_email, json.dumps(hotel_contacts), gc_name,
+            gc_email, f.get('cutoff_date'),
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
@@ -4332,24 +4324,16 @@ def pickup_edit_event(cid):
         attrition_raw = f.get('attrition_pct', '')
         attrition = float(attrition_raw) / 100 if attrition_raw else None
         ota_url = f.get('ota_url', '').strip() or None
-        # Dynamic hotel contacts
-        hotel_contacts = []
-        for i in range(20):
-            e_val = f.get(f'hc_email_{i}', '').strip()
-            n_val = f.get(f'hc_name_{i}', '').strip()
-            if e_val or n_val:
-                hotel_contacts.append({'name': n_val, 'email': e_val})
-        primary_hc_name  = hotel_contacts[0]['name']  if hotel_contacts else None
-        primary_hc_email = hotel_contacts[0]['email'] if hotel_contacts else None
-        # Dynamic client contacts
+        hc_name  = f.get('hotel_contact', '').strip() or None
+        hc_email = f.get('hotel_contact_email', '').strip() or None
+        gc_name  = f.get('group_contact', '').strip() or None
+        gc_email = f.get('group_contact_email', '').strip() or None
+        hotel_contacts = [{'name': hc_name or '', 'email': hc_email or ''}] if (hc_name or hc_email) else []
+        # Additional CC recipients
         cc_emails = []
-        for i in range(20):
-            e_val = f.get(f'cc_email_{i}', '').strip()
-            n_val = f.get(f'cc_name_{i}', '').strip()
-            if e_val or n_val:
-                cc_emails.append({'name': n_val, 'email': e_val})
-        primary_gc_name  = cc_emails[0]['name']  if cc_emails else None
-        primary_gc_email = cc_emails[0]['email'] if cc_emails else None
+        for n, e in zip(f.getlist('cc_name[]'), f.getlist('cc_email[]')):
+            if n.strip() or e.strip():
+                cc_emails.append({'name': n.strip(), 'email': e.strip()})
         db.execute('''
             UPDATE pickup_config SET
             booking_id=?, tab_name=?, organization=?, event_name=?, hotel=?,
@@ -4360,9 +4344,9 @@ def pickup_edit_event(cid):
             WHERE id=?
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
-            f.get('event_name'), f.get('hotel'), primary_hc_name,
-            primary_hc_email, json.dumps(hotel_contacts), primary_gc_name,
-            primary_gc_email, f.get('cutoff_date'),
+            f.get('event_name'), f.get('hotel'), hc_name,
+            hc_email, json.dumps(hotel_contacts), gc_name,
+            gc_email, f.get('cutoff_date'),
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
