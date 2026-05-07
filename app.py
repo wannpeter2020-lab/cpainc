@@ -3965,6 +3965,7 @@ def pickup_new_event():
             pipeline_event = row['EventName'] or None
     return render_template('pickup_config_form.html', config=None,
                            action=url_for('pickup_new_event'),
+                           cancel_url=url_for('pickup_dashboard'),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
                            pipeline_event=pipeline_event)
@@ -4357,6 +4358,7 @@ def pickup_edit_event(cid):
             pipeline_event = row['EventName'] or None
     return render_template('pickup_config_form.html', config=config,
                            action=url_for('pickup_edit_event', cid=cid),
+                           cancel_url=url_for('pickup_event', cid=cid),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
                            pipeline_event=pipeline_event)

@@ -6,7 +6,7 @@
     <i class="bi bi-calendar-check me-2"></i>
     {% if config %}Edit Event{% else %}New Pickup Event{% endif %}
   </h4>
-  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+  <a href="{{ cancel_url or url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-secondary">
     <i class="bi bi-arrow-left me-1"></i>Back
   </a>
 </div>
@@ -84,7 +84,14 @@
                placeholder="https://… (optional)">
       </div>
       <div class="col-md-6">
-        <label class="form-label fw-semibold">OTA / Webrate URL</label>
+        <label class="form-label fw-semibold">
+          {% if not (config and config['ota_url']) %}
+            <a href="https://www.google.com/travel/search?ts=CAESABoAKgIKAA&ved=0CAAQ5JsGahcKEwiYn_SflKWUAxUAAAAAHQAAAAAQBg&ictx=3"
+               target="_blank" class="text-decoration-none">OTA / Webrate URL <i class="bi bi-box-arrow-up-right small"></i></a>
+          {% else %}
+            OTA / Webrate URL
+          {% endif %}
+        </label>
         <input type="url" name="ota_url" class="form-control"
                value="{{ config['ota_url'] if config and config['ota_url'] else '' }}"
                placeholder="https://...">
@@ -239,7 +246,7 @@
   <button type="submit" class="btn btn-primary">
     <i class="bi bi-check-lg me-1"></i>Save Event
   </button>
-  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+  <a href="{{ cancel_url or url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
 </div>
 </form>
 {% endblock %}
