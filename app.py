@@ -4281,7 +4281,7 @@ def pickup_final_history(cid):
                            today=datetime.now().strftime('%Y-%m-%d'))
 
 
-@app.route('/pickup/<int:cid>/edit', methods=['GET', 'POST'])
+@app.route('/pickup/<int:cid>/config/edit', methods=['GET', 'POST'])
 def pickup_edit_event(cid):
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
