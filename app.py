@@ -375,9 +375,12 @@ def index():
         params.append(associate)
 
     query += ' ORDER BY BookedDate DESC'
-    bookings  = db.execute(query, params).fetchall()
-    statuses  = [r[0] for r in db.execute('SELECT DISTINCT BookingStatus FROM ReportPipeline WHERE BookingStatus IS NOT NULL ORDER BY 1').fetchall()]
-    associates = [r[0] for r in db.execute('SELECT DISTINCT BookingAssociate FROM ReportPipeline WHERE BookingAssociate IS NOT NULL ORDER BY 1').fetchall()]
+    try:
+        bookings  = db.execute(query, params).fetchall()
+        statuses  = [r[0] for r in db.execute('SELECT DISTINCT BookingStatus FROM ReportPipeline WHERE BookingStatus IS NOT NULL ORDER BY 1').fetchall()]
+        associates = [r[0] for r in db.execute('SELECT DISTINCT BookingAssociate FROM ReportPipeline WHERE BookingAssociate IS NOT NULL ORDER BY 1').fetchall()]
+    except Exception:
+        bookings, statuses, associates = [], [], []
 
     # Calculate Kristin's commission for each booking
     kristin_split = get_kristin_split()
