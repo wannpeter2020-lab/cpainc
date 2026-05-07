@@ -3721,8 +3721,26 @@ def pickup_dashboard():
     today = date.today()
     today_str = today.isoformat()
     future_cutoff = today + timedelta(days=120)
-    configs = db.execute("SELECT * FROM pickup_config WHERE status='active' ORDER BY cutoff_date").fetchall()
-    archived_configs = db.execute("SELECT * FROM pickup_config WHERE status='archived' ORDER BY cutoff_date").fetchall()
+    configs = db.execute("""
+        SELECT c.*,
+               p.StartDate  AS bk_start,
+               p.EndDate    AS bk_end,
+               p.EventName  AS bk_event,
+               p.AccountName AS bk_org,
+               p.Customer   AS bk_hotel,
+               p.PeakRooms  AS bk_peak_rooms,
+               p.TotalRoomNights AS bk_total_rn
+        FROM pickup_config c
+        LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
+        WHERE c.status='active' ORDER BY c.cutoff_date
+    """).fetchall()
+    archived_configs = db.execute("""
+        SELECT c.*,
+               p.StartDate AS bk_start, p.EndDate AS bk_end
+        FROM pickup_config c
+        LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
+        WHERE c.status='archived' ORDER BY c.cutoff_date
+    """).fetchall()
     past_rows, current_rows, future_rows, archived_rows = [], [], [], []
 
     for c in configs:
@@ -3763,8 +3781,8 @@ def pickup_dashboard():
                 pass
         has_final_history = any(w['label'] and 'final' in w['label'].lower() for w in all_weekly)
         all_dates = sorted(block.keys())
-        event_start = all_dates[0] if all_dates else None
-        event_end   = all_dates[-1] if all_dates else None
+        event_start = all_dates[0] if all_dates else (c['bk_start'] or None)
+        event_end   = all_dates[-1] if all_dates else (c['bk_end'] or None)
         force_past = bool(c['force_past']) if c['force_past'] else False
         row = {
             'config': c, 'contracted_total': contracted_total,
@@ -3799,8 +3817,8 @@ def pickup_dashboard():
         all_dates = sorted(block.keys())
         archived_rows.append({
             'config': c,
-            'event_start': all_dates[0] if all_dates else None,
-            'event_end':   all_dates[-1] if all_dates else None,
+            'event_start': all_dates[0] if all_dates else (c['bk_start'] or None),
+            'event_end':   all_dates[-1] if all_dates else (c['bk_end'] or None),
         })
 
     _sort_key = lambda r: r.get('event_start') or ''
@@ -4890,18 +4908,8 @@ def rfp_dashboard():
     db = get_db()
     show_archived = request.args.get('archived') == '1'
     rfps = db.execute(
-        '''SELECT r.*,
-            (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count,
-            COALESCE(r.start_date,    p.StartDate)       AS eff_start_date,
-            COALESCE(r.end_date,      p.EndDate)         AS eff_end_date,
-            COALESCE(r.event_name,    p.EventName)       AS eff_event_name,
-            COALESCE(r.peak_rooms,    p.PeakRooms)       AS eff_peak_rooms,
-            COALESCE(r.total_room_nights, p.TotalRoomNights) AS eff_total_room_nights,
-            p.AccountName AS booking_account,
-            p.Customer    AS booking_hotel
-           FROM rfp r
-           LEFT JOIN ReportPipeline p ON CAST(r.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
-           WHERE r.archived=? ORDER BY r.created_at DESC''',
+        'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
+        'FROM rfp r WHERE r.archived=? ORDER BY r.created_at DESC',
         (1 if show_archived else 0,)
     ).fetchall()
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,

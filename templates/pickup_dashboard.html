@@ -60,12 +60,14 @@
           {% else %}—{% endif %}
         </td>
         <td>
-          <div class="fw-semibold">{{ r.config['event_name'] or r.config['organization'] }}</div>
-          {% if r.config['event_name'] %}
-          <div class="text-muted small">{{ r.config['organization'] }}</div>
+          {% set eff_event = r.config['event_name'] or r.config['bk_event'] %}
+          {% set eff_org = r.config['organization'] or r.config['bk_org'] %}
+          <div class="fw-semibold">{{ eff_event or eff_org }}</div>
+          {% if eff_event %}
+          <div class="text-muted small">{{ eff_org }}</div>
           {% endif %}
         </td>
-        <td>{{ r.config['hotel'] or '—' }}</td>
+        <td>{{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}</td>
         <td>{{ r.event_start | us_date }}</td>
         <td>{{ r.event_end | us_date }}</td>
         <td>{{ r.config['cutoff_date'] | us_date }}</td>
@@ -268,12 +270,14 @@
           <tr>
             <td class="font-monospace small">{{ r.config['booking_id'] or '—' }}</td>
             <td>
-              <div class="fw-semibold">{{ r.config['event_name'] or r.config['organization'] }}</div>
-              {% if r.config['event_name'] %}
-              <div class="text-muted small">{{ r.config['organization'] }}</div>
+              {% set eff_event = r.config['event_name'] or r.config['bk_event'] %}
+              {% set eff_org = r.config['organization'] or r.config['bk_org'] %}
+              <div class="fw-semibold">{{ eff_event or eff_org }}</div>
+              {% if eff_event %}
+              <div class="text-muted small">{{ eff_org }}</div>
               {% endif %}
             </td>
-            <td>{{ r.config['hotel'] or '—' }}</td>
+            <td>{{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}</td>
             <td>{{ r.event_start | us_date }}</td>
             <td>{{ r.event_end | us_date }}</td>
             <td class="d-flex gap-2">

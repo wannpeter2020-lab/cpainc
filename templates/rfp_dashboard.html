@@ -37,10 +37,10 @@
         {% set st = statuses.get(r['status'], ('secondary', r['status'])) %}
         <tr onclick="window.location='/rfp/{{ r['id'] }}'" style="cursor:pointer">
           <td class="fw-semibold">{{ r['client_org'] }}</td>
-          <td class="small">{{ r['eff_event_name'] or '—' }}</td>
+          <td class="small">{{ r['event_name'] or '—' }}</td>
           <td class="small text-nowrap">
-            {{ r['eff_start_date'] | us_date if r['eff_start_date'] else '—' }}
-            {% if r['eff_end_date'] %} – {{ r['eff_end_date'] | us_date }}{% endif %}
+            {{ r['start_date'] | us_date if r['start_date'] else '—' }}
+            {% if r['end_date'] %} – {{ r['end_date'] | us_date }}{% endif %}
           </td>
           <td class="text-center">
             <span class="badge bg-secondary">{{ r['hotel_count'] }}</span>
