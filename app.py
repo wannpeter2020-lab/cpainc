@@ -3010,6 +3010,18 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add CRF columns to rfp and rfp_hotel if not present
+    for _tbl, _col, _typ in [
+        ('rfp',       'crf_filename', 'TEXT'),
+        ('rfp',       'crf_data',     'BLOB'),
+        ('rfp_hotel', 'crf_row_data', 'TEXT'),
+        ('rfp_hotel', 'crf_version',  'INTEGER DEFAULT 0'),
+    ]:
+        try:
+            db.execute(f'ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}')
+            db.commit()
+        except Exception:
+            pass
     # Add BookingName to ReportPipeline if not present
     try:
         db.execute('ALTER TABLE ReportPipeline ADD COLUMN BookingName TEXT')
@@ -5069,6 +5081,165 @@ def rfp_edit(rid):
         flash('RFP updated.', 'success')
         return redirect(url_for('rfp_detail', rid=rid))
     return render_template('rfp_form.html', rfp=rfp, all_statuses=RFP_STATUSES)
+
+
+@app.route('/rfp/<int:rid>/import-crf', methods=['POST'])
+def rfp_import_crf(rid):
+    from pickup_utils import parse_crf_excel
+    db = get_db()
+    rfp = db.execute("SELECT * FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    f = request.files.get('crf_file')
+    if not f or not f.filename:
+        flash('No file selected.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    file_bytes = f.read()
+    crf_filename = f.filename
+    db.execute("UPDATE rfp SET crf_filename=?, crf_data=?, updated_at=datetime('now') WHERE id=?",
+               (crf_filename, file_bytes, rid))
+    db.commit()
+    try:
+        result = parse_crf_excel(file_bytes)
+    except Exception as e:
+        flash(f'Error parsing CRF: {e}', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    # Fill blank meta fields from CRF
+    meta = result.get('rfp_meta', {})
+    updates, vals = [], []
+    for field in ('event_name', 'response_due_date', 'decision_due_date'):
+        if meta.get(field) and not rfp[field]:
+            updates.append(f'{field}=?')
+            vals.append(meta[field])
+    if updates:
+        vals.append(rid)
+        db.execute(f"UPDATE rfp SET {', '.join(updates)}, updated_at=datetime('now') WHERE id=?", vals)
+        db.commit()
+    hotels = result.get('hotels', [])
+    n_proposals = sum(1 for h in hotels if h['status'] == 'proposal_received')
+    n_declined  = sum(1 for h in hotels if h['status'] == 'declined')
+    return render_template('rfp_crf_review.html', rfp=rfp, hotels=hotels,
+                           n_proposals=n_proposals, n_declined=n_declined,
+                           crf_filename=crf_filename)
+
+
+@app.route('/rfp/<int:rid>/import-crf/confirm', methods=['POST'])
+def rfp_import_crf_confirm(rid):
+    from pickup_utils import parse_crf_excel
+    db = get_db()
+    rfp = db.execute("SELECT * FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    crf_data = rfp['crf_data'] if rfp['crf_data'] else None
+    if not crf_data:
+        flash('No CRF file stored — please re-upload the CRF.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    try:
+        hotels = parse_crf_excel(bytes(crf_data)).get('hotels', [])
+    except Exception as e:
+        flash(f'Error re-parsing CRF: {e}', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+
+    def _fv(s):
+        try: return float(s) if s not in (None,'','None') else None
+        except: return None
+    def _iv(s):
+        try: return int(s) if s not in (None,'','None') else None
+        except: return None
+
+    inserted = updated = 0
+    any_proposal = False
+    _GENERIC = {
+        'hotel','hotels','resort','resorts','suites','suite','inn','inns',
+        'motel','lodge','lodges','hilton','marriott','hyatt','sheraton',
+        'westin','omni','embassy','extended','stay','holiday','best','western',
+        'comfort','quality','sleep','springhill','the','and','spa','conference',
+        'center','collection','autograph','renaissance','tapestry','curio',
+        'home2','homewood','hampton','doubletree','courtyard','fairfield',
+        'towneplace','graduate','thompson','kimpton','indigo','vignette','by','at','of',
+    }
+
+    for idx, h in enumerate(hotels):
+        if request.form.get(f'include_{idx}') != '1':
+            continue
+        hotel_name = (h.get('hotel_name') or '').strip()
+        if not hotel_name:
+            continue
+        status = h.get('status', 'pending')
+        if status == 'proposal_received':
+            any_proposal = True
+        proposed_rate   = _fv(request.form.get(f'rate_{idx}'))  or _fv(h.get('proposed_rate'))
+        f_and_b_minimum = _fv(request.form.get(f'fab_{idx}'))   or _fv(h.get('f_and_b_minimum'))
+        comm_raw        = request.form.get(f'comm_{idx}')
+        commission_pct  = (_fv(comm_raw) / 100.0 if _fv(comm_raw) else None) or _fv(h.get('commission_pct'))
+        notes_val       = request.form.get(f'notes_{idx}','').strip() or h.get('notes') or None
+        city  = h.get('city') or None
+        state = h.get('state') or None
+        crf_row_data = h.get('crf_row_data') or None
+
+        # Match existing hotel by exact name, then word overlap
+        existing = db.execute(
+            "SELECT id, crf_version FROM rfp_hotel WHERE rfp_id=? AND LOWER(hotel_name)=LOWER(?)",
+            (rid, hotel_name)
+        ).fetchone()
+        if not existing:
+            all_hotels = db.execute("SELECT id, hotel_name, crf_version FROM rfp_hotel WHERE rfp_id=?", (rid,)).fetchall()
+            h_words = set(w.lower() for w in hotel_name.split() if len(w) > 3 and w.lower() not in _GENERIC)
+            for ah in all_hotels:
+                ah_words = set(w.lower() for w in ah['hotel_name'].split() if len(w) > 3 and w.lower() not in _GENERIC)
+                if h_words and ah_words and (h_words & ah_words):
+                    existing = ah
+                    break
+
+        new_ver = (existing['crf_version'] or 0) + 1 if existing else 1
+        if existing:
+            db.execute('''
+                UPDATE rfp_hotel SET
+                    city=COALESCE(?,city), state=COALESCE(?,state),
+                    contact_name=COALESCE(?,contact_name),
+                    contact_email=COALESCE(?,contact_email),
+                    contact_phone=COALESCE(?,contact_phone),
+                    contact_title=COALESCE(?,contact_title),
+                    status=?, proposed_rate=?, commission_pct=?,
+                    f_and_b_minimum=?, attrition_pct=?, cutoff_days=?,
+                    concessions=?, notes=COALESCE(?,notes),
+                    crf_row_data=?, crf_version=?, updated_at=datetime('now')
+                WHERE id=?
+            ''', (city, state,
+                  h.get('contact_name') or None, h.get('contact_email') or None,
+                  h.get('contact_phone') or None, h.get('contact_title') or None,
+                  status, proposed_rate, commission_pct, f_and_b_minimum,
+                  _fv(h.get('attrition_pct')), _iv(h.get('cutoff_days')),
+                  h.get('concessions') or None, notes_val,
+                  crf_row_data, new_ver, existing['id']))
+            updated += 1
+        else:
+            db.execute('''
+                INSERT INTO rfp_hotel (rfp_id, hotel_name, city, state,
+                    contact_name, contact_email, contact_phone, contact_title,
+                    status, proposed_rate, commission_pct, f_and_b_minimum,
+                    attrition_pct, cutoff_days, concessions, notes,
+                    crf_row_data, crf_version, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+            ''', (rid, hotel_name, city, state,
+                  h.get('contact_name') or None, h.get('contact_email') or None,
+                  h.get('contact_phone') or None, h.get('contact_title') or None,
+                  status, proposed_rate, commission_pct, f_and_b_minimum,
+                  _fv(h.get('attrition_pct')), _iv(h.get('cutoff_days')),
+                  h.get('concessions') or None, notes_val,
+                  crf_row_data, new_ver))
+            inserted += 1
+
+    if any_proposal and rfp['status'] == 'sourcing':
+        db.execute("UPDATE rfp SET status='proposals_received', updated_at=datetime('now') WHERE id=?", (rid,))
+    db.commit()
+    parts = []
+    if inserted: parts.append(f'{inserted} hotel{"s" if inserted!=1 else ""} added')
+    if updated:  parts.append(f'{updated} hotel{"s" if updated!=1 else ""} updated')
+    flash((', '.join(parts) + '.') if parts else 'No changes made.', 'success' if parts else 'info')
+    return redirect(url_for('rfp_detail', rid=rid))
 
 
 @app.route('/rfp/parse-document', methods=['POST'])

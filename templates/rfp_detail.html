@@ -121,9 +121,19 @@
     <span><i class="bi bi-building me-2"></i>Hotels
       <span class="badge bg-secondary ms-1">{{ hotels|length }}</span>
     </span>
-    <a href="{{ url_for('rfp_hotel_add', rid=rfp['id']) }}" class="btn btn-sm btn-light">
-      <i class="bi bi-plus me-1"></i>Add Hotel
-    </a>
+    <div class="d-flex gap-2">
+      <form method="post" action="{{ url_for('rfp_import_crf', rid=rfp['id']) }}"
+            enctype="multipart/form-data" class="d-inline">
+        <label class="btn btn-sm btn-outline-success mb-0" title="Import Cvent CRF Excel file">
+          <i class="bi bi-file-earmark-spreadsheet me-1"></i>Import CRF
+          <input type="file" name="crf_file" class="d-none" accept=".xlsx,.xls"
+                 onchange="this.closest('form').submit()">
+        </label>
+      </form>
+      <a href="{{ url_for('rfp_hotel_add', rid=rfp['id']) }}" class="btn btn-sm btn-light">
+        <i class="bi bi-plus me-1"></i>Add Hotel
+      </a>
+    </div>
   </div>
   {% if hotels %}
   <div class="table-responsive">

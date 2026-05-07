@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}CRF Import Review — {{ rfp['event_name'] or rfp['client_org'] }}{% endblock %}
+{% block content %}
+
+<div class="mb-2">
+  <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to RFP
+  </a>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-file-earmark-spreadsheet me-2 text-success"></i>
+    CRF Import Review
+    <span class="text-muted fw-normal fs-6 ms-2">{{ rfp['event_name'] or rfp['client_org'] }}</span>
+  </h4>
+</div>
+
+<div class="alert alert-info d-flex align-items-start gap-2 mb-3">
+  <i class="bi bi-info-circle fs-5 mt-1"></i>
+  <div>
+    Parsed from <strong>{{ crf_filename }}</strong> —
+    <span class="text-success fw-semibold">{{ n_proposals }} proposal{{ 's' if n_proposals != 1 }}</span> received,
+    <span class="text-muted">{{ n_declined }} declined/withdrawn</span>.
+    <br>Review and adjust below, then click <strong>Confirm Import</strong>.
+    Declined hotels are unchecked by default — include them if you want a record.
+  </div>
+</div>
+
+<form method="post" action="{{ url_for('rfp_import_crf_confirm', rid=rfp['id']) }}"
+      id="confirmForm">
+
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>Hotels <span class="badge bg-secondary ms-1">{{ hotels|length }}</span></span>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkAll(true)">
+          Check All
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkAll(false)">
+          Uncheck All
+        </button>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0" id="reviewTable">
+        <thead class="table-light">
+          <tr>
+            <th style="width:36px"></th>
+            <th>Hotel</th>
+            <th>City / State</th>
+            <th>Status</th>
+            <th class="text-end" style="width:110px">Rate / Night</th>
+            <th class="text-end" style="width:110px">F&amp;B Min</th>
+            <th class="text-end" style="width:90px">Commission</th>
+            <th style="width:180px">Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in hotels %}
+          {% set idx = loop.index0 %}
+          {% set is_proposal = h.status == 'proposal_received' %}
+          <tr class="{% if not is_proposal %}text-muted{% endif %}">
+            <td class="text-center">
+              {# Hidden 0 ensures unchecked boxes still submit; checked replaces with 1 #}
+              <input type="hidden" name="include_{{ idx }}" value="0">
+              <input type="checkbox" class="form-check-input hotel-cb"
+                     name="include_{{ idx }}" value="1"
+                     {% if is_proposal %}checked{% endif %}>
+            </td>
+            <td>
+              <div class="fw-semibold">{{ h.hotel_name }}</div>
+              {% if h.contact_name %}
+              <div class="small text-muted"><i class="bi bi-person me-1"></i>{{ h.contact_name }}
+                {% if h.contact_email %} · {{ h.contact_email }}{% endif %}
+              </div>
+              {% endif %}
+            </td>
+            <td class="small">
+              {% if h.city %}{{ h.city }}{% if h.state %}, {{ h.state }}{% endif %}{% else %}—{% endif %}
+            </td>
+            <td>
+              {% if is_proposal %}
+                <span class="badge bg-info">Proposal Received</span>
+              {% elif h.status == 'declined' %}
+                <span class="badge bg-secondary">Declined</span>
+              {% else %}
+                <span class="badge bg-light text-dark border">Pending</span>
+              {% endif %}
+            </td>
+            <td>
+              <input type="number" step="0.01" min="0"
+                     name="rate_{{ idx }}"
+                     class="form-control form-control-sm text-end"
+                     value="{{ '%.2f'|format(h.proposed_rate) if h.proposed_rate else '' }}"
+                     placeholder="—">
+            </td>
+            <td>
+              <input type="number" step="1" min="0"
+                     name="fab_{{ idx }}"
+                     class="form-control form-control-sm text-end"
+                     value="{{ '%.0f'|format(h.f_and_b_minimum) if h.f_and_b_minimum else '' }}"
+                     placeholder="—">
+            </td>
+            <td>
+              <div class="input-group input-group-sm">
+                <input type="number" step="0.1" min="0" max="100"
+                       name="comm_{{ idx }}"
+                       class="form-control text-end"
+                       value="{{ '%.0f'|format(h.commission_pct * 100) if h.commission_pct else '' }}"
+                       placeholder="—">
+                <span class="input-group-text">%</span>
+              </div>
+            </td>
+            <td class="small text-muted">
+              <input type="text" name="notes_{{ idx }}"
+                     class="form-control form-control-sm"
+                     value="{{ h.notes or '' }}"
+                     placeholder="—">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-check-lg me-1"></i>Confirm Import
+    </button>
+    <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+
+<script>
+function checkAll(checked) {
+  document.querySelectorAll('.hotel-cb').forEach(cb => cb.checked = checked);
+}
+</script>
+{% endblock %}

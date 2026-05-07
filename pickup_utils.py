@@ -1859,3 +1859,234 @@ def parse_rfp_docx(file_bytes):
         'start_date':        start_date,
         'end_date':          end_date,
     }
+
+
+# ── Cvent CRF (Consolidated Response Form) Excel Parser ──────────────────────
+
+def parse_crf_excel(file_bytes):
+    """
+    Parse a Cvent Consolidated Response Form (CRF) Excel file.
+    Returns:
+        {'rfp_meta': {event_name, response_due_date, decision_due_date},
+         'hotels': [{hotel_name, city, state, status, proposed_rate,
+                     f_and_b_minimum, commission_pct, attrition_pct,
+                     cutoff_days, concessions, notes, contact_name,
+                     contact_email, contact_phone, contact_title, crf_row_data}]}
+    """
+    import io as _io
+    import re as _re
+    import json as _json
+    import openpyxl
+
+    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), read_only=True, data_only=True)
+
+    def _sv(v):
+        if v is None:
+            return ''
+        s = str(v).replace('_x000d_', ' ').replace('\r', ' ')
+        return _re.sub(r'\s+', ' ', s).strip()
+
+    def _parse_currency(val):
+        s = _sv(val)
+        if not s or s.lower() in ('n/a', 'na', '—', '-'):
+            return None
+        cleaned = _re.sub(r'[USD$,]', '', s)
+        m = _re.search(r'[\d]+\.?\d*', cleaned)
+        return float(m.group()) if m else None
+
+    def _parse_commission(val):
+        s = _sv(val)
+        m = _re.search(r'(\d+(?:\.\d+)?)\s*%', s)
+        return float(m.group(1)) / 100.0 if m else None
+
+    def _parse_address(val):
+        if val is None:
+            return None, None
+        raw = str(val).replace('_x000d_', '\n').replace('\r\n', '\n').replace('\r', '\n')
+        lines = [ln.strip() for ln in raw.split('\n') if ln.strip() and ln.strip().upper() != 'USA']
+        city_state_line = None
+        for line in lines:
+            if _re.search(r'[A-Za-z].+,\s*[A-Za-z]', line):
+                city_state_line = line
+                break
+        if not city_state_line:
+            city_state_line = ' '.join(lines)
+        parts = [p.strip() for p in city_state_line.split(',')]
+        if len(parts) >= 2:
+            city  = parts[0].strip()
+            state = _re.sub(r'\s+[\d\-]+\s*$', '', parts[1].strip()).strip()
+            state = _re.sub(r'\s*(USA|US|United States)\s*$', '', state, flags=_re.I).strip()
+            return city, state
+        return None, None
+
+    def _map_status(val):
+        s = _sv(val).lower()
+        if 'submitted' in s:
+            return 'proposal_received'
+        if 'turned down' in s or 'withdrawn' in s or 'declined' in s:
+            return 'declined'
+        return 'pending'
+
+    # ── RFP metadata sheet ────────────────────────────────────────────────────
+    rfp_meta = {}
+    if 'RFP' in wb.sheetnames:
+        rfp_ws = wb['RFP']
+        rfp_rows = list(rfp_ws.rows)
+        for row in rfp_rows[:25]:
+            vals = [c.value for c in row]
+            if len(vals) < 2:
+                continue
+            label = _sv(vals[0]).lower()
+            val = next((_sv(v) for v in vals[1:4] if _sv(v)), '')
+            if ('response' in label and 'due' in label) and val and len(val) <= 40:
+                rfp_meta['response_due_date'] = val
+            elif 'decision' in label and 'due' in label and val and len(val) <= 40:
+                rfp_meta['decision_due_date'] = val
+        for row in rfp_rows[:5]:
+            for cell in row:
+                v = _sv(cell.value)
+                if v and len(v) > 8 and 'request for proposal' not in v.lower() and 'rfp' not in v.lower()[:3]:
+                    rfp_meta.setdefault('event_name', v)
+                    break
+
+    # ── Summary sheet ─────────────────────────────────────────────────────────
+    if 'Summary' not in wb.sheetnames:
+        return {'rfp_meta': rfp_meta, 'hotels': []}
+
+    ws = wb['Summary']
+    all_rows = list(ws.rows)
+
+    header_row_idx = None
+    for i, row in enumerate(all_rows[:10]):
+        if _sv(row[0].value).lower() == 'hotel':
+            header_row_idx = i
+            break
+    if header_row_idx is None:
+        return {'rfp_meta': rfp_meta, 'hotels': []}
+
+    headers = [_sv(all_rows[header_row_idx][i].value) for i in range(len(all_rows[header_row_idx]))]
+
+    def _find_col(*keywords):
+        for j, h in enumerate(headers):
+            hl = h.lower()
+            if all(kw.lower() in hl for kw in keywords):
+                return j
+        return None
+
+    col_address    = _find_col('address')
+    col_status     = _find_col('status')
+    col_notes      = _find_col('notes')
+    col_rate       = _find_col('room rate')
+    col_fab        = _find_col('f&b') or _find_col('food') or _find_col('beverage') or _find_col('minimum')
+    col_attrition  = _find_col('80%') or _find_col('attrition')
+    col_cutoff     = _find_col('21 day') or _find_col('cut off') or _find_col('cutoff')
+    col_commission = _find_col('commission') or _find_col('10%')
+
+    def _gv(vals, idx):
+        if idx is None or idx >= len(vals):
+            return None
+        return vals[idx]
+
+    _SEVEN_PCT_BRANDS = [
+        'marriott','westin','sheraton','w hotel','jw marriott','renaissance',
+        'courtyard','residence inn','fairfield','delta hotel','tribute portfolio',
+        'autograph collection','hilton','doubletree','embassy suites','hampton inn',
+        'homewood','home2','curio collection','tapestry','waldorf astoria',
+        'conrad','canopy','tempo by hilton','signia','graduate',
+    ]
+    _CONC_KEYWORDS = [
+        'resort fee','comp room','1:40','1 per 40','parking','wifi',
+        'wireless','internet','fitness','suite','amenity','projector','audio',
+        'profit calc','f&b profit',
+    ]
+
+    skip_labels = {'available','not available','hotel',''}
+    hotels = []
+
+    for row in all_rows[header_row_idx + 1:]:
+        vals = [c.value for c in row]
+        hotel_name = _sv(vals[0]) if vals else ''
+        if not hotel_name or hotel_name.lower() in skip_labels:
+            continue
+        if sum(1 for v in vals if v is not None) <= 2:
+            continue
+
+        city, state   = _parse_address(_gv(vals, col_address))
+        status        = _map_status(_gv(vals, col_status))
+        notes         = _sv(_gv(vals, col_notes))
+        proposed_rate = _parse_currency(_gv(vals, col_rate))
+        f_and_b_min   = _parse_currency(_gv(vals, col_fab))
+        commission_pct = _parse_commission(_gv(vals, col_commission))
+
+        if commission_pct is None:
+            comm_raw = _sv(_gv(vals, col_commission)).lower()
+            if comm_raw.startswith('yes') or '10%' in comm_raw or comm_raw == '10':
+                commission_pct = 0.10
+            elif any(b in hotel_name.lower() for b in _SEVEN_PCT_BRANDS):
+                commission_pct = 0.07
+
+        attrition_raw = _sv(_gv(vals, col_attrition)).lower()
+        attrition_pct = 0.80 if attrition_raw.startswith('yes') else None
+        cutoff_raw  = _sv(_gv(vals, col_cutoff)).lower()
+        cutoff_days = 21 if cutoff_raw.startswith('yes') else None
+
+        concession_items = []
+        for j, (h, v) in enumerate(zip(headers, vals)):
+            if not h or v is None:
+                continue
+            hl, vl = h.lower(), _sv(v).lower()
+            if not any(kw in hl for kw in _CONC_KEYWORDS):
+                continue
+            if not vl or vl in ('no','n/a','na','—','-'):
+                continue
+            if vl.startswith('yes'):
+                short_h = h.split('?')[0].strip()[:60]
+                extra = _sv(v)[3:].strip(' ,:') if len(_sv(v)) > 3 else ''
+                concession_items.append(f'✓ {short_h}: {extra}' if extra else f'✓ {short_h}')
+        concessions = '\n'.join(concession_items) if concession_items else None
+
+        crf_row_data = {h: _sv(v)[:400] for h, v in zip(headers, vals) if h and v is not None}
+
+        hotel_dict = {
+            'hotel_name': hotel_name, 'city': city, 'state': state,
+            'status': status, 'proposed_rate': proposed_rate,
+            'f_and_b_minimum': f_and_b_min, 'commission_pct': commission_pct,
+            'attrition_pct': attrition_pct, 'cutoff_days': cutoff_days,
+            'concessions': concessions, 'notes': notes or None,
+            'contact_name': None, 'contact_email': None,
+            'contact_phone': None, 'contact_title': None,
+            'crf_row_data': _json.dumps(crf_row_data),
+        }
+
+        # Pull contact info from matching hotel tab
+        h_words = set(w.lower() for w in hotel_name.split() if len(w) > 3)
+        for sheet_name in wb.sheetnames:
+            if sheet_name.lower() in ('summary', 'rfp'):
+                continue
+            s_words = set(w.lower() for w in sheet_name.split() if len(w) > 3)
+            if h_words & s_words:
+                try:
+                    h_ws = wb[sheet_name]
+                    for h_row in list(h_ws.rows)[5:22]:
+                        h_vals = [c.value for c in h_row]
+                        if len(h_vals) < 2:
+                            continue
+                        lbl = _sv(h_vals[0]).lower()
+                        val = next((_sv(v) for v in h_vals[1:3] if v is not None and _sv(v)), '')
+                        if not val:
+                            continue
+                        if 'contact name' in lbl or lbl == 'contact':
+                            hotel_dict['contact_name'] = val
+                        elif 'title' in lbl and 'hotel' not in lbl:
+                            hotel_dict['contact_title'] = val
+                        elif 'email' in lbl:
+                            hotel_dict['contact_email'] = val
+                        elif 'phone' in lbl or 'telephone' in lbl:
+                            hotel_dict['contact_phone'] = val
+                except Exception:
+                    pass
+                break
+
+        hotels.append(hotel_dict)
+
+    return {'rfp_meta': rfp_meta, 'hotels': hotels}
