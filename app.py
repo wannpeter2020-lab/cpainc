@@ -326,6 +326,29 @@ def dashboard():
         meetings_next30=meetings_next30, missing_commission_count=missing_commission_count,
         upcoming=upcoming, now=datetime.today(), who=who, title_suffix=title_suffix)
 
+# ── Temporary DB Upload ───────────────────────────────────────────────────────
+
+@app.route('/admin/upload-db', methods=['POST'])
+def admin_upload_db():
+    try:
+        token = request.headers.get('X-Upload-Token', '')
+        if token != 'cpainc-upload-2026':
+            return 'Unauthorized', 401
+        f = request.files.get('db')
+        if not f:
+            return 'No file', 400
+        os.makedirs(_DATA_DIR, exist_ok=True)
+        dest = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
+        f.save(dest)
+        # verify table exists
+        import sqlite3 as _sq
+        cx = _sq.connect(dest)
+        tables = [r[0] for r in cx.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        cx.close()
+        return f'Saved {os.path.getsize(dest)} bytes to {dest}. Tables: {tables}', 200
+    except Exception as e:
+        return f'Error: {e}', 500
+
 # ── Home / Bookings List ──────────────────────────────────────────────────────
 
 @app.route('/')
@@ -3155,7 +3178,7 @@ def get_user_account_filter(user=None):
 
 @app.before_request
 def require_login():
-    exempt = {'login', 'logout', 'static'}
+    exempt = {'login', 'logout', 'static', 'admin_upload_db'}
     if request.endpoint in exempt or request.endpoint is None:
         return
     uid = session.get('user_id')
