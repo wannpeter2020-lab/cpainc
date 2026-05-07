@@ -3714,6 +3714,63 @@ def contact_edit(tbl, cid):
     return redirect(url_for('contacts_page') + ('?tab=hotels' if tbl == 'hotel' else ''))
 
 
+@app.route('/pickup/auto-match', methods=['GET', 'POST'])
+def pickup_auto_match():
+    """Find pickup configs missing booking_id and suggest matches from ReportPipeline."""
+    user = get_current_user()
+    if not has_permission(user, 'pickups_payments'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+    db = get_db()
+
+    if request.method == 'POST':
+        # Apply confirmed matches
+        applied = 0
+        for key, val in request.form.items():
+            if key.startswith('match_') and val:
+                cid = int(key.replace('match_', ''))
+                db.execute('UPDATE pickup_config SET booking_id=? WHERE id=? AND (booking_id IS NULL OR booking_id="")',
+                           (val, cid))
+                applied += 1
+        db.commit()
+        flash(f'Applied {applied} booking ID match(es).', 'success')
+        return redirect(url_for('pickup_dashboard'))
+
+    # Find unmatched configs
+    unmatched = db.execute(
+        "SELECT * FROM pickup_config WHERE (booking_id IS NULL OR booking_id='') AND status='active'"
+    ).fetchall()
+
+    results = []
+    for c in unmatched:
+        org   = (c['organization'] or '').strip().lower()
+        event = (c['event_name'] or '').strip().lower()
+        hotel = (c['hotel'] or '').strip().lower()
+
+        # Score each booking: +3 org match, +3 event match, +2 hotel match
+        bookings = db.execute(
+            "SELECT BookingId, AccountName, EventName, Customer, StartDate, EndDate "
+            "FROM ReportPipeline WHERE BookingStatus NOT LIKE '%Cancel%' OR BookingStatus IS NULL"
+        ).fetchall()
+
+        scored = []
+        for b in bookings:
+            score = 0
+            b_org   = (b['AccountName'] or '').strip().lower()
+            b_event = (b['EventName'] or '').strip().lower()
+            b_hotel = (b['Customer'] or '').strip().lower()
+            if org   and b_org   and (org in b_org   or b_org in org):   score += 3
+            if event and b_event and (event in b_event or b_event in event): score += 3
+            if hotel and b_hotel and (hotel in b_hotel or b_hotel in hotel): score += 2
+            if score >= 3:
+                scored.append((score, dict(b)))
+
+        scored.sort(key=lambda x: -x[0])
+        results.append({'config': c, 'suggestions': scored[:5]})
+
+    return render_template('pickup_auto_match.html', results=results)
+
+
 @app.route('/pickup')
 def pickup_dashboard():
     from datetime import date, timedelta
@@ -3803,10 +3860,18 @@ def pickup_dashboard():
                 start_date = date.fromisoformat(all_dates[0])
             except Exception:
                 pass
+        # also try bk_start if contracted_block has no dates
+        if start_date is None and c['bk_start']:
+            try:
+                start_date = date.fromisoformat(c['bk_start'])
+            except Exception:
+                pass
         if has_final_history or force_past:
             past_rows.append(row)
         elif c['force_current']:
             current_rows.append(row)
+        elif start_date is not None and start_date < today:
+            past_rows.append(row)
         elif start_date is not None and start_date > future_cutoff:
             future_rows.append(row)
         else:
