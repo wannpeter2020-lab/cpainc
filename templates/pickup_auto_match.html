@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Auto-Match Booking IDs — Pickup Tracking{% endblock %}
+{% block content %}
+
+<div class="mb-2">
+  <a href="{{ url_for('pickup_dashboard') }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Pickup Dashboard
+  </a>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Auto-Match Booking IDs
+    <span class="badge bg-secondary ms-1">{{ results|length }} unmatched</span>
+  </h4>
+</div>
+
+{% if not results %}
+<div class="card">
+  <div class="card-body text-center text-muted py-5">
+    <i class="bi bi-check-circle display-4 d-block mb-3 opacity-25"></i>
+    <p>All pickup records have a booking ID assigned.</p>
+  </div>
+</div>
+{% else %}
+<form method="post">
+<p class="text-muted small mb-3">Select the correct booking match for each pickup record. Leave blank to skip.</p>
+
+{% for r in results %}
+<div class="card mb-3">
+  <div class="card-header bg-light">
+    <strong>{{ r.config['event_name'] or r.config['organization'] }}</strong>
+    <span class="text-muted ms-2 small">{{ r.config['organization'] }}</span>
+    <span class="text-muted ms-2 small">· {{ r.config['hotel'] or '—' }}</span>
+  </div>
+  <div class="card-body py-2">
+    {% if r.suggestions %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width:40px"></th>
+            <th>Booking ID</th>
+            <th>Organization</th>
+            <th>Event Name</th>
+            <th>Hotel</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for score, b in r.suggestions %}
+          <tr>
+            <td class="text-center">
+              <input type="radio" name="match_{{ r.config['id'] }}" value="{{ b['BookingId'] }}"
+                     class="form-check-input"
+                     {% if loop.first %}checked{% endif %}>
+            </td>
+            <td class="font-monospace">{{ b['BookingId'] }}</td>
+            <td class="small">{{ b['AccountName'] or '—' }}</td>
+            <td class="small">{{ b['EventName'] or '—' }}</td>
+            <td class="small">{{ b['Customer'] or '—' }}</td>
+            <td class="small text-nowrap">{{ b['StartDate'] | us_date if b['StartDate'] else '—' }}</td>
+            <td class="small text-nowrap">{{ b['EndDate'] | us_date if b['EndDate'] else '—' }}</td>
+          </tr>
+          {% endfor %}
+          <tr>
+            <td class="text-center">
+              <input type="radio" name="match_{{ r.config['id'] }}" value=""
+                     class="form-check-input">
+            </td>
+            <td colspan="6" class="text-muted small fst-italic">Skip — no match</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0 fst-italic">No close matches found in pipeline. <a href="{{ url_for('pickup_event', cid=r.config['id']) }}">Edit manually</a>.</p>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<div class="d-flex gap-2 mt-3">
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-lg me-1"></i>Apply Selected Matches
+  </button>
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+</form>
+{% endif %}
+
+{% endblock %}
