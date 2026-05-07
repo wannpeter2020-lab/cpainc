@@ -3898,6 +3898,34 @@ def pickup_dashboard():
                            today=today_str)
 
 
+@app.route('/admin/seed-pickup-2026')
+def seed_pickup_2026():
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+    db = get_db()
+    rows = [
+        ('235045','National Conference of State Legislatures (NCSL)','NCSL 2026 Legislative Summit Overflow – The Blackstone','The Blackstone',289.00),
+        ('235046','National Conference of State Legislatures (NCSL)','NCSL 2026 Legislative Summit Overflow – Le Meridien','Le Meridien',289.00),
+        ('238455','Alliance of Crop, Soil and Environmental Science Societies','2026 ASA ICCA Board Meeting','Hilton',249.00),
+        ('229681','International Erosion Control Association','2026 IECA South Central Regional Meeting','Embassy Suites',163.50),
+        ('235856','International Erosion Control Association','2026 IECA Australian Chapter Meeting','Shangri-La',460.00),
+        ('231271','International Erosion Control Association','2026 IECA Mountain States Regional','Hilton',142.00),
+    ]
+    inserted = 0
+    for bk, org, evt, hotel, rate in rows:
+        exists = db.execute('SELECT 1 FROM pickup_config WHERE booking_id=?', (bk,)).fetchone()
+        if not exists:
+            db.execute('''INSERT INTO pickup_config
+                (booking_id,organization,event_name,hotel,contracted_rate,
+                 status,contracted_block,hotel_contacts,cc_emails,force_current,force_past)
+                VALUES (?,?,?,?,?,'active','{}','[]','[]',0,0)''',
+                (bk, org, evt, hotel, rate))
+            inserted += 1
+    db.commit()
+    flash(f'Seed complete: {inserted} records inserted (skipped duplicates).', 'success')
+    return redirect(url_for('pickup_dashboard'))
+
+
 @app.route('/pickup/new', methods=['GET', 'POST'])
 def pickup_new_event():
     if request.method == 'POST':
