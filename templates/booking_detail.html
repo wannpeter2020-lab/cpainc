@@ -145,7 +145,7 @@
           <i class="bi bi-download me-1"></i>Download
         </a>
         <form method="post" action="/booking/{{ booking.BookingId }}/contract/{{ c['id'] }}/delete"
-              onsubmit="return confirm('Delete {{ c[\'filename\'] }}?')">
+              onsubmit="return confirm('Delete ' + {{ c['filename']|tojson }} + '?')">
           <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
         </form>
       </div>
