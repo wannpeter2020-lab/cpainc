@@ -3167,7 +3167,7 @@ def get_user_account_filter(user=None):
 
 @app.before_request
 def require_login():
-    exempt = {'login', 'logout', 'static'}
+    exempt = {'login', 'logout', 'static', 'admin_upload_db'}
     if request.endpoint in exempt or request.endpoint is None:
         return
     uid = session.get('user_id')
