@@ -3803,6 +3803,12 @@ def pickup_dashboard():
             'event_end':   all_dates[-1] if all_dates else None,
         })
 
+    _sort_key = lambda r: r.get('event_start') or ''
+    past_rows.sort(key=_sort_key)
+    current_rows.sort(key=_sort_key)
+    future_rows.sort(key=_sort_key)
+    archived_rows.sort(key=_sort_key)
+
     return render_template('pickup_dashboard.html',
                            past_rows=past_rows, current_rows=current_rows,
                            future_rows=future_rows, archived_rows=archived_rows,
