@@ -326,25 +326,6 @@ def dashboard():
         meetings_next30=meetings_next30, missing_commission_count=missing_commission_count,
         upcoming=upcoming, now=datetime.today(), who=who, title_suffix=title_suffix)
 
-# ── Temporary DB Upload (remove after one-time use) ───────────────────────────
-
-@app.route('/admin/upload-db', methods=['POST'])
-def admin_upload_db():
-    try:
-        token = request.headers.get('X-Upload-Token', '')
-        if token != 'cpainc-upload-2026':
-            return 'Unauthorized', 401
-        f = request.files.get('db')
-        if not f:
-            return f'No file. DATA_DIR={_DATA_DIR} exists={os.path.exists(_DATA_DIR)}', 400
-        dest = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
-        os.makedirs(_DATA_DIR, exist_ok=True)
-        f.save(dest)
-        size = os.path.getsize(dest)
-        return f'Saved {size} bytes to {dest}', 200
-    except Exception as e:
-        return f'Error: {e}  DATA_DIR={_DATA_DIR}', 500
-
 # ── Home / Bookings List ──────────────────────────────────────────────────────
 
 @app.route('/')
@@ -3174,7 +3155,7 @@ def get_user_account_filter(user=None):
 
 @app.before_request
 def require_login():
-    exempt = {'login', 'logout', 'static', 'admin_upload_db'}
+    exempt = {'login', 'logout', 'static'}
     if request.endpoint in exempt or request.endpoint is None:
         return
     uid = session.get('user_id')
