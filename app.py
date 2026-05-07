@@ -329,15 +329,20 @@ def dashboard():
 
 @app.route('/admin/upload-db', methods=['POST'])
 def admin_upload_db():
-    token = request.headers.get('X-Upload-Token', '')
-    if token != 'cpainc-upload-2026':
-        return 'Unauthorized', 401
-    f = request.files.get('db')
-    if not f:
-        return 'No file', 400
-    dest = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
-    f.save(dest)
-    return f'Saved to {dest}', 200
+    try:
+        token = request.headers.get('X-Upload-Token', '')
+        if token != 'cpainc-upload-2026':
+            return 'Unauthorized', 401
+        f = request.files.get('db')
+        if not f:
+            return f'No file. DATA_DIR={_DATA_DIR} exists={os.path.exists(_DATA_DIR)}', 400
+        dest = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
+        os.makedirs(_DATA_DIR, exist_ok=True)
+        f.save(dest)
+        size = os.path.getsize(dest)
+        return f'Saved {size} bytes to {dest}', 200
+    except Exception as e:
+        return f'Error: {e}  DATA_DIR={_DATA_DIR}', 500
 
 # ── Home / Bookings List ──────────────────────────────────────────────────────
 
