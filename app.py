@@ -4,6 +4,16 @@ import json
 import sqlite3
 import functools
 import pandas as pd
+
+# Load .env file for local development (ignored in production where env vars are set directly)
+_env_path = os.path.join(os.path.dirname(__file__), '.env')
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, g, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
