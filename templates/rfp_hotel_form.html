@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{% if hotel %}Edit Hotel{% else %}Add Hotel{% endif %} — CPAinc RFP{% endblock %}
+{% block content %}
+
+<div class="mb-2">
+  <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to RFP
+  </a>
+</div>
+
+<h4 class="mb-3">{% if hotel %}Edit Hotel{% else %}Add Hotel{% endif %}</h4>
+<p class="text-muted small mb-3">RFP: <strong>{{ rfp['event_name'] or rfp['client_org'] }}</strong></p>
+
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-body">
+        <form method="post">
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Hotel Name <span class="text-danger">*</span></label>
+              <input type="text" name="hotel_name" class="form-control" required
+                     value="{{ hotel['hotel_name'] if hotel else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Brand / Chain</label>
+              <input type="text" name="brand" class="form-control"
+                     value="{{ hotel['brand'] if hotel and hotel['brand'] else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">City</label>
+              <input type="text" name="city" class="form-control"
+                     value="{{ hotel['city'] if hotel and hotel['city'] else '' }}">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">State</label>
+              <input type="text" name="state" class="form-control"
+                     value="{{ hotel['state'] if hotel and hotel['state'] else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Contact Name</label>
+              <input type="text" name="contact_name" class="form-control"
+                     value="{{ hotel['contact_name'] if hotel and hotel['contact_name'] else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Contact Email</label>
+              <input type="email" name="contact_email" class="form-control"
+                     value="{{ hotel['contact_email'] if hotel and hotel['contact_email'] else '' }}">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Contact Phone</label>
+              <input type="text" name="contact_phone" class="form-control"
+                     value="{{ hotel['contact_phone'] if hotel and hotel['contact_phone'] else '' }}">
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Proposed Rate ($)</label>
+              <input type="number" name="proposed_rate" step="0.01" class="form-control"
+                     value="{{ hotel['proposed_rate'] if hotel and hotel['proposed_rate'] else '' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Commission %</label>
+              <input type="number" name="commission_pct" step="0.01" class="form-control"
+                     value="{{ hotel['commission_pct'] if hotel and hotel['commission_pct'] else '' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">F&B Minimum ($)</label>
+              <input type="number" name="f_and_b_minimum" step="0.01" class="form-control"
+                     value="{{ hotel['f_and_b_minimum'] if hotel and hotel['f_and_b_minimum'] else '' }}">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">Attrition %</label>
+              <input type="number" name="attrition_pct" step="0.01" class="form-control"
+                     value="{{ hotel['attrition_pct'] if hotel and hotel['attrition_pct'] else '' }}">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Concessions / Special Terms</label>
+            <textarea name="concessions" class="form-control" rows="2">{{ hotel['concessions'] if hotel and hotel['concessions'] else '' }}</textarea>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Notes</label>
+            <textarea name="notes" class="form-control" rows="2">{{ hotel['notes'] if hotel and hotel['notes'] else '' }}</textarea>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-check-lg me-1"></i>{% if hotel %}Save Changes{% else %}Add Hotel{% endif %}
+            </button>
+            <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

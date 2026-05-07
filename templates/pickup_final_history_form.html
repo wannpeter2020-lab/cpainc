@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}{% if existing_fh %}Edit Final History{% else %}Enter Final History{% endif %} — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-flag-fill me-2 text-success"></i>
+    {% if existing_fh %}Edit Final History{% else %}Enter Final History{% endif %}
+    <span class="text-muted fw-normal fs-6 ms-2">{{ config['event_name'] or config['organization'] }}</span>
+  </h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<div class="alert alert-info d-flex align-items-center gap-2 mb-3" style="max-width:640px">
+  <i class="bi bi-info-circle fs-5"></i>
+  <span>Enter the <strong>actual final room night pickup</strong> from the hotel's Housing History Report.
+  Once saved, this event will move to <strong>Past Events</strong> on the dashboard.</span>
+</div>
+
+<form method="post" action="{{ url_for('pickup_final_history', cid=config['id']) }}">
+<div class="card mb-3" style="max-width:640px">
+  <div class="card-header">Report Details</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Report Date</label>
+        <input type="date" name="report_date" class="form-control"
+               value="{{ existing_fh['report_date'] if existing_fh else today }}" required>
+        <div class="form-text">Date of the hotel's final HHR</div>
+      </div>
+      <div class="col-md-8">
+        <label class="form-label fw-semibold">Notes</label>
+        <input type="text" name="notes" class="form-control"
+               value="{{ existing_fh['notes'] if existing_fh and existing_fh['notes'] else '' }}"
+               placeholder="e.g. received from hotel 05/02/26">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3" style="max-width:640px">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Actual Pickup by Night</span>
+    <span class="text-muted small" id="totalLabel"></span>
+  </div>
+  <div class="card-body">
+    <table class="table table-sm w-auto" id="pickupTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Day</th>
+          <th class="text-end">Contracted</th>
+          <th class="text-end">Actual Pickup</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for date in block.keys()|sort %}
+        {% set contracted = (block[date] or 0)|int %}
+        {% set prefill = (last_pickup.get(date) or 0)|int %}
+        <tr>
+          <td class="fw-semibold small">{{ date | us_date }}</td>
+          <td class="text-muted small" id="day_{{ date }}"></td>
+          <td class="text-end text-muted">{{ contracted if contracted else '—' }}</td>
+          <td>
+            <input type="number" name="night_{{ date }}" id="night_{{ date }}"
+                   class="form-control form-control-sm text-end night-input"
+                   style="width:90px"
+                   value="{{ prefill }}"
+                   min="0"
+                   data-contracted="{{ contracted }}"
+                   oninput="updateTotals()">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-semibold">
+          <td colspan="2">Total</td>
+          <td class="text-end">{{ block.values()|sum }}</td>
+          <td class="text-end" id="totalPickup">—</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="row g-3 mt-1">
+      <div class="col-auto">
+        <span class="text-muted small">% of Block:</span>
+        <span id="pctBlock" class="fw-semibold ms-1">—</span>
+      </div>
+      <div class="col-auto">
+        <span class="text-muted small">% of Attrition:</span>
+        <span id="pctAttrition" class="fw-semibold ms-1">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex gap-2" style="max-width:640px">
+  <button type="submit" class="btn btn-success">
+    <i class="bi bi-flag-fill me-1"></i>
+    {% if existing_fh %}Update Final History{% else %}Save Final History{% endif %}
+  </button>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const CONTRACTED_TOTAL = {{ block.values()|sum }};
+const ATTRITION_PCT = {{ (config['attrition_pct'] or 0) }};
+
+// Fill in day-of-week labels
+document.querySelectorAll('.night-input').forEach(function(inp) {
+  const dateStr = inp.name.replace('night_', '');
+  const dayEl = document.getElementById('day_' + dateStr);
+  if (dayEl) {
+    const dt = new Date(dateStr + 'T12:00:00');
+    dayEl.textContent = DAYS[dt.getDay()];
+  }
+});
+
+function updateTotals() {
+  let total = 0;
+  document.querySelectorAll('.night-input').forEach(function(inp) {
+    total += parseInt(inp.value) || 0;
+  });
+  document.getElementById('totalPickup').textContent = total;
+
+  const pctBlock = CONTRACTED_TOTAL > 0 ? (total / CONTRACTED_TOTAL * 100).toFixed(1) : null;
+  const pctEl = document.getElementById('pctBlock');
+  if (pctBlock !== null) {
+    pctEl.textContent = pctBlock + '%';
+    pctEl.className = 'fw-semibold ms-1 ' + (pctBlock >= 80 ? 'text-success' : pctBlock >= 60 ? 'text-warning' : 'text-danger');
+  }
+
+  const attrFloor = CONTRACTED_TOTAL * ATTRITION_PCT;
+  const pctAttr = attrFloor > 0 ? (total / attrFloor * 100).toFixed(1) : null;
+  document.getElementById('pctAttrition').textContent = pctAttr ? pctAttr + '%' : '—';
+}
+
+updateTotals();
+</script>
+{% endblock %}

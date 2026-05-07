@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Outlook Ready — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+
+<div style="max-width:560px; margin:60px auto; text-align:center;">
+  <div class="card shadow-sm">
+    <div class="card-body py-5 px-4">
+
+      <div style="font-size:3rem; margin-bottom:1rem;">
+        <i class="bi bi-microsoft text-success"></i>
+      </div>
+
+      <h4 class="mb-2">Outlook is opening…</h4>
+      <p class="text-muted mb-4">
+        The formatted pickup table is on your clipboard.<br>
+        <strong>To/Subject are already filled in.</strong>
+      </p>
+
+      <div class="alert alert-success py-3 px-4 mb-4 text-start" style="font-size:1.05rem;">
+        <ol class="mb-0 ps-3">
+          <li>Switch to <strong>Outlook</strong></li>
+          <li>Click in the <strong>email body</strong></li>
+          <li>Press <kbd>⌘V</kbd> — the table pastes in with full formatting</li>
+          <li>Review and send</li>
+        </ol>
+      </div>
+
+      <div class="d-flex gap-2 justify-content-center flex-wrap">
+        <a href="{{ url_for('pickup_email_client', cid=config['id']) }}"
+           class="btn btn-outline-secondary">
+          <i class="bi bi-arrow-left me-1"></i>Back to Email Preview
+        </a>
+        <a href="{{ url_for('pickup_event', cid=config['id']) }}"
+           class="btn btn-outline-secondary">
+          <i class="bi bi-calendar-check me-1"></i>Back to Event
+        </a>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Upload Contract — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Event
+  </a>
+  <h4 class="mt-1">Upload Hotel Contract</h4>
+  <div class="text-muted small">{{ config['event_name'] or config['organization'] }} — {{ config['hotel'] }}</div>
+</div>
+
+<div class="card" style="max-width:560px">
+  <div class="card-header">Contract Document</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Upload the signed hotel contract (PDF or Word .docx). The room block, contracted rate,
+      cut-off date, and attrition % will be extracted automatically and shown for review
+      before saving.
+    </p>
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="action" value="upload">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Contract File</label>
+        <input type="file" name="contract_file" class="form-control"
+               accept=".pdf,.docx,.doc" required>
+        <div class="form-text">Accepted: PDF, Word (.docx)</div>
+      </div>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-magic me-1"></i> Extract Contract Data
+      </button>
+      <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

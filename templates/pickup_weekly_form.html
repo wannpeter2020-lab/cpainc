@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}{% if is_edit %}Edit Weekly Entry{% else %}Add Weekly Entry{% endif %} — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    {% if is_edit %}
+    <i class="bi bi-pencil me-2"></i>Edit Weekly Entry
+    {% else %}
+    <i class="bi bi-plus-circle me-2"></i>Add Weekly Pickup Entry
+    {% endif %}
+    <span class="text-muted fw-normal fs-6 ms-2">{{ config['event_name'] or config['organization'] }}</span>
+  </h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<form method="post" action="{% if is_edit %}{{ url_for('pickup_weekly_edit', cid=config['id'], wid=wid) }}{% else %}{{ url_for('pickup_weekly_new', cid=config['id']) }}{% endif %}">
+<div class="card mb-3">
+  <div class="card-header">Report Details</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Report Date <span class="text-danger">*</span></label>
+        <input type="date" name="report_date" class="form-control" value="{{ today }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">OTA Rate ($/night)</label>
+        <input type="number" step="0.01" name="ota_rate" id="otaRate" class="form-control"
+               value="{{ entry['ota_rate'] if is_edit and entry['ota_rate'] else '' }}"
+               oninput="updateStatus()">
+        {% if config['contracted_rate'] %}
+        <div class="form-text">Contracted: ${{ "%.2f"|format(config['contracted_rate']) }}</div>
+        {% endif %}
+        {% if config['ota_url'] %}
+        <div class="mt-2">
+          <a href="{{ config['ota_url'] }}" target="_blank" class="btn btn-sm btn-outline-info">
+            <i class="bi bi-box-arrow-up-right me-1"></i>Check Current Webrate
+          </a>
+        </div>
+        {% else %}
+        <div class="form-text text-warning">
+          <i class="bi bi-exclamation-triangle me-1"></i>No webrate URL saved —
+          <a href="{{ url_for('pickup_edit_event', cid=config['id']) }}">add it in Edit Event</a>
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Label</label>
+        <select name="label" class="form-select">
+          <option value="">— none —</option>
+          <option value="Final History" {% if is_edit and entry['label'] == 'Final History' %}selected{% endif %}>Final History</option>
+          <option value="Revised" {% if is_edit and entry['label'] == 'Revised' %}selected{% endif %}>Revised</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Status</label>
+        <div class="mt-2">
+          <span id="statusBadge" class="badge bg-secondary fs-6">—</span>
+        </div>
+      </div>
+    </div>
+    <div class="mt-3">
+      <label class="form-label fw-semibold">Notes</label>
+      <input type="text" name="notes" class="form-control" placeholder="Optional note for this entry"
+             value="{{ entry['notes'] if is_edit and entry['notes'] else '' }}">
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">Pickup by Night</div>
+  <div class="card-body">
+    <table class="table table-sm w-auto" id="pickupTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th class="text-end">Contracted</th>
+          <th class="text-end">Pickup</th>
+          <th class="text-end">Last Pickup</th>
+          <th class="text-end">Remaining</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for date in block.keys()|sort %}
+        {% set contracted = (block[date] or 0)|int %}
+        {% set is_shoulder = contracted == 0 %}
+        {% set input_val = (entry_pickup.get(date) or 0)|int if is_edit else (last_pickup.get(date) or 0)|int %}
+        {% set prev = (last_pickup.get(date) or 0)|int %}
+        <tr class="{% if is_shoulder %}text-muted{% endif %}">
+          <td class="fw-semibold">
+            {{ date | us_date }}
+            {% if is_shoulder %}<span class="badge bg-light text-muted border ms-1" style="font-size:.7rem">shoulder</span>{% endif %}
+          </td>
+          <td class="text-end">{{ contracted if contracted else '—' }}</td>
+          <td>
+            <input type="number" name="night_{{ date }}" id="night_{{ date }}"
+                   class="form-control form-control-sm text-end night-input"
+                   style="width:90px"
+                   value="{{ input_val }}"
+                   min="0"
+                   data-contracted="{{ contracted }}"
+                   oninput="updateStatus()">
+          </td>
+          <td class="text-end text-muted">{{ prev if prev else '—' }}</td>
+          <td class="text-end" id="rem_{{ date }}">{{ contracted - input_val }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-semibold">
+          <td>Total</td>
+          <td class="text-end" id="contractedTotalDisplay">{{ contracted_total if contracted_total is defined else block.values()|sum }}</td>
+          <td class="text-end" id="totalPickup">—</td>
+          <td class="text-end text-muted">{{ last['total_rooms'] if last else 0 }}</td>
+          <td class="text-end" id="totalRemaining">—</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="row g-3 mt-2">
+      <div class="col-auto">
+        <span class="section-label">% of Block:</span>
+        <span id="pctBlock" class="fw-semibold ms-1">—</span>
+      </div>
+      <div class="col-auto">
+        <span class="section-label">% of Attrition:</span>
+        <span id="pctAttrition" class="fw-semibold ms-1">—</span>
+      </div>
+      <div class="col-auto">
+        <span class="section-label">Change from last:</span>
+        <span id="changeFromLast" class="fw-semibold ms-1">—</span>
+      </div>
+      {% if config['attrition_pct'] %}
+      <div class="col-auto">
+        <span class="section-label">Rooms to Attrition:</span>
+        <span id="roomsToAttrition" class="fw-semibold ms-1">—</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="d-flex gap-2">
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-lg me-1"></i>{% if is_edit %}Save Changes{% else %}Save Entry{% endif %}
+  </button>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Only sum non-zero contracted values for CONTRACTED_TOTAL
+const CONTRACTED_TOTAL = (function() {
+  let t = 0;
+  document.querySelectorAll('.night-input').forEach(function(inp) {
+    const c = parseInt(inp.dataset.contracted) || 0;
+    if (c > 0) t += c;
+  });
+  return t;
+})();
+const ATTRITION_PCT    = {{ (config['attrition_pct'] or 0) }};
+const LAST_TOTAL       = {{ (last['total_rooms'] or 0) if last else 0 }};
+const IS_EDIT          = {{ 'true' if is_edit else 'false' }};
+const CONTRACTED_RATE  = {{ config['contracted_rate'] or 'null' }};
+
+function updateStatus() {
+  let total = 0;
+  document.querySelectorAll('.night-input').forEach(function(inp) {
+    const val = parseInt(inp.value) || 0;
+    const contracted = parseInt(inp.dataset.contracted) || 0;
+    total += val;
+    const date = inp.name.replace('night_', '');
+    const remEl = document.getElementById('rem_' + date);
+    if (remEl) remEl.textContent = contracted - val;
+  });
+
+  document.getElementById('totalPickup').textContent = total;
+  document.getElementById('totalRemaining').textContent = CONTRACTED_TOTAL - total;
+
+  // % of block
+  const pctBlock = CONTRACTED_TOTAL > 0 ? (total / CONTRACTED_TOTAL * 100).toFixed(1) : null;
+  const pctBlockEl = document.getElementById('pctBlock');
+  if (pctBlock !== null) {
+    pctBlockEl.textContent = pctBlock + '%';
+    pctBlockEl.className = 'fw-semibold ms-1 ' + (pctBlock >= 80 ? 'text-success' : pctBlock >= 60 ? 'text-warning' : 'text-danger');
+  }
+
+  // % of attrition
+  const attritionFloor = CONTRACTED_TOTAL * ATTRITION_PCT;
+  const pctAttr = attritionFloor > 0 ? (total / attritionFloor * 100).toFixed(1) : null;
+  document.getElementById('pctAttrition').textContent = pctAttr !== null ? pctAttr + '%' : '—';
+
+  // Rooms to attrition
+  const roomsToAttr = attritionFloor > 0 ? (attritionFloor - total).toFixed(1) : null;
+  const rta = document.getElementById('roomsToAttrition');
+  if (rta && roomsToAttr !== null) {
+    rta.textContent = roomsToAttr;
+    rta.className = 'fw-semibold ms-1 ' + (parseFloat(roomsToAttr) <= 0 ? 'text-success' : 'text-danger');
+  }
+
+  // Change from last
+  const change = total - LAST_TOTAL;
+  const changeEl = document.getElementById('changeFromLast');
+  changeEl.textContent = (change >= 0 ? '+' : '') + change;
+  changeEl.className = 'fw-semibold ms-1 ' + (change > 0 ? 'text-success' : change < 0 ? 'text-danger' : '');
+
+  // Status badge
+  const badgeEl = document.getElementById('statusBadge');
+  if (pctBlock === null) {
+    badgeEl.textContent = '—'; badgeEl.className = 'badge bg-secondary fs-6';
+  } else if (pctBlock >= 80) {
+    badgeEl.textContent = 'On Pace'; badgeEl.className = 'badge bg-success fs-6';
+  } else if (pctBlock >= 60) {
+    badgeEl.textContent = 'Watch'; badgeEl.className = 'badge bg-warning text-dark fs-6';
+  } else {
+    badgeEl.textContent = 'At Risk'; badgeEl.className = 'badge bg-danger fs-6';
+  }
+}
+
+// Init on load
+updateStatus();
+</script>
+{% endblock %}

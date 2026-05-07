@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block title %}{% if config %}Edit Event{% else %}New Pickup Event{% endif %} — CPAinc{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-calendar-check me-2"></i>
+    {% if config %}Edit Event{% else %}New Pickup Event{% endif %}
+  </h4>
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<form method="post" action="{{ action }}">
+<div class="card mb-3">
+  <div class="card-header">Event Details</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Organization <span class="text-danger">*</span></label>
+        <input type="text" name="organization" id="organization" class="form-control"
+               value="{{ pipeline_org or (config['organization'] if config else '') }}" required>
+        {% if pipeline_org %}
+        <div class="form-text text-success">
+          <i class="bi bi-check-circle me-1"></i>From pipeline
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Event Name</label>
+        <input type="text" name="event_name" id="event_name" class="form-control"
+               value="{{ pipeline_event or (config['event_name'] if config else '') }}">
+        {% if pipeline_event %}
+        <div class="form-text text-success">
+          <i class="bi bi-check-circle me-1"></i>From pipeline
+        </div>
+        {% endif %}
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Booking ID</label>
+        <input type="text" name="booking_id" id="bookingId" class="form-control"
+               value="{{ config['booking_id'] if config else '' }}"
+               placeholder="e.g. 239561">
+        <div class="form-text" id="bookingIdNote"></div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Spreadsheet Tab Name</label>
+        <input type="text" name="tab_name" class="form-control"
+               value="{{ config['tab_name'] if config else '' }}">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">Hotel</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Hotel Name</label>
+        <input type="text" name="hotel" class="form-control"
+               value="{{ config['hotel'] if config else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Contracted Rate ($/night)</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="number" step="0.01" name="contracted_rate" id="contracted_rate"
+                 class="form-control"
+                 value="{{ pipeline_rate if pipeline_rate else (config['contracted_rate'] if config and config['contracted_rate'] else '') }}">
+        </div>
+        {% if pipeline_rate %}
+        <div class="form-text text-success">
+          <i class="bi bi-check-circle me-1"></i>Pulled from Booking #{{ config['booking_id'] if config else '' }} in pipeline
+        </div>
+        {% else %}
+        <div class="form-text" id="rateNote"></div>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Hotel Booking Link</label>
+        <input type="text" name="hotel_booking_link" class="form-control"
+               value="{{ config['hotel_booking_link'] if config else '' }}"
+               placeholder="https://… (optional)">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">OTA / Webrate URL</label>
+        <input type="url" name="ota_url" class="form-control"
+               value="{{ config['ota_url'] if config and config['ota_url'] else '' }}"
+               placeholder="https://...">
+        <div class="form-text">The hotel booking page link used to check current OTA rates</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Hotel Contacts</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="addHotelContact">
+      <i class="bi bi-plus-lg me-1"></i>Add Contact
+    </button>
+  </div>
+  <div class="card-body">
+    <div class="form-text mb-2">First entry is used as the primary To: address for hotel emails.</div>
+    <div id="hotelContactList">
+      {% set hc_list = config['hotel_contacts']|fromjson if config and config['hotel_contacts'] else [] %}
+      {# Back-compat: if hotel_contacts empty but hotel_contact set, seed with primary #}
+      {% if not hc_list and config and config['hotel_contact'] %}
+        {% set hc_list = [{'name': config['hotel_contact'], 'email': config['hotel_contact_email'] or ''}] %}
+      {% endif %}
+      {% for entry in hc_list %}
+      <div class="row g-2 mb-2 align-items-center hc-row">
+        <div class="col-md-5">
+          <input type="text" name="hc_name_{{ loop.index0 }}" class="form-control"
+                 value="{{ entry.name or '' }}" placeholder="Contact Name">
+        </div>
+        <div class="col-md-6">
+          <input type="email" name="hc_email_{{ loop.index0 }}" class="form-control"
+                 value="{{ entry.email or '' }}" placeholder="email@hotel.com">
+        </div>
+        <div class="col-auto">
+          <button type="button" class="btn btn-outline-danger btn-sm remove-hc" title="Remove">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Client / Customer Contacts</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="addClientContact">
+      <i class="bi bi-plus-lg me-1"></i>Add Contact
+    </button>
+  </div>
+  <div class="card-body">
+    <div class="form-text mb-2">First entry is used as the primary To: address for client emails. All entries receive weekly pickup reports.</div>
+    <div id="clientContactList">
+      {% set cc_list = config['cc_emails']|fromjson if config and config['cc_emails'] else [] %}
+      {# Back-compat: if cc_emails empty but group_contact set, seed with primary #}
+      {% if not cc_list and config and config['group_contact'] %}
+        {% set cc_list = [{'name': config['group_contact'], 'email': config['group_contact_email'] or ''}] %}
+      {% endif %}
+      {% for entry in cc_list %}
+      {% set cc_email = entry.email if entry is mapping else entry %}
+      {% set cc_name  = entry.name  if entry is mapping else '' %}
+      <div class="row g-2 mb-2 align-items-center cc-row">
+        <div class="col-md-5">
+          <input type="text" name="cc_name_{{ loop.index0 }}" class="form-control"
+                 value="{{ cc_name }}" placeholder="Contact Name">
+        </div>
+        <div class="col-md-6">
+          <input type="email" name="cc_email_{{ loop.index0 }}" class="form-control"
+                 value="{{ cc_email }}" placeholder="email@client.com">
+        </div>
+        <div class="col-auto">
+          <button type="button" class="btn btn-outline-danger btn-sm remove-cc" title="Remove">
+            <i class="bi bi-trash3"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">Block & Attrition</div>
+  <div class="card-body">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Cutoff Date</label>
+        <input type="date" name="cutoff_date" class="form-control"
+               value="{{ config['cutoff_date'] if config else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Attrition %</label>
+        <div class="input-group">
+          <input type="number" step="1" min="0" max="100" name="attrition_pct" class="form-control"
+                 value="{{ ((config['attrition_pct'] or 0) * 100)|round(0)|int if config and config['attrition_pct'] else '' }}">
+          <span class="input-group-text">%</span>
+        </div>
+        <div class="form-text">e.g. 80 means you must pick up 80% of block</div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Shoulder Pre</label>
+        <input type="number" min="0" name="shoulder_pre" class="form-control"
+               value="{{ config['shoulder_pre'] if config else 3 }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Shoulder Post</label>
+        <input type="number" min="0" name="shoulder_post" class="form-control"
+               value="{{ config['shoulder_post'] if config else 3 }}">
+      </div>
+    </div>
+
+    <div class="section-label mb-2">Contracted Block (one row per event night)</div>
+    <table class="table table-sm w-auto" id="blockTable">
+      <thead>
+        <tr><th>Date</th><th>Contracted Rooms</th><th></th></tr>
+      </thead>
+      <tbody id="blockBody">
+        {% if config and config['contracted_block'] %}
+          {% set blk = config['contracted_block']|fromjson %}
+          {% for date, rooms in blk.items()|sort %}
+          <tr>
+            <td><input type="date" name="block_date" class="form-control form-control-sm" value="{{ date }}" required></td>
+            <td><input type="number" name="block_rooms" class="form-control form-control-sm" value="{{ rooms }}" min="0" required></td>
+            <td><button type="button" class="btn btn-sm btn-outline-danger remove-row">✕</button></td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td><input type="date" name="block_date" class="form-control form-control-sm"></td>
+            <td><input type="number" name="block_rooms" class="form-control form-control-sm" placeholder="rooms" min="0"></td>
+            <td><button type="button" class="btn btn-sm btn-outline-danger remove-row">✕</button></td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+    <button type="button" id="addNight" class="btn btn-sm btn-outline-secondary mt-1">
+      <i class="bi bi-plus me-1"></i>Add Night
+    </button>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header">Notes</div>
+  <div class="card-body">
+    <textarea name="notes" class="form-control" rows="3">{{ config['notes'] if config else '' }}</textarea>
+  </div>
+</div>
+
+<div class="d-flex gap-2">
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-lg me-1"></i>Save Event
+  </button>
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Live Booking ID → pipeline prefill (org, event name, room rate)
+(function() {
+  const bidInput  = document.getElementById('bookingId');
+  const rateInput = document.getElementById('contracted_rate');
+  const orgInput  = document.getElementById('organization');
+  const evtInput  = document.getElementById('event_name');
+  const note      = document.getElementById('bookingIdNote');
+  const rateNote  = document.getElementById('rateNote');
+  if (!bidInput) return;
+
+  let timer;
+  bidInput.addEventListener('input', function() {
+    clearTimeout(timer);
+    const bid = bidInput.value.trim();
+    if (!bid || isNaN(bid)) {
+      if (note) note.textContent = '';
+      return;
+    }
+    timer = setTimeout(function() {
+      fetch('/api/booking-rate?booking_id=' + encodeURIComponent(bid))
+        .then(r => r.json())
+        .then(data => {
+          if (data.account || data.room_rate) {
+            if (rateInput && data.room_rate)  rateInput.value = data.room_rate.toFixed(2);
+            if (orgInput  && data.account)    orgInput.value  = data.account;
+            if (evtInput  && data.event_name) evtInput.value  = data.event_name;
+            if (note) {
+              note.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' +
+                'Matched: <strong>' + data.account + '</strong> — ' + data.event_name + '</span>';
+            }
+            if (rateNote && data.room_rate) {
+              rateNote.innerHTML = '<span class="text-success">' +
+                '<i class="bi bi-check-circle me-1"></i>Pulled from pipeline</span>';
+            }
+          } else {
+            if (note) note.innerHTML = '<span class="text-muted">Booking ID not found in pipeline</span>';
+          }
+        })
+        .catch(() => {});
+    }, 500);
+  });
+})();
+
+// ── Shared contact autocomplete engine ────────────────────────────────────
+(function() {
+  // Inject shared dropdown styles once
+  const style = document.createElement('style');
+  style.textContent = `
+    .contact-ac-wrap { position: relative; }
+    .contact-ac-drop {
+      position: absolute; top: 100%; left: 0; right: 0; z-index: 9999;
+      background: #fff; border: 1px solid #dee2e6; border-top: none;
+      border-radius: 0 0 .375rem .375rem;
+      box-shadow: 0 6px 16px rgba(0,0,0,.12);
+      max-height: 260px; overflow-y: auto;
+    }
+    .contact-ac-item {
+      padding: 7px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0;
+    }
+    .contact-ac-item:last-child { border-bottom: none; }
+    .contact-ac-item:hover, .contact-ac-item.active { background: #e9f2ff; }
+    .contact-ac-item .ac-name { font-weight: 600; font-size: .9rem; }
+    .contact-ac-item .ac-sub  { font-size: .78rem; color: #6c757d; }
+  `;
+  document.head.appendChild(style);
+
+  window._attachContactAC = function(nameInput, emailInput, apiEndpoint, rowClass) {
+    // Wrap name input for positioning
+    const wrap = document.createElement('div');
+    wrap.className = 'contact-ac-wrap';
+    nameInput.parentNode.insertBefore(wrap, nameInput);
+    wrap.appendChild(nameInput);
+
+    let drop = null, timer = null, activeIdx = -1;
+
+    function openDrop(items) {
+      closeDrop();
+      if (!items.length) return;
+      drop = document.createElement('div');
+      drop.className = 'contact-ac-drop';
+      items.forEach(function(c, i) {
+        const item = document.createElement('div');
+        item.className = 'contact-ac-item';
+        item.innerHTML =
+          `<div class="ac-name">${_esc(c.name)}</div>` +
+          `<div class="ac-sub">${_esc(c.email)}` +
+          (c.organization ? ` &middot; ${_esc(c.organization)}` : '') +
+          (c.hotel_name   ? ` &middot; ${_esc(c.hotel_name)}`   : '') +
+          `</div>`;
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          fill(c);
+        });
+        drop.appendChild(item);
+      });
+      wrap.appendChild(drop);
+    }
+
+    function closeDrop() {
+      if (drop) { drop.remove(); drop = null; }
+      activeIdx = -1;
+    }
+
+    function fill(c) {
+      nameInput.value  = c.name  || '';
+      emailInput.value = c.email || '';
+      closeDrop();
+    }
+
+    function _esc(s) {
+      return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function search(q) {
+      fetch(apiEndpoint + '?q=' + encodeURIComponent(q))
+        .then(r => r.json())
+        .then(openDrop)
+        .catch(() => {});
+    }
+
+    nameInput.addEventListener('input', function() {
+      clearTimeout(timer);
+      const q = this.value.trim();
+      if (q.length < 2) { closeDrop(); return; }
+      timer = setTimeout(() => search(q), 200);
+    });
+
+    emailInput.addEventListener('input', function() {
+      clearTimeout(timer);
+      const q = this.value.trim();
+      if (q.length < 2) { closeDrop(); return; }
+      timer = setTimeout(() => search(q), 200);
+    });
+
+    nameInput.addEventListener('blur',  () => setTimeout(closeDrop, 200));
+    emailInput.addEventListener('blur', () => setTimeout(closeDrop, 200));
+  };
+
+  window._attachRowAC = function(row, apiEndpoint) {
+    const nameInput  = row.querySelector('input[type="text"]');
+    const emailInput = row.querySelector('input[type="email"]');
+    if (nameInput && emailInput) {
+      window._attachContactAC(nameInput, emailInput, apiEndpoint);
+    }
+  };
+})();
+
+// ── Dynamic Hotel Contacts ─────────────────────────────────────────────────
+(function() {
+  const list    = document.getElementById('hotelContactList');
+  const API     = '/api/contacts/hotels';
+  let hcCount   = list.querySelectorAll('.hc-row').length;
+
+  // Attach autocomplete to pre-existing rows
+  list.querySelectorAll('.hc-row').forEach(r => window._attachRowAC(r, API));
+
+  function makeHCRow(idx) {
+    const div = document.createElement('div');
+    div.className = 'row g-2 mb-2 align-items-center hc-row';
+    div.innerHTML =
+      `<div class="col-md-5"><input type="text" name="hc_name_${idx}" class="form-control" placeholder="Contact Name"></div>` +
+      `<div class="col-md-6"><input type="email" name="hc_email_${idx}" class="form-control" placeholder="email@hotel.com"></div>` +
+      `<div class="col-auto"><button type="button" class="btn btn-outline-danger btn-sm remove-hc" title="Remove"><i class="bi bi-trash3"></i></button></div>`;
+    return div;
+  }
+
+  document.getElementById('addHotelContact').addEventListener('click', function() {
+    const row = makeHCRow(hcCount++);
+    list.appendChild(row);
+    window._attachRowAC(row, API);
+    row.querySelector('input[type="text"]').focus();
+  });
+
+  list.addEventListener('click', function(e) {
+    const btn = e.target.closest('.remove-hc');
+    if (!btn) return;
+    btn.closest('.hc-row').remove();
+    hcCount = 0;
+    list.querySelectorAll('.hc-row').forEach(function(r) {
+      r.querySelector('input[type="text"]').name  = 'hc_name_'  + hcCount;
+      r.querySelector('input[type="email"]').name = 'hc_email_' + hcCount;
+      hcCount++;
+    });
+  });
+})();
+
+// ── Dynamic Client Contacts ────────────────────────────────────────────────
+(function() {
+  const list  = document.getElementById('clientContactList');
+  const API   = '/api/contacts/clients';
+  let ccCount = list.querySelectorAll('.cc-row').length;
+
+  // Attach autocomplete to pre-existing rows
+  list.querySelectorAll('.cc-row').forEach(r => window._attachRowAC(r, API));
+
+  function makeCCRow(idx) {
+    const div = document.createElement('div');
+    div.className = 'row g-2 mb-2 align-items-center cc-row';
+    div.innerHTML =
+      `<div class="col-md-5"><input type="text" name="cc_name_${idx}" class="form-control" placeholder="Contact Name"></div>` +
+      `<div class="col-md-6"><input type="email" name="cc_email_${idx}" class="form-control" placeholder="email@client.com"></div>` +
+      `<div class="col-auto"><button type="button" class="btn btn-outline-danger btn-sm remove-cc" title="Remove"><i class="bi bi-trash3"></i></button></div>`;
+    return div;
+  }
+
+  document.getElementById('addClientContact').addEventListener('click', function() {
+    const row = makeCCRow(ccCount++);
+    list.appendChild(row);
+    window._attachRowAC(row, API);
+    row.querySelector('input[type="text"]').focus();
+  });
+
+  list.addEventListener('click', function(e) {
+    const btn = e.target.closest('.remove-cc');
+    if (!btn) return;
+    btn.closest('.cc-row').remove();
+    ccCount = 0;
+    list.querySelectorAll('.cc-row').forEach(function(r) {
+      r.querySelector('input[type="text"]').name  = 'cc_name_'  + ccCount;
+      r.querySelector('input[type="email"]').name = 'cc_email_' + ccCount;
+      ccCount++;
+    });
+  });
+})();
+
+// ── Contracted block add/remove rows ──────────────────────────────────────
+document.getElementById('addNight').addEventListener('click', function() {
+  const tbody = document.getElementById('blockBody');
+  const row = document.createElement('tr');
+  row.innerHTML = `
+    <td><input type="date" name="block_date" class="form-control form-control-sm"></td>
+    <td><input type="number" name="block_rooms" class="form-control form-control-sm" placeholder="rooms" min="0"></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger remove-row">✕</button></td>
+  `;
+  tbody.appendChild(row);
+});
+
+document.getElementById('blockBody').addEventListener('click', function(e) {
+  if (e.target.classList.contains('remove-row')) {
+    const row = e.target.closest('tr');
+    if (document.querySelectorAll('#blockBody tr').length > 1) {
+      row.remove();
+    }
+  }
+});
+</script>
+{% endblock %}

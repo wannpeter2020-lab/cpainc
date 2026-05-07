@@ -1,0 +1,363 @@
+{% extends "base.html" %}
+{% block title %}Contact Directory — CPAinc{% endblock %}
+{% block content %}
+
+{% set active_tab = request.args.get('tab', 'clients') %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Contact Directory</h4>
+</div>
+
+<style>
+  #contactTabs .nav-link { color: #212529 !important; }
+  #contactTabs .nav-link.active { color: #212529 !important; font-weight: 600; }
+</style>
+
+<ul class="nav nav-tabs mb-3" id="contactTabs">
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab != 'hotels' %}active{% endif %}"
+       data-bs-toggle="tab" href="#clientsTab">
+      <i class="bi bi-people me-1"></i>Clients
+      <span class="badge bg-secondary ms-1">{{ clients | length }}</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab == 'hotels' %}active{% endif %}"
+       data-bs-toggle="tab" href="#hotelsTab">
+      <i class="bi bi-building me-1"></i>Hotel Contacts
+      <span class="badge bg-secondary ms-1">{{ hotels | length }}</span>
+    </a>
+  </li>
+</ul>
+
+<div class="tab-content">
+
+  {# ── Clients Tab ── #}
+  <div class="tab-pane fade {% if active_tab != 'hotels' %}show active{% endif %}" id="clientsTab">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <input type="text" id="clientSearch" class="form-control form-control-sm w-auto" placeholder="Search clients…" style="min-width:220px">
+      <button class="btn btn-primary btn-sm" onclick="openAddModal('client')">
+        <i class="bi bi-person-plus me-1"></i>New Client Contact
+      </button>
+    </div>
+    {% if clients %}
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0" id="clientTable">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Title</th>
+              <th>Organization</th>
+              <th>Email</th>
+              <th>Phone (Office)</th>
+              <th>Phone (Cell)</th>
+              <th>LinkedIn</th>
+              <th>Added</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in clients %}
+            <tr>
+              <td class="fw-semibold">{{ c.name }}</td>
+              <td class="text-muted small">{{ c.title or '—' }}</td>
+              <td class="text-muted small">{{ c.organization or '—' }}</td>
+              <td><a href="mailto:{{ c.email }}" class="text-decoration-none small">{{ c.email }}</a></td>
+              <td class="small">{{ c.phone_office or '—' }}</td>
+              <td class="small">{{ c.phone_cell or '—' }}</td>
+              <td class="text-center small">
+                {% if c.linkedin %}
+                <a href="{{ c.linkedin if c.linkedin.startswith('http') else 'https://linkedin.com/in/' ~ c.linkedin }}" target="_blank" class="text-primary"><i class="bi bi-linkedin"></i></a>
+                {% else %}—{% endif %}
+              </td>
+              <td class="text-muted small">{{ c.created_at | us_date if c.created_at else '—' }}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-outline-secondary btn-sm me-1 btn-edit"
+                  data-tbl="client"
+                  data-id="{{ c.id }}"
+                  data-contact="{{ c|tojson|e }}">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <form method="post" action="{{ url_for('contact_delete', tbl='client', cid=c.id) }}"
+                      onsubmit="return confirm('Delete {{ c.name }}?')" class="d-inline">
+                  <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-5">
+      <i class="bi bi-people fs-1 d-block mb-2 opacity-25"></i>
+      No client contacts yet.
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Hotel Contacts Tab ── #}
+  <div class="tab-pane fade {% if active_tab == 'hotels' %}show active{% endif %}" id="hotelsTab">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <input type="text" id="hotelSearch" class="form-control form-control-sm w-auto" placeholder="Search hotel contacts…" style="min-width:220px">
+      <button class="btn btn-primary btn-sm" onclick="openAddModal('hotel')">
+        <i class="bi bi-building-add me-1"></i>New Hotel Contact
+      </button>
+    </div>
+    {% if hotels %}
+    <div class="card">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0" id="hotelTable">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Title</th>
+              <th>Hotel</th>
+              <th>Email</th>
+              <th>Phone (Office)</th>
+              <th>Phone (Cell)</th>
+              <th>LinkedIn</th>
+              <th>Added</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in hotels %}
+            <tr>
+              <td class="fw-semibold">{{ h.name }}</td>
+              <td class="text-muted small">{{ h.title or '—' }}</td>
+              <td class="text-muted small">{{ h.hotel_name or '—' }}</td>
+              <td><a href="mailto:{{ h.email }}" class="text-decoration-none small">{{ h.email }}</a></td>
+              <td class="small">{{ h.phone_office or '—' }}</td>
+              <td class="small">{{ h.phone_cell or '—' }}</td>
+              <td class="text-center small">
+                {% if h.linkedin %}
+                <a href="{{ h.linkedin if h.linkedin.startswith('http') else 'https://linkedin.com/in/' ~ h.linkedin }}" target="_blank" class="text-primary"><i class="bi bi-linkedin"></i></a>
+                {% else %}—{% endif %}
+              </td>
+              <td class="text-muted small">{{ h.created_at | us_date if h.created_at else '—' }}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-outline-secondary btn-sm me-1 btn-edit"
+                  data-tbl="hotel"
+                  data-id="{{ h.id }}"
+                  data-contact="{{ h|tojson|e }}">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <form method="post" action="{{ url_for('contact_delete', tbl='hotel', cid=h.id) }}"
+                      onsubmit="return confirm('Delete {{ h.name }}?')" class="d-inline">
+                  <button type="submit" class="btn btn-outline-danger btn-sm" title="Delete">
+                    <i class="bi bi-trash3"></i>
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-5">
+      <i class="bi bi-building fs-1 d-block mb-2 opacity-25"></i>
+      No hotel contacts yet.
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+{# ── Add / Edit Modal ── #}
+<div class="modal fade" id="contactModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form id="contactForm" method="post">
+        <div class="modal-header">
+          <h5 class="modal-title" id="contactModalTitle">Contact</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+
+          {# Name + Title row #}
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+              <input type="text" name="name" id="f_name" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Title / Role</label>
+              <input type="text" name="title" id="f_title" class="form-control" placeholder="e.g. Director of Sales">
+            </div>
+          </div>
+
+          {# Org / Hotel + Email row #}
+          <div class="row g-2 mb-2">
+            <div class="col-md-6" id="orgRow">
+              <label class="form-label fw-semibold" id="orgLabel">Organization</label>
+              <input type="text" name="organization" id="f_organization" class="form-control">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+              <input type="email" name="email" id="f_email" class="form-control" required>
+            </div>
+          </div>
+
+          {# Phone Office + Phone Cell #}
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Phone (Office)</label>
+              <input type="text" name="phone_office" id="f_phone_office" class="form-control" placeholder="(000) 000-0000">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Phone (Cell)</label>
+              <input type="text" name="phone_cell" id="f_phone_cell" class="form-control" placeholder="(000) 000-0000">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Fax</label>
+              <input type="text" name="fax" id="f_fax" class="form-control" placeholder="(000) 000-0000">
+            </div>
+          </div>
+
+          {# Address #}
+          <div class="mb-2">
+            <label class="form-label fw-semibold">Street Address</label>
+            <input type="text" name="address" id="f_address" class="form-control">
+          </div>
+
+          {# City / State / Zip #}
+          <div class="row g-2 mb-2">
+            <div class="col-md-5">
+              <label class="form-label fw-semibold">City</label>
+              <input type="text" name="city" id="f_city" class="form-control">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-semibold">State</label>
+              <input type="text" name="state" id="f_state" class="form-control" placeholder="e.g. IL">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Zip Code</label>
+              <input type="text" name="zip" id="f_zip" class="form-control">
+            </div>
+          </div>
+
+          {# Website + LinkedIn #}
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Website</label>
+              <input type="url" name="website" id="f_website" class="form-control" placeholder="https://…">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold"><i class="bi bi-linkedin me-1"></i>LinkedIn</label>
+              <input type="text" name="linkedin" id="f_linkedin" class="form-control" placeholder="linkedin.com/in/username or just username">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label fw-semibold">Notes</label>
+            <textarea name="notes" id="f_notes" class="form-control" rows="2"></textarea>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Contact</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Live search ──────────────────────────────────────────────────────────────
+function filterTable(inputId, tableId) {
+  document.getElementById(inputId).addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('#' + tableId + ' tbody tr').forEach(function(row) {
+      row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+}
+filterTable('clientSearch', 'clientTable');
+filterTable('hotelSearch', 'hotelTable');
+
+// ── Edit button delegation (data-attributes avoid quote-escaping issues) ─────
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.btn-edit');
+  if (!btn) return;
+  const tbl  = btn.dataset.tbl;
+  const id   = btn.dataset.id;
+  const data = JSON.parse(btn.dataset.contact);
+  openEditModal(tbl, id, data);
+});
+
+// ── Modal helpers ────────────────────────────────────────────────────────────
+const modal    = new bootstrap.Modal(document.getElementById('contactModal'));
+const form     = document.getElementById('contactForm');
+const orgRow   = document.getElementById('orgRow');
+const orgLabel = document.getElementById('orgLabel');
+
+function getOrgInput() { return orgRow.querySelector('input'); }
+
+function setOrgField(tbl) {
+  const inp = getOrgInput();
+  if (tbl === 'hotel') {
+    orgLabel.textContent = 'Hotel Name';
+    inp.name = 'hotel_name';
+  } else {
+    orgLabel.textContent = 'Organization';
+    inp.name = 'organization';
+  }
+}
+
+function clearForm() {
+  ['f_name','f_title','f_email','f_phone_office','f_phone_cell',
+   'f_fax','f_address','f_city','f_state','f_zip','f_website','f_linkedin','f_notes'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const org = getOrgInput();
+  if (org) org.value = '';
+}
+
+function fillForm(data, tbl) {
+  document.getElementById('f_name').value         = data.name         || '';
+  document.getElementById('f_title').value        = data.title        || '';
+  document.getElementById('f_email').value        = data.email        || '';
+  document.getElementById('f_phone_office').value = data.phone_office || '';
+  document.getElementById('f_phone_cell').value   = data.phone_cell   || '';
+  document.getElementById('f_fax').value          = data.fax          || '';
+  document.getElementById('f_address').value      = data.address      || '';
+  document.getElementById('f_city').value         = data.city         || '';
+  document.getElementById('f_state').value        = data.state        || '';
+  document.getElementById('f_zip').value          = data.zip          || '';
+  document.getElementById('f_website').value      = data.website      || '';
+  document.getElementById('f_linkedin').value     = data.linkedin     || '';
+  document.getElementById('f_notes').value        = data.notes        || '';
+  const org = orgRow.querySelector('input');
+  if (org) org.value = (tbl === 'hotel' ? data.hotel_name : data.organization) || '';
+}
+
+function openAddModal(tbl) {
+  document.getElementById('contactModalTitle').textContent =
+    (tbl === 'hotel') ? 'New Hotel Contact' : 'New Client Contact';
+  setOrgField(tbl);
+  clearForm();
+  form.action = '/contacts/add/' + tbl;
+  modal.show();
+}
+
+function openEditModal(tbl, id, data) {
+  document.getElementById('contactModalTitle').textContent =
+    (tbl === 'hotel') ? 'Edit Hotel Contact' : 'Edit Client Contact';
+  setOrgField(tbl);
+  fillForm(data, tbl);
+  form.action = '/contacts/edit/' + tbl + '/' + id;
+  modal.show();
+}
+</script>
+{% endblock %}

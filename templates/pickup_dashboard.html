@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+{% block title %}Pickup Tracking — CPAinc{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-check me-2"></i>Pickup Tracking</h4>
+  <div class="d-flex gap-2">
+    <form method="post" action="{{ url_for('pickup_sync_pipeline') }}">
+      <button type="submit" class="btn btn-outline-secondary btn-sm"
+              title="Update organization names and event names from pipeline for all matched booking IDs">
+        <i class="bi bi-arrow-repeat me-1"></i> Sync from Pipeline
+      </button>
+    </form>
+    <a href="{{ url_for('pickup_fill_missing') }}" class="btn btn-outline-warning btn-sm">
+      <i class="bi bi-calendar-plus me-1"></i> Fill Missing
+    </a>
+    <a href="{{ url_for('pickup_new_event') }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i> New Event
+    </a>
+  </div>
+</div>
+
+{# ── Macro: render a table of rows ── #}
+{% macro event_table(rows, show_history=false, table_id='evt-table', section='') %}
+{% if rows %}
+<div class="table-responsive">
+  <table class="table table-hover mb-0 align-middle sortable-table" id="{{ table_id }}">
+    <thead>
+      <tr>
+        <th>Booking ID</th>
+        <th>Event / Organization</th>
+        <th>Hotel</th>
+        <th class="sortable" data-col="start" style="cursor:pointer;white-space:nowrap">
+          Start Date <i class="bi bi-arrow-down-up text-muted small"></i>
+        </th>
+        <th class="sortable" data-col="end" style="cursor:pointer;white-space:nowrap">
+          End Date <i class="bi bi-arrow-down-up text-muted small"></i>
+        </th>
+        <th>Cutoff Date</th>
+        <th>Days Left</th>
+        <th>Last Report</th>
+        <th>Email Sent</th>
+        <th>Responded</th>
+        <th class="text-end">% of Block</th>
+        <th class="text-end">% of Attrition</th>
+        <th>OTA Rate</th>
+        <th>Status</th>
+        {% if show_history %}<th>History</th>{% endif %}
+        <th style="position:sticky;right:0;background:#f8f9fa;z-index:2;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}">
+        <td class="font-monospace small">
+          {% if r.config['booking_id'] %}
+            <a href="{{ url_for('booking_detail', booking_id=r.config['booking_id']) }}"
+               class="text-decoration-none" title="Open booking in pipeline">
+              {{ r.config['booking_id'] }}
+            </a>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <div class="fw-semibold">{{ r.config['event_name'] or r.config['organization'] }}</div>
+          {% if r.config['event_name'] %}
+          <div class="text-muted small">{{ r.config['organization'] }}</div>
+          {% endif %}
+        </td>
+        <td>{{ r.config['hotel'] or '—' }}</td>
+        <td>{{ r.event_start | us_date }}</td>
+        <td>{{ r.event_end | us_date }}</td>
+        <td>{{ r.config['cutoff_date'] | us_date }}</td>
+        <td>
+          {% if r.days_to_cutoff is not none %}
+            {% if r.days_to_cutoff < 0 %}
+              <span class="text-danger">{{ r.days_to_cutoff }} d</span>
+            {% elif r.days_to_cutoff <= 14 %}
+              <span class="text-warning fw-semibold">{{ r.days_to_cutoff }} d</span>
+            {% else %}
+              {{ r.days_to_cutoff }} d
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ r.last_date | us_date }}</td>
+        <td>
+          {% if r.last_contact %}
+            <span class="text-dark small">{{ r.last_contact[0] | us_date }}</span>
+          {% else %}
+            <span class="text-muted small">—</span>
+          {% endif %}
+        </td>
+        <td style="white-space:nowrap" id="respond-cell-{{ r.config['id'] }}">
+          {% if r.has_response %}
+            <span class="text-success fw-semibold me-1" title="Hotel responded">
+              <i class="bi bi-check-circle-fill"></i>
+              <span class="small ms-1 responded-date">{{ r.responded_date | us_date if r.responded_date else '' }}</span>
+            </span>
+            <button class="btn btn-sm btn-link p-0 text-muted" title="Undo — remove responded mark"
+                    style="font-size:.75rem; vertical-align:middle;"
+                    onclick="quickRespond({{ r.config['id'] }}, 'undo')">
+              <i class="bi bi-x-circle"></i>
+            </button>
+          {% else %}
+            <button class="btn btn-sm btn-link p-0 text-muted" title="Mark hotel as responded"
+                    onclick="quickRespond({{ r.config['id'] }}, 'mark')">
+              <i class="bi bi-check-circle" style="font-size:1.2rem;"></i>
+            </button>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.last_pct_block is not none %}{{ r.last_pct_block }}%{% else %}—{% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.last_pct_attr is not none %}{{ "%.1f"|format(r.last_pct_attr) }}%{% else %}—{% endif %}
+        </td>
+        <td>
+          {% if r.config['ota_url'] %}
+            <a href="{{ r.config['ota_url'] }}" target="_blank" class="text-decoration-none me-1" title="Check current OTA rate">
+              <i class="bi bi-box-arrow-up-right text-info small"></i>
+            </a>
+          {% endif %}
+          {% if r.last_ota %}
+            ${{ "%.2f"|format(r.last_ota) }}
+            {% if r.config['contracted_rate'] %}
+              {% set diff = r.last_ota - r.config['contracted_rate'] %}
+              {% if diff > 0 %}
+                <span class="text-danger small">(+${{ "%.0f"|format(diff) }})</span>
+              {% elif diff < 0 %}
+                <span class="text-success small">(-${{ "%.0f"|format(diff|abs) }})</span>
+              {% endif %}
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <span class="badge bg-{{ r.badge }}">{{ r.badge_label }}</span>
+        </td>
+        {% if show_history %}
+        <td>
+          {% if r.has_final_history %}
+            <span class="badge bg-success">&#x2705; Complete</span>
+          {% elif r.force_past %}
+            <span class="badge bg-secondary">Manually moved</span>
+          {% else %}
+            <span class="badge bg-warning text-dark">&#x26A0;&#xFE0F; Pending</span>
+          {% endif %}
+        </td>
+        {% endif %}
+        <td style="position:sticky;right:0;background:white;z-index:1;white-space:nowrap;" class="d-flex gap-1 flex-wrap align-items-center">
+          <a href="{{ url_for('pickup_event', cid=r.config['id']) }}" class="btn btn-sm btn-primary">
+            <i class="bi bi-calendar-check me-1"></i>Pickup History
+          </a>
+          <a href="{{ url_for('pickup_edit_event', cid=r.config['id']) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+          {% if not r.has_final_history and not show_history %}
+          <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
+            <button class="btn btn-sm btn-outline-dark" title="Move to Past Events">
+              <i class="bi bi-archive me-1"></i>Move to Past
+            </button>
+          </form>
+          {% endif %}
+          {% if show_history and r.force_past and not r.has_final_history %}
+          <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
+            <button class="btn btn-sm btn-outline-secondary" title="Move back to Current Events">
+              <i class="bi bi-arrow-counterclockwise me-1"></i>Undo
+            </button>
+          </form>
+          {% endif %}
+          {% if section == 'future' %}
+          <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
+            <button class="btn btn-sm btn-outline-secondary" title="Move to Current Events">
+              <i class="bi bi-arrow-left-circle me-1"></i>Move to Current
+            </button>
+          </form>
+          {% elif section == 'current' and r.force_current %}
+          <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
+            <button class="btn btn-sm btn-outline-secondary" title="Return to Future Events">
+              <i class="bi bi-arrow-right-circle me-1"></i>Back to Future
+            </button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card-body text-muted">No events in this category.</div>
+{% endif %}
+{% endmacro %}
+
+{# ── Current Events ── #}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-activity me-2"></i>Current Events
+      <span class="badge bg-primary ms-1">{{ current_rows|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#collapseCurrent">
+      <i class="bi bi-chevron-up"></i>
+    </button>
+  </div>
+  <div id="collapseCurrent" class="collapse show">
+    {{ event_table(current_rows, table_id='tbl-current', section='current') }}
+    {% if not current_rows %}
+    <div class="card-body text-muted">No current events. <a href="{{ url_for('pickup_new_event') }}">Add your first event.</a></div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Future Events ── #}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-calendar-event me-2"></i>Future Events
+      <span class="badge bg-secondary ms-1">{{ future_rows|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#collapseFuture">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div id="collapseFuture" class="collapse">
+    {{ event_table(future_rows, table_id='tbl-future', section='future') }}
+  </div>
+</div>
+
+{# ── Past Events ── #}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-archive me-2"></i>Past Events
+      <span class="badge bg-secondary ms-1">{{ past_rows|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#collapsePast">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div id="collapsePast" class="collapse">
+    {{ event_table(past_rows, show_history=true, table_id='tbl-past') }}
+  </div>
+</div>
+
+{# ── Archived Events ── #}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-archive me-2"></i>Archived Events
+      <span class="badge bg-secondary ms-1">{{ archived_rows|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#collapseArchived">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div id="collapseArchived" class="collapse">
+    {% if archived_rows %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead>
+          <tr>
+            <th>Booking ID</th>
+            <th>Event / Organization</th>
+            <th>Hotel</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in archived_rows %}
+          <tr>
+            <td class="font-monospace small">{{ r.config['booking_id'] or '—' }}</td>
+            <td>
+              <div class="fw-semibold">{{ r.config['event_name'] or r.config['organization'] }}</div>
+              {% if r.config['event_name'] %}
+              <div class="text-muted small">{{ r.config['organization'] }}</div>
+              {% endif %}
+            </td>
+            <td>{{ r.config['hotel'] or '—' }}</td>
+            <td>{{ r.event_start | us_date }}</td>
+            <td>{{ r.event_end | us_date }}</td>
+            <td class="d-flex gap-2">
+              <a href="{{ url_for('pickup_event', cid=r.config['id']) }}" class="btn btn-sm btn-primary">
+                <i class="bi bi-calendar-check me-1"></i>Pickup History
+              </a>
+              <a href="{{ url_for('pickup_edit_event', cid=r.config['id']) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+              <form method="post" action="{{ url_for('pickup_unarchive', cid=r.config['id']) }}" class="d-inline">
+                <button class="btn btn-sm btn-outline-success">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Restore
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">No archived events.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Chevron toggle ─────────────────────────────────────────────────────────
+document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function(btn) {
+  const target = document.querySelector(btn.dataset.bsTarget);
+  if (!target) return;
+  target.addEventListener('show.bs.collapse', function() {
+    btn.querySelector('i').className = 'bi bi-chevron-up';
+  });
+  target.addEventListener('hide.bs.collapse', function() {
+    btn.querySelector('i').className = 'bi bi-chevron-down';
+  });
+});
+
+// ── Column sort ────────────────────────────────────────────────────────────
+document.querySelectorAll('th.sortable').forEach(function(th) {
+  th.addEventListener('click', function() {
+    const table = th.closest('table');
+    const tbody = table.querySelector('tbody');
+    const col   = th.dataset.col;
+    const icon  = th.querySelector('i');
+    const asc   = th.dataset.sortDir !== 'asc';
+    th.dataset.sortDir = asc ? 'asc' : 'desc';
+    table.querySelectorAll('th.sortable i').forEach(function(i) {
+      i.className = 'bi bi-arrow-down-up text-muted small';
+    });
+    icon.className = asc
+      ? 'bi bi-arrow-up text-primary small'
+      : 'bi bi-arrow-down text-primary small';
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      const va = a.dataset[col] || '', vb = b.dataset[col] || '';
+      if (va === vb) return 0;
+      if (va === '') return 1;
+      if (vb === '') return -1;
+      return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  });
+});
+
+// ── Quick respond ──────────────────────────────────────────────────────────
+function quickRespond(cid, action) {
+  const url = action === 'mark'
+    ? '/pickup/' + cid + '/quick-respond'
+    : '/pickup/' + cid + '/undo-respond';
+  fetch(url, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) return;
+      const cell = document.getElementById('respond-cell-' + cid);
+      if (!cell) return;
+      if (action === 'mark') {
+        const dateStr = data.date ? data.date.slice(5,7) + '/' + data.date.slice(8,10) + '/' + data.date.slice(2,4) : '';
+        cell.innerHTML =
+          '<span class="text-success fw-semibold me-1" title="Hotel responded">' +
+            '<i class="bi bi-check-circle-fill"></i>' +
+            '<span class="small ms-1 responded-date">' + dateStr + '</span>' +
+          '</span>' +
+          '<button class="btn btn-sm btn-link p-0 text-muted" title="Undo — remove responded mark" ' +
+                  'style="font-size:.75rem; vertical-align:middle;" ' +
+                  'onclick="quickRespond(' + cid + ', \'undo\')">' +
+            '<i class="bi bi-x-circle"></i>' +
+          '</button>';
+      } else {
+        cell.innerHTML =
+          '<button class="btn btn-sm btn-link p-0 text-muted" title="Mark hotel as responded" ' +
+                  'onclick="quickRespond(' + cid + ', \'mark\')">' +
+            '<i class="bi bi-check-circle" style="font-size:1.2rem;"></i>' +
+          '</button>';
+      }
+    })
+    .catch(() => { window.location.reload(); });
+}
+</script>
+{% endblock %}

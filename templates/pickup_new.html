@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Add Pickup — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/booking/{{ booking.BookingId }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Booking</a>
+  <h4 class="mt-1">Add Pickup Record</h4>
+  <p class="text-muted small">{{ booking.EventName }} &bull; {{ booking.Customer }}</p>
+</div>
+
+<div class="card" style="max-width:560px">
+  <div class="card-header">Pickup Details</div>
+  <div class="card-body">
+    <form method="post">
+      <div class="mb-3">
+        <label class="form-label">Brand / Hotel Name</label>
+        <input type="text" name="brand" class="form-control" value="{{ booking.Brand or '' }}">
+        <div class="form-text">Pre-filled from booking — update if different.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Actual Pickup (rooms sold)</label>
+        <input type="number" id="actual_pickup" name="actual_pickup" class="form-control" placeholder="e.g. 87" autofocus>
+        <div class="form-text">Enter the "Sold" total from the hotel pickup report.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Total Revenue</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="number" step="0.01" id="total_revenue" name="total_revenue" class="form-control" placeholder="e.g. 21663">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Avg Room Night Rate <span class="text-muted small">(Total Revenue ÷ Pickup)</span></label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="text" id="avg_rate" class="form-control" readonly placeholder="Calculated automatically" style="background:#f8f9fa">
+        </div>
+        <div class="form-text">This will update the Room Rate on the booking.</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Expected Commission
+          <span class="text-muted small">(Revenue × {{ '{:.0f}'.format(comm_pct * 100) }}% × {{ '{:.0f}'.format(split * 100) }}%)</span>
+        </label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="text" id="exp_commission" class="form-control" readonly placeholder="Calculated automatically" style="background:#f8f9fa">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Date Entered</label>
+        <input type="text" class="form-control" value="{{ now }}" readonly style="background:#f8f9fa">
+      </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save Pickup</button>
+        <a href="/booking/{{ booking.BookingId }}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const COMM_PCT = {{ comm_pct }};
+  const SPLIT    = {{ split }};
+  function calcAll() {
+    const pickup  = parseFloat(document.getElementById('actual_pickup').value);
+    const revenue = parseFloat(document.getElementById('total_revenue').value);
+    const avg     = document.getElementById('avg_rate');
+    const exp     = document.getElementById('exp_commission');
+    if (pickup > 0 && revenue > 0) {
+      avg.value = (revenue / pickup).toFixed(2);
+    } else {
+      avg.value = '';
+    }
+    if (revenue > 0 && COMM_PCT > 0) {
+      exp.value = (revenue * COMM_PCT * SPLIT).toFixed(2);
+    } else {
+      exp.value = '';
+    }
+  }
+  document.getElementById('actual_pickup').addEventListener('input', calcAll);
+  document.getElementById('total_revenue').addEventListener('input', calcAll);
+</script>
+{% endblock %}

@@ -1,0 +1,20 @@
+# Database files — do NOT commit the live database
+*.sqlite
+*.db
+cpainc.db
+
+# Outlook token (contains live credentials)
+outlook_token.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# macOS
+.DS_Store
+
+# Temp files
+/tmp/
+*.log

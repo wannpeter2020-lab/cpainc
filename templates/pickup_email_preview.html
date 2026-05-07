@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}
+  {% if email_type == 'hotel' %}Email Hotel{% else %}Email Client{% endif %}
+   — {{ config['event_name'] or config['organization'] }}
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-envelope me-2"></i>
+    {% if email_type == 'hotel' %}Hotel Pickup Request{% else %}Client Pickup Update{% endif %}
+    <span class="text-muted fw-normal fs-6 ms-2">{{ config['event_name'] or config['organization'] }}</span>
+  </h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<div class="card" style="max-width:760px">
+  <div class="card-header">
+    Review &amp; edit before sending
+    <span class="text-muted fw-normal small ms-2">Changes here only affect this send — nothing is saved</span>
+  </div>
+  <div class="card-body">
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold">To</label>
+      <input type="email" id="email-to" class="form-control"
+             value="{{ email.to }}"
+             placeholder="recipient@example.com">
+      {% if not email.to %}
+      <div class="form-text text-warning">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        No {% if email_type == 'hotel' %}hotel contact email{% else %}group contact email{% endif %} on file —
+        <a href="{{ url_for('pickup_edit', cid=config['id']) }}">add it in Edit Event</a>.
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold">CC</label>
+      <input type="text" id="email-cc" class="form-control"
+             value="{{ email.cc }}"
+             placeholder="cc@example.com, another@example.com">
+      {% if not email.cc %}
+      <div class="form-text text-muted">
+        Add CC addresses in <a href="{{ url_for('pickup_edit', cid=config['id']) }}">Edit Event → Additional Email Recipients</a>.
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Subject</label>
+      <input type="text" id="email-subject" class="form-control" value="{{ email.subject }}">
+    </div>
+
+    {% if email_type == 'client' and rooming_list %}
+    <div class="alert alert-info py-2 px-3 mb-3" style="font-size:.875rem">
+      <i class="bi bi-paperclip me-1"></i>
+      <strong>Rooming List:</strong>
+      <a href="{{ url_for('pickup_rooming_download_csv', cid=config['id'], rl_id=rooming_list['id']) }}"
+         class="ms-1" download>
+        Download {{ rooming_list['filename'] }} ({{ rooming_list['total_guests'] }} rooms)
+      </a>
+      <span class="text-muted ms-2">— download and attach to your email manually before sending.</span>
+    </div>
+    {% endif %}
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Body</label>
+      <textarea id="email-body" class="form-control font-monospace"
+                rows="22" style="font-size:.85rem; white-space:pre;">{{ email.body }}</textarea>
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+      {% if email_type == 'client' and email.html_body %}
+      <a href="{{ url_for('pickup_email_client_launch_outlook', cid=config['id']) }}"
+         class="btn btn-success">
+        <i class="bi bi-microsoft me-1"></i>Open in Outlook (with table)
+      </a>
+      {% endif %}
+      <button class="btn btn-primary" id="open-mail-btn">
+        <i class="bi bi-envelope-arrow-up me-1"></i>Open in Mail App (plain text)
+      </button>
+      {% if email_type == 'client' and email.html_body %}
+      <button class="btn btn-outline-secondary" id="copy-outlook-btn">
+        <i class="bi bi-clipboard me-1"></i>Copy for Outlook (with table)
+      </button>
+      {% endif %}
+      <button class="btn btn-outline-secondary" id="copy-body-btn">
+        <i class="bi bi-clipboard me-1"></i>Copy Body (plain text)
+      </button>
+    </div>
+    <div id="copy-feedback" class="text-success small mt-2" style="display:none">
+      <i class="bi bi-check-circle me-1"></i>Copied to clipboard
+    </div>
+
+    {# Hidden HTML body for Outlook clipboard copy #}
+    {% if email_type == 'client' and email.html_body %}
+    <div id="html-email-body" style="display:none">{{ email.html_body | safe }}</div>
+    {% endif %}
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const toEl      = document.getElementById('email-to');
+  const ccEl      = document.getElementById('email-cc');
+  const subjEl    = document.getElementById('email-subject');
+  const bodyEl    = document.getElementById('email-body');
+  const openBtn   = document.getElementById('open-mail-btn');
+  const copyBody  = document.getElementById('copy-body-btn');
+  const copyAll   = document.getElementById('copy-all-btn');
+  const feedback  = document.getElementById('copy-feedback');
+
+  function showFeedback() {
+    feedback.style.display = 'block';
+    setTimeout(() => { feedback.style.display = 'none'; }, 2000);
+  }
+
+  // Build mailto: from current field values and open it.
+  // For hotel emails, also silently log the send date.
+  openBtn.addEventListener('click', function () {
+    const to      = toEl.value.trim();
+    const cc      = ccEl ? ccEl.value.trim() : '';
+    const subject = subjEl.value.trim();
+    const body    = bodyEl.value;
+    const mailUrl = 'mailto:' + encodeURIComponent(to)
+                  + '?subject=' + encodeURIComponent(subject)
+                  + (cc ? '&cc=' + encodeURIComponent(cc) : '')
+                  + '&body='    + encodeURIComponent(body);
+
+    {% if email_type == 'hotel' %}
+    // Auto-log the email send before opening Outlook
+    fetch('{{ url_for("pickup_log_email_sent", cid=config["id"]) }}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': '' }
+    }).finally(function () {
+      window.location.href = mailUrl;
+    });
+    {% else %}
+    window.location.href = mailUrl;
+    {% endif %}
+  });
+
+  // Copy HTML body for Outlook (rich text with formatted table)
+  const copyOutlook = document.getElementById('copy-outlook-btn');
+  if (copyOutlook) {
+    copyOutlook.addEventListener('click', function () {
+      const htmlDiv = document.getElementById('html-email-body');
+      const htmlContent = htmlDiv ? htmlDiv.innerHTML : '';
+      const plainText = bodyEl.value;
+      try {
+        const htmlBlob  = new Blob([htmlContent], { type: 'text/html' });
+        const plainBlob = new Blob([plainText],   { type: 'text/plain' });
+        navigator.clipboard.write([
+          new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': plainBlob })
+        ]).then(showFeedback).catch(function () {
+          // Fallback: plain text copy
+          navigator.clipboard.writeText(plainText).then(showFeedback);
+        });
+      } catch (e) {
+        navigator.clipboard.writeText(plainText).then(showFeedback);
+      }
+    });
+  }
+
+  // Copy just the body
+  copyBody.addEventListener('click', function () {
+    navigator.clipboard.writeText(bodyEl.value).then(showFeedback);
+  });
+
+  // Copy formatted block: To / CC / Subject / Body
+  copyAll.addEventListener('click', function () {
+    const cc = ccEl ? ccEl.value.trim() : '';
+    const text = `To: ${toEl.value}` +
+                 (cc ? `\nCC: ${cc}` : '') +
+                 `\nSubject: ${subjEl.value}\n\n${bodyEl.value}`;
+    navigator.clipboard.writeText(text).then(showFeedback);
+  });
+})();
+</script>
+{% endblock %}

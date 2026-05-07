@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}Upload Rooming List — {{ config['event_name'] or config['organization'] }}{% endblock %}
+
+{% block styles %}
+<style>
+#drop-card { position: relative; }
+#drop-label {
+  display: block;
+  border: 2px dashed #6c757d;
+  border-radius: 8px;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  background: #f8f9fa;
+  transition: border-color .15s, background .15s;
+}
+#drop-label.drag-over { border-color: #0d6efd; background: #e8f0fe; }
+#drop-label.has-files { border-color: #198754; background: #f0faf3; }
+.file-row {
+  background: #f8f9fa; border: 1px solid #dee2e6;
+  border-radius: 6px; padding: .5rem .75rem;
+  display: flex; align-items: center; gap: .5rem;
+}
+.icon-pdf { color: #dc3545; }
+.icon-csv { color: #198754; }
+.icon-xls { color: #0d6efd; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-upload me-2"></i>Upload Rooming List(s)
+    <span class="text-muted fw-normal fs-6 ms-2">{{ config['event_name'] or config['organization'] }}</span>
+  </h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<!-- Tab switcher -->
+<ul class="nav nav-tabs mb-3" style="max-width:640px">
+  <li class="nav-item">
+    <a class="nav-link active" id="tab-upload" href="#" onclick="switchTab('upload');return false;">
+      <i class="bi bi-upload me-1"></i>Upload File
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" id="tab-manual" href="#" onclick="switchTab('manual');return false;">
+      <i class="bi bi-keyboard me-1"></i>Enter Manually
+    </a>
+  </li>
+</ul>
+
+<!-- Upload tab -->
+<div id="pane-upload">
+<div class="card" style="max-width:640px">
+  <div class="card-header">Select File(s)</div>
+  <div class="card-body" id="drop-card">
+
+    {# Drop zone label — clicking opens file browser #}
+    <label id="drop-label" for="file-input">
+      <div style="font-size:2.4rem;color:#6c757d" class="mb-2">
+        <i id="drop-icon" class="bi bi-file-earmark-arrow-up"></i>
+      </div>
+      <div id="drop-title" class="fw-semibold mb-1">Click to browse for file(s)</div>
+      <div id="drop-subtitle" class="text-muted small mb-2">or drag &amp; drop from Finder / Explorer</div>
+      <div class="text-muted small">PDF &nbsp;·&nbsp; CSV &nbsp;·&nbsp; XLS &nbsp;·&nbsp; XLSX</div>
+    </label>
+
+    <div class="alert alert-info py-2 px-3 mt-2 mb-0" style="font-size:.85rem">
+      <i class="bi bi-info-circle me-1"></i>
+      <strong>Outlook attachment?</strong> Save it to your Desktop or Downloads first, then click above to browse.
+    </div>
+
+    {# File list — shown after files are selected #}
+    <div id="file-list" class="mt-3" style="display:none"></div>
+
+    <div class="form-text mt-2 mb-3">
+      You can add multiple files (e.g. Attendees + Staff). Each is parsed separately and combined.
+    </div>
+
+    {# Form — file input is synced from JS array before submit #}
+    <form method="post" enctype="multipart/form-data"
+          action="{{ url_for('pickup_rooming_upload', cid=config['id']) }}"
+          id="upload-form">
+      <input type="file" id="file-input" name="rooming_pdf"
+             accept=".pdf,.csv,.xls,.xlsx" multiple
+             style="position:absolute;left:-9999px;opacity:0;width:1px;height:1px">
+      {# Label text inputs are injected here by JS before submit #}
+      <div id="label-inputs"></div>
+      <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+        <i class="bi bi-cloud-upload me-1"></i>Upload &amp; Parse
+        <span id="count-lbl"></span>
+      </button>
+    </form>
+
+  </div>
+</div>
+</div><!-- /pane-upload -->
+
+<!-- Manual entry tab -->
+<div id="pane-manual" style="display:none">
+<div class="card" style="max-width:640px">
+  <div class="card-header"><i class="bi bi-keyboard me-2"></i>Enter Room Counts Manually</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Use this when the PDF is image-based (scanned) and can't be parsed.
+      Enter the rooms on books for each night of the event.
+    </p>
+    <form method="post" action="{{ url_for('pickup_rooming_manual', cid=config['id']) }}">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Label / Source</label>
+        <input type="text" name="manual_label" class="form-control" style="max-width:300px"
+               placeholder="e.g. Ameristar pickup 4/27" value="">
+      </div>
+      <table class="table table-sm w-auto" id="manual-table">
+        <thead>
+          <tr><th>Date</th><th>Rooms on Books</th><th></th></tr>
+        </thead>
+        <tbody id="manual-body">
+          {% set block = config['contracted_block'] | fromjson %}
+          {% for d in block.keys() | sort %}
+          <tr>
+            <td><input type="date" name="manual_date" class="form-control form-control-sm" value="{{ d }}" required></td>
+            <td><input type="number" name="manual_rooms" class="form-control form-control-sm" min="0" placeholder="0"></td>
+            <td><button type="button" class="btn btn-sm btn-outline-danger rm-manual-row">✕</button></td>
+          </tr>
+          {% else %}
+          <tr>
+            <td><input type="date" name="manual_date" class="form-control form-control-sm"></td>
+            <td><input type="number" name="manual_rooms" class="form-control form-control-sm" min="0" placeholder="0"></td>
+            <td><button type="button" class="btn btn-sm btn-outline-danger rm-manual-row">✕</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" id="add-manual-row" class="btn btn-sm btn-outline-secondary mb-3">
+        <i class="bi bi-plus me-1"></i>Add Night
+      </button>
+      <div>
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-check-lg me-1"></i>Save &amp; Review
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+</div><!-- /pane-manual -->
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+
+  var card      = document.getElementById('drop-card');
+  var label     = document.getElementById('drop-label');
+  var fileInput = document.getElementById('file-input');
+  var fileList  = document.getElementById('file-list');
+  var labelInputs = document.getElementById('label-inputs');
+  var form      = document.getElementById('upload-form');
+  var submitBtn = document.getElementById('submit-btn');
+  var countLbl  = document.getElementById('count-lbl');
+  var dropIcon  = document.getElementById('drop-icon');
+  var dropTitle = document.getElementById('drop-title');
+  var dropSub   = document.getElementById('drop-subtitle');
+
+  var ALLOWED = ['pdf', 'csv', 'xls', 'xlsx'];
+  var files   = [];
+
+  function ext(name)  { return name.split('.').pop().toLowerCase(); }
+
+  function iconClass(name) {
+    var e = ext(name);
+    if (e === 'pdf') return 'bi bi-file-earmark-pdf icon-pdf';
+    if (e === 'csv') return 'bi bi-file-earmark-text icon-csv';
+    return 'bi bi-file-earmark-spreadsheet icon-xls';
+  }
+
+  function labelFromName(name) {
+    return name.replace(/\.(pdf|csv|xlsx?)$/i, '').replace(/[_\-]+/g, ' ').trim();
+  }
+
+  function render() {
+    fileList.innerHTML = '';
+
+    if (files.length === 0) {
+      fileList.style.display = 'none';
+      submitBtn.disabled = true;
+      countLbl.textContent = '';
+      label.classList.remove('has-files');
+      dropIcon.className    = 'bi bi-file-earmark-arrow-up';
+      dropTitle.textContent = 'Click to browse for file(s)';
+      dropSub.textContent   = 'or drag & drop from Finder / Explorer';
+      return;
+    }
+
+    label.classList.add('has-files');
+    dropIcon.className    = 'bi bi-plus-circle';
+    dropTitle.textContent = 'Drop another file or click to add more';
+    dropSub.textContent   = files.length + ' file' + (files.length > 1 ? 's' : '') + ' ready';
+
+    fileList.style.display = 'block';
+    var rows = document.createElement('div');
+    rows.className = 'd-flex flex-column gap-2';
+
+    files.forEach(function (f, idx) {
+      var row = document.createElement('div');
+      row.className = 'file-row';
+      row.innerHTML =
+        '<i class="' + iconClass(f.name) + ' flex-shrink-0" style="font-size:1.2rem"></i>' +
+        '<span class="text-truncate small" style="max-width:170px" title="' + f.name + '">' + f.name + '</span>' +
+        '<input type="text" class="form-control form-control-sm ms-1 lbl-input"' +
+        ' placeholder="Label" value="' + labelFromName(f.name) + '" style="max-width:160px">' +
+        '<button type="button" class="btn btn-sm btn-outline-danger ms-auto rm" data-i="' + idx + '">' +
+        '<i class="bi bi-x-lg"></i></button>';
+      rows.appendChild(row);
+    });
+    fileList.appendChild(rows);
+
+    var n = files.length;
+    countLbl.textContent = ' (' + n + ' file' + (n > 1 ? 's' : '') + ')';
+    submitBtn.disabled = false;
+  }
+
+  function add(newFiles) {
+    var added = false;
+    Array.from(newFiles).forEach(function (f) {
+      if (ALLOWED.indexOf(ext(f.name)) === -1) {
+        alert('"' + f.name + '" — unsupported type. Use PDF, CSV, XLS, or XLSX.');
+        return;
+      }
+      var dupe = files.some(function (x) { return x.name === f.name && x.size === f.size; });
+      if (!dupe) { files.push(f); added = true; }
+    });
+    if (added) render();
+  }
+
+  // Remove file row
+  fileList.addEventListener('click', function (e) {
+    var btn = e.target.closest('.rm');
+    if (!btn) return;
+    files.splice(parseInt(btn.getAttribute('data-i'), 10), 1);
+    render();
+  });
+
+  // Click to browse
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files.length) add(fileInput.files);
+    fileInput.value = '';
+  });
+
+  // On submit: sync JS files array → file input via DataTransfer, inject label inputs
+  form.addEventListener('submit', function (e) {
+    if (files.length === 0) { e.preventDefault(); return; }
+
+    // Sync files to the hidden input
+    var dt = new DataTransfer();
+    files.forEach(function (f) { dt.items.add(f); });
+    fileInput.files = dt.files;
+
+    // Inject label hidden inputs
+    labelInputs.innerHTML = '';
+    fileList.querySelectorAll('.lbl-input').forEach(function (inp) {
+      var hidden = document.createElement('input');
+      hidden.type = 'hidden';
+      hidden.name = 'list_label';
+      hidden.value = inp.value.trim() || inp.placeholder;
+      labelInputs.appendChild(hidden);
+    });
+  });
+
+  // Drag & drop — whole card is the target
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('drop',     function (e) { e.preventDefault(); });
+
+  card.addEventListener('dragover', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    label.classList.add('drag-over');
+  });
+
+  card.addEventListener('dragleave', function (e) {
+    if (!card.contains(e.relatedTarget)) label.classList.remove('drag-over');
+  });
+
+  card.addEventListener('drop', function (e) {
+    e.preventDefault(); e.stopPropagation();
+    label.classList.remove('drag-over');
+    if (e.dataTransfer && e.dataTransfer.files.length) add(e.dataTransfer.files);
+  });
+
+})();
+
+function switchTab(tab) {
+  document.getElementById('pane-upload').style.display = tab === 'upload' ? '' : 'none';
+  document.getElementById('pane-manual').style.display = tab === 'manual' ? '' : 'none';
+  document.getElementById('tab-upload').classList.toggle('active', tab === 'upload');
+  document.getElementById('tab-manual').classList.toggle('active', tab === 'manual');
+}
+
+document.getElementById('add-manual-row').addEventListener('click', function () {
+  var tbody = document.getElementById('manual-body');
+  var row = document.createElement('tr');
+  row.innerHTML =
+    '<td><input type="date" name="manual_date" class="form-control form-control-sm"></td>' +
+    '<td><input type="number" name="manual_rooms" class="form-control form-control-sm" min="0" placeholder="0"></td>' +
+    '<td><button type="button" class="btn btn-sm btn-outline-danger rm-manual-row">✕</button></td>';
+  tbody.appendChild(row);
+});
+
+document.getElementById('manual-body').addEventListener('click', function (e) {
+  if (e.target.classList.contains('rm-manual-row')) {
+    var rows = document.querySelectorAll('#manual-body tr');
+    if (rows.length > 1) e.target.closest('tr').remove();
+  }
+});
+</script>
+{% endblock %}

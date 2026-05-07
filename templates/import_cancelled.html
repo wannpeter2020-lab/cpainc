@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Import Cancelled Meetings — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Bookings</a>
+  <h4 class="mt-1">Import Cancelled Meetings</h4>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-header">Upload Cancelled Meetings Report</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Supports the standard Event Bookings Report format (.xls or .xlsx) exported with a Cancelled status filter.
+    </p>
+    <div class="alert alert-info py-2 small mb-3">
+      <i class="bi bi-info-circle me-1"></i>
+      <strong>How this import works:</strong>
+      <ul class="mb-0 mt-1">
+        <li>If the booking already exists and is <em>not</em> cancelled, its status will be updated to <strong>Cancelled</strong>.</li>
+        <li>If the booking does not exist, it will be added as a new Cancelled record.</li>
+        <li>Bookings already marked Cancelled will be skipped.</li>
+      </ul>
+    </div>
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Select File</label>
+        <input type="file" name="file" class="form-control" accept=".xls,.xlsx" required>
+        <div class="form-text">Accepted formats: .xls, .xlsx</div>
+      </div>
+      <button type="submit" class="btn btn-danger"><i class="bi bi-x-circle me-1"></i> Import Cancelled</button>
+      <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

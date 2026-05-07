@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Import Payments — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Bookings</a>
+  <h4 class="mt-1">Import Payments</h4>
+</div>
+
+<div class="card" style="max-width:600px">
+  <div class="card-header">Upload Year to Date Payments File</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Supports the standard <strong>Year to Date Payments</strong> report format (.xls, .xlsx, or .csv).<br>
+      Payments with the same Booking ID <em>and</em> payment date already in the system will be skipped automatically.
+    </p>
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Select File</label>
+        <input type="file" name="file" class="form-control" accept=".xls,.xlsx,.csv" required>
+        <div class="form-text">Accepted formats: .xls, .xlsx, .csv</div>
+      </div>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Import Payments</button>
+      <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

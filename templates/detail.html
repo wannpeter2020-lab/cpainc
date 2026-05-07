@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Booking {{ booking.BookingId }} — CPAinc{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Back to Bookings</a>
+</div>
+
+<!-- Header -->
+<div class="card shadow-sm mb-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+      <div>
+        <h4 class="mb-1">{{ booking.EventName or '(No Event Name)' }}</h4>
+        <div class="text-muted">{{ booking.AccountName }}</div>
+      </div>
+      <div class="text-end">
+        <div class="fs-5 fw-bold text-success">{{ booking.USDCommissionableAmount | fmtcurrency }}</div>
+        <div class="small text-muted">Commission</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+
+  <!-- Booking Details -->
+  <div class="col-md-6">
+    <div class="card shadow-sm h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-info-circle me-2"></i>Booking Details</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tbody>
+            <tr><th class="text-muted w-40">Booking ID</th><td>{{ booking.BookingId }}</td></tr>
+            <tr><th class="text-muted">Status</th><td>
+              {% if booking.BookingStatus == 'Definite' %}
+                <span class="badge bg-success">Definite</span>
+              {% elif booking.BookingStatus == 'Cancelled' %}
+                <span class="badge bg-danger">Cancelled</span>
+              {% else %}
+                <span class="badge bg-secondary">{{ booking.BookingStatus or '—' }}</span>
+              {% endif %}
+            </td></tr>
+            <tr><th class="text-muted">Booking Type</th><td>{{ booking.BookingType or '—' }}</td></tr>
+            <tr><th class="text-muted">Share Type</th><td>{{ booking.ShareType or '—' }}</td></tr>
+            <tr><th class="text-muted">Associate</th><td>{{ booking.BookingAssociate or '—' }}</td></tr>
+            <tr><th class="text-muted">Booked Date</th><td>{{ booking.BookedDate | fmtdate }}</td></tr>
+            <tr><th class="text-muted">Start Date</th><td>{{ booking.StartDate | fmtdate }}</td></tr>
+            <tr><th class="text-muted">End Date</th><td>{{ booking.EndDate | fmtdate }}</td></tr>
+            <tr><th class="text-muted">Addendum</th><td>{{ 'Yes' if booking.Addendum else 'No' }}</td></tr>
+            <tr><th class="text-muted">Advance</th><td>{{ booking.Advance or '—' }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hotel & Financials -->
+  <div class="col-md-6">
+    <div class="card shadow-sm mb-3">
+      <div class="card-header fw-semibold"><i class="bi bi-building me-2"></i>Hotel</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tbody>
+            <tr><th class="text-muted w-40">Hotel</th><td>{{ booking.Customer or '—' }}</td></tr>
+            <tr><th class="text-muted">Address</th><td>{{ booking.Address or '—' }}</td></tr>
+            <tr><th class="text-muted">City</th><td>{{ booking.City or '—' }}</td></tr>
+            <tr><th class="text-muted">State</th><td>{{ booking.State or '—' }}</td></tr>
+            <tr><th class="text-muted">Country</th><td>{{ booking.Country or '—' }}</td></tr>
+            <tr><th class="text-muted">Brand</th><td>{{ booking.Brand or '—' }}</td></tr>
+            <tr><th class="text-muted">Chain</th><td>{{ booking.Chain or '—' }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold"><i class="bi bi-currency-dollar me-2"></i>Financials</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tbody>
+            <tr><th class="text-muted w-40">Currency</th><td>{{ booking.Currency or 'USD' }}</td></tr>
+            <tr><th class="text-muted">Peak Rooms</th><td>{{ booking.PeakRooms | int if booking.PeakRooms else '—' }}</td></tr>
+            <tr><th class="text-muted">Total Nights</th><td>{{ booking.TotalRoomNights | int if booking.TotalRoomNights else '—' }}</td></tr>
+            <tr><th class="text-muted">Room Rate</th><td>{{ booking.RoomRate | fmtcurrency }}</td></tr>
+            <tr><th class="text-muted">Revenue</th><td>{{ booking.Revenue | fmtcurrency }}</td></tr>
+            <tr><th class="text-muted">Other Revenue</th><td>{{ booking.OtherRevenue | fmtcurrency }}</td></tr>
+            <tr><th class="text-muted">USD Revenue</th><td>{{ booking.USDRevenue | fmtcurrency }}</td></tr>
+            <tr><th class="text-muted">Commission %</th><td>{{ booking.CommissionPercent | fmtpct }}</td></tr>
+            <tr><th class="text-muted fw-bold">Commission $</th><td class="fw-bold text-success">{{ booking.USDCommissionableAmount | fmtcurrency }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment / Check Register -->
+  <div class="col-12">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-receipt me-2"></i>Payment Register
+        <span class="badge bg-secondary ms-2">{{ payments | length }}</span>
+      </div>
+      <div class="card-body p-0">
+        {% if payments %}
+        <div class="table-responsive">
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Check #</th>
+                <th>Date on Check</th>
+                <th>Final Payment</th>
+                <th>Entry Date</th>
+                <th>Deposit Date</th>
+                <th>Cancelled</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in payments %}
+              <tr class="{{ 'table-danger' if p.Cancelled else '' }}">
+                <td>{{ p.Check_ or '—' }}</td>
+                <td class="text-nowrap">{{ p.DateOnCheck | fmtdate }}</td>
+                <td class="fw-semibold">{{ p.FinalPayment | fmtcurrency }}</td>
+                <td class="text-nowrap small text-muted">{{ p.EntryDate | fmtdate }}</td>
+                <td class="text-nowrap small text-muted">{{ p.DepositDate | fmtdate }}</td>
+                <td>{% if p.Cancelled %}<span class="badge bg-danger">Yes</span>{% else %}—{% endif %}</td>
+                <td class="small">{{ p.SpecialNotes or '' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="text-muted p-3 mb-0">No payment records found.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Pickup -->
+  {% if pickup %}
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold"><i class="bi bi-graph-up me-2"></i>Pickup / Attrition</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead class="table-light">
+            <tr><th>Brand</th><th>Actual Pickup</th><th>Attrition %</th><th>Cut-off Date</th></tr>
+          </thead>
+          <tbody>
+            {% for p in pickup %}
+            <tr>
+              <td>{{ p.Brand or '—' }}</td>
+              <td>{{ p.ActualPickup or '—' }}</td>
+              <td>{{ p.AttritionPercentage | fmtpct if p.AttritionPercentage else '—' }}</td>
+              <td class="text-nowrap small">{{ p.CutOffDate | fmtdate }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Commission Splits -->
+  {% if comm_splits %}
+  <div class="col-md-6">
+    <div class="card shadow-sm">
+      <div class="card-header fw-semibold"><i class="bi bi-pie-chart me-2"></i>Commission Splits</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead class="table-light">
+            <tr><th>Brand</th><th>Split %</th></tr>
+          </thead>
+          <tbody>
+            {% for s in comm_splits %}
+            <tr>
+              <td>{{ s.Brand or '—' }}</td>
+              <td>{{ s.Percent | fmtpct }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

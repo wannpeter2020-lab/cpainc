@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Assistant — CPAinc{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-9">
+
+    <div class="card" style="height: calc(100vh - 140px); display: flex; flex-direction: column;">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-robot me-2"></i>CPAinc Assistant</span>
+        <div class="d-flex gap-2 align-items-center">
+          <small class="text-white-50">Powered by Claude &middot; has access to your bookings</small>
+          <button class="btn btn-sm btn-outline-light" onclick="clearChat()">Clear</button>
+        </div>
+      </div>
+
+      <!-- Message thread -->
+      <div id="chat-thread" style="flex:1; overflow-y:auto; padding:1.25rem; display:flex; flex-direction:column; gap:.75rem;">
+        <div class="d-flex gap-3">
+          <div class="flex-shrink-0 rounded-circle bg-primary d-flex align-items-center justify-content-center"
+               style="width:36px;height:36px;min-width:36px;">
+            <i class="bi bi-robot text-white"></i>
+          </div>
+          <div class="card border-0 bg-white shadow-sm" style="max-width:80%;">
+            <div class="card-body py-2 px-3">
+              Hi! I'm the CPAinc Assistant. I can help you with:<br>
+              <ul class="mb-0 mt-1">
+                <li>Answer questions about bookings, commissions, and payments</li>
+                <li>Look up pickup data and revenue figures</li>
+                <li>Find bookings by client, hotel, date range, or status</li>
+              </ul>
+              What can I help you with today?
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Input area -->
+      <div class="border-top p-3 bg-white">
+        <form id="chat-form" class="d-flex gap-2">
+          <textarea id="user-input" class="form-control" rows="2"
+                    placeholder="Ask anything… e.g. 'Which bookings are missing commission?' or 'Show me Kristin's bookings this year'"
+                    style="resize:none;"></textarea>
+          <button type="submit" class="btn btn-primary px-4" id="send-btn">
+            <i class="bi bi-send"></i>
+          </button>
+        </form>
+        <div class="text-muted" style="font-size:.75rem; margin-top:.4rem;">
+          Press <kbd>Enter</kbd> to send &middot; <kbd>Shift+Enter</kbd> for new line
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const thread = document.getElementById('chat-thread');
+const form   = document.getElementById('chat-form');
+const input  = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+let conversationHistory = [];
+
+function scrollBottom() {
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function addMessage(role, text) {
+  const isUser = role === 'user';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'd-flex gap-3' + (isUser ? ' flex-row-reverse' : '');
+
+  const avatar = document.createElement('div');
+  avatar.className = 'flex-shrink-0 rounded-circle d-flex align-items-center justify-content-center';
+  avatar.style = 'width:36px;height:36px;min-width:36px;background:' + (isUser ? '#1a3a5c' : '#e9ecef');
+  avatar.innerHTML = isUser
+    ? '<i class="bi bi-person text-white"></i>'
+    : '<i class="bi bi-robot text-secondary"></i>';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'card border-0 shadow-sm';
+  bubble.style = 'max-width:80%;' + (isUser ? 'background:#eaf0fb;' : 'background:#fff;');
+
+  const body = document.createElement('div');
+  body.className = 'card-body py-2 px-3';
+  body.style = 'white-space:pre-wrap; word-break:break-word;';
+  body.textContent = text;
+
+  bubble.appendChild(body);
+  wrapper.appendChild(avatar);
+  wrapper.appendChild(bubble);
+  thread.appendChild(wrapper);
+  scrollBottom();
+  return body;
+}
+
+function addTypingIndicator() {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'd-flex gap-3';
+  wrapper.id = 'typing-indicator';
+  wrapper.innerHTML = `
+    <div class="flex-shrink-0 rounded-circle d-flex align-items-center justify-content-center"
+         style="width:36px;height:36px;min-width:36px;background:#e9ecef;">
+      <i class="bi bi-robot text-secondary"></i>
+    </div>
+    <div class="card border-0 bg-white shadow-sm">
+      <div class="card-body py-2 px-3">
+        <span class="text-muted">Thinking</span>
+        <span class="ms-1">
+          <span class="spinner-grow spinner-grow-sm text-secondary" style="animation-delay:0ms"></span>
+          <span class="spinner-grow spinner-grow-sm text-secondary" style="animation-delay:150ms"></span>
+          <span class="spinner-grow spinner-grow-sm text-secondary" style="animation-delay:300ms"></span>
+        </span>
+      </div>
+    </div>`;
+  thread.appendChild(wrapper);
+  scrollBottom();
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById('typing-indicator');
+  if (el) el.remove();
+}
+
+function clearChat() {
+  conversationHistory = [];
+  thread.innerHTML = `
+    <div class="d-flex gap-3">
+      <div class="flex-shrink-0 rounded-circle bg-primary d-flex align-items-center justify-content-center"
+           style="width:36px;height:36px;min-width:36px;">
+        <i class="bi bi-robot text-white"></i>
+      </div>
+      <div class="card border-0 bg-white shadow-sm" style="max-width:80%;">
+        <div class="card-body py-2 px-3">
+          Chat cleared. How can I help you?
+        </div>
+      </div>
+    </div>`;
+}
+
+async function sendMessage(text) {
+  conversationHistory.push({ role: 'user', content: text });
+  addMessage('user', text);
+  addTypingIndicator();
+  sendBtn.disabled = true;
+
+  try {
+    const resp = await fetch('/assistant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: conversationHistory }),
+    });
+    const data = await resp.json();
+    removeTypingIndicator();
+
+    const reply = data.reply || '(No response)';
+    conversationHistory.push({ role: 'assistant', content: reply });
+    addMessage('assistant', reply);
+  } catch (err) {
+    removeTypingIndicator();
+    addMessage('assistant', 'Sorry, something went wrong. Please try again.');
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  input.style.height = 'auto';
+  sendMessage(text);
+});
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    form.dispatchEvent(new Event('submit'));
+  }
+});
+
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+});
+</script>
+{% endblock %}

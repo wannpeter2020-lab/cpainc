@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Import Payment Voucher — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Import Payment Voucher (PDF)</h4>
+  <a href="{{ url_for('import_payments') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-table me-1"></i>Switch to Spreadsheet Import
+  </a>
+</div>
+
+<div class="row">
+  <div class="col-md-7">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-upload me-2"></i>Upload Voucher PDF</div>
+      <div class="card-body">
+        <p class="text-muted mb-3">
+          Upload a <strong>ConferenceDirect Payment Voucher</strong> PDF. The system will automatically
+          extract the payment date, reference number, currency, USD amount, and all booking line items.
+          Duplicate payments are detected by reference number and skipped automatically.
+        </p>
+        <form method="post" enctype="multipart/form-data" id="upload-form">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Select PDF File(s)</label>
+            <input type="file" name="files" class="form-control" accept=".pdf" required id="file-input" multiple>
+            <div class="form-text">Hold <kbd>Cmd</kbd> (Mac) or <kbd>Ctrl</kbd> (Windows) to select multiple voucher PDFs at once.</div>
+          </div>
+          <button type="submit" class="btn btn-primary" id="submit-btn">
+            <i class="bi bi-cloud-upload me-1"></i>Import Voucher
+          </button>
+        </form>
+        <div id="loading-msg" class="text-muted mt-3" style="display:none;">
+          <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+          <span id="loading-text">Parsing PDF and importing payments…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>What Gets Imported</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Voucher Field</th><th>Stored As</th></tr></thead>
+          <tbody>
+            <tr><td>Reference</td><td>Check / Reference #</td></tr>
+            <tr><td>Date</td><td>Payment Date</td></tr>
+            <tr><td>Amount Paid in USD</td><td>Final Payment (USD)</td></tr>
+            <tr><td>Invoice Number</td><td>Booking ID lookup</td></tr>
+            <tr><td>Currency + Original Amt</td><td>Notes</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card mt-3">
+      <div class="card-header"><i class="bi bi-shield-check me-2"></i>Duplicate Protection</div>
+      <div class="card-body">
+        <p class="text-muted small mb-0">
+          A payment is skipped if a record already exists for the same booking with either:
+        </p>
+        <ul class="text-muted small mt-2 mb-0">
+          <li>The same <strong>Reference number</strong>, or</li>
+          <li>The same <strong>date + USD amount</strong></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('upload-form').addEventListener('submit', function() {
+  var n = document.getElementById('file-input').files.length;
+  document.getElementById('submit-btn').disabled = true;
+  document.getElementById('loading-msg').style.display = 'block';
+  document.getElementById('loading-text').textContent =
+    'Parsing ' + n + ' PDF' + (n !== 1 ? 's' : '') + ' and importing payments…';
+});
+</script>
+{% endblock %}

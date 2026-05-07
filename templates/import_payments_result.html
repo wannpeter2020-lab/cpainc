@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Payment Import Results — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <h4 class="mt-1">Payment Import Results</h4>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card text-center border-success">
+      <div class="card-body py-2">
+        <div class="section-label">Payments Imported</div>
+        <div class="fs-3 fw-bold text-success">{{ added }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="section-label">Duplicates Skipped</div>
+        <div class="fs-3 fw-bold text-muted">{{ skipped }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center {% if new_bookings %}border-warning{% endif %}">
+      <div class="card-body py-2">
+        <div class="section-label">New Bookings Created</div>
+        <div class="fs-3 fw-bold {% if new_bookings %}text-warning{% else %}text-muted{% endif %}">{{ new_bookings|length }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if new_bookings %}
+<div class="card mb-4 border-warning">
+  <div class="card-header" style="background:#fff3cd;color:#856404">
+    <i class="bi bi-exclamation-triangle"></i>
+    <strong>Action Required — New Bookings Created</strong>
+    <span class="fw-normal ms-2">These Booking IDs were not found in the database. Records have been created but are incomplete — please review and fill in missing details.</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>Booking ID</th>
+          <th>Account</th>
+          <th>Event Name</th>
+          <th>Hotel</th>
+          <th class="text-end">Payment Amount</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in new_bookings %}
+        <tr style="background:#fffdf0">
+          <td><code>{{ b.booking_id }}</code></td>
+          <td>{{ b.account or '—' }}</td>
+          <td>{{ b.event or '—' }}</td>
+          <td>{{ b.hotel or '—' }}</td>
+          <td class="text-end">{% if b.amount %}${{ '{:,.2f}'.format(b.amount|float) }}{% else %}—{% endif %}</td>
+          <td>
+            <a href="/booking/{{ b.booking_id }}/edit" class="btn btn-sm btn-warning">
+              <i class="bi bi-pencil"></i> Complete Record
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="d-flex gap-2">
+  <a href="/import/payments" class="btn btn-primary"><i class="bi bi-upload"></i> Import Another File</a>
+  <a href="/" class="btn btn-outline-secondary">Back to Bookings</a>
+</div>
+{% endblock %}

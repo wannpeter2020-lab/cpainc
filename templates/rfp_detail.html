@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}{{ rfp['event_name'] or rfp['client_org'] }} — RFP{% endblock %}
+{% block content %}
+
+{% set st = statuses.get(rfp['status'], ('secondary', rfp['status'] or 'Unknown')) %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 px-3 py-2 rounded"
+     style="position:sticky;top:60px;z-index:10;background:#1a3a5c;color:#fff;">
+  <div>
+    <a href="{{ url_for('rfp_dashboard') }}" class="text-decoration-none small" style="color:#aed6f1">
+      <i class="bi bi-arrow-left"></i> RFP Tracking
+    </a>
+    <h4 class="mb-0 mt-1 text-white">{{ rfp['event_name'] or rfp['client_org'] }}</h4>
+    <span class="small" style="color:#aed6f1">{{ rfp['client_org'] }}</span>
+  </div>
+  <div class="d-flex gap-2">
+    <span class="badge bg-{{ st[0] }} align-self-center fs-6">{{ st[1] }}</span>
+    <a href="{{ url_for('rfp_edit', rid=rfp['id']) }}" class="btn btn-light btn-sm">
+      <i class="bi bi-pencil"></i> Edit
+    </a>
+    <form method="post" action="{{ url_for('rfp_archive', rid=rfp['id']) }}"
+          onsubmit="return confirm('Archive this RFP?')">
+      <button class="btn btn-sm btn-outline-light"><i class="bi bi-archive"></i> Archive</button>
+    </form>
+  </div>
+</div>
+
+<!-- RFP Details -->
+<div class="card mb-4">
+  <div class="card-header">RFP Details</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="section-label">Client</div>
+        <div>{{ rfp['client_org'] }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Event</div>
+        <div>{{ rfp['event_name'] or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">RFP Reference</div>
+        <div>{{ rfp['rfp_name'] or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Status</div>
+        <div><span class="badge bg-{{ st[0] }}">{{ st[1] }}</span></div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Start Date</div>
+        <div>{{ rfp['start_date'] | us_date if rfp['start_date'] else '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">End Date</div>
+        <div>{{ rfp['end_date'] | us_date if rfp['end_date'] else '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Alt. Dates</div>
+        <div>
+          {% if rfp['alt_start_date'] %}
+          {{ rfp['alt_start_date'] | us_date }} – {{ rfp['alt_end_date'] | us_date if rfp['alt_end_date'] else '?' }}
+          {% else %}—{% endif %}
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Peak Rooms</div>
+        <div>{{ rfp['peak_rooms'] or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Total Room Nights</div>
+        <div>{{ rfp['total_room_nights'] or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Attendees</div>
+        <div>{{ rfp['total_attendees'] or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">F&B Budget</div>
+        <div>{% if rfp['f_and_b_budget'] %}${{ '{:,.0f}'.format(rfp['f_and_b_budget']|float) }}{% else %}—{% endif %}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Response Due</div>
+        <div>{{ rfp['response_due_date'] | us_date if rfp['response_due_date'] else '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Decision Due</div>
+        <div>{{ rfp['decision_due_date'] | us_date if rfp['decision_due_date'] else '—' }}</div>
+      </div>
+      {% if rfp['notes'] %}
+      <div class="col-12">
+        <div class="section-label">Notes</div>
+        <div class="small" style="white-space:pre-wrap">{{ rfp['notes'] }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- RFP Document Upload -->
+    <div class="mt-3 pt-3 border-top d-flex gap-2 align-items-center">
+      <span class="text-muted small fw-semibold">RFP Document:</span>
+      {% if rfp['rfp_filename'] %}
+      <a href="{{ url_for('rfp_document_download', rid=rfp['id']) }}" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-download me-1"></i>{{ rfp['rfp_filename'] }}
+      </a>
+      {% else %}
+      <span class="text-muted small">No document uploaded</span>
+      {% endif %}
+      <form method="post" action="{{ url_for('rfp_upload_document', rid=rfp['id']) }}"
+            enctype="multipart/form-data" class="d-inline">
+        <label class="btn btn-sm btn-outline-secondary mb-0">
+          <i class="bi bi-upload me-1"></i>{% if rfp['rfp_filename'] %}Replace{% else %}Upload{% endif %}
+          <input type="file" name="rfp_file" class="d-none" onchange="this.closest('form').submit()">
+        </label>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Hotels -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-building me-2"></i>Hotels
+      <span class="badge bg-secondary ms-1">{{ hotels|length }}</span>
+    </span>
+    <a href="{{ url_for('rfp_hotel_add', rid=rfp['id']) }}" class="btn btn-sm btn-light">
+      <i class="bi bi-plus me-1"></i>Add Hotel
+    </a>
+  </div>
+  {% if hotels %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Hotel</th>
+          <th>Location</th>
+          <th>Contact</th>
+          <th class="text-end">Rate</th>
+          <th class="text-center">Comm %</th>
+          <th>Status</th>
+          <th>Proposal</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in hotels %}
+        <tr {% if h['status'] == 'selected' %}class="table-success"{% endif %}>
+          <td class="fw-semibold">
+            {{ h['hotel_name'] }}
+            {% if h['brand'] %}<div class="text-muted small">{{ h['brand'] }}</div>{% endif %}
+          </td>
+          <td class="small">{{ h['city'] or '' }}{% if h['city'] and h['state'] %}, {% endif %}{{ h['state'] or '' }}</td>
+          <td class="small">
+            {% if h['contact_name'] %}
+            {{ h['contact_name'] }}<br>
+            {% if h['contact_email'] %}<a href="mailto:{{ h['contact_email'] }}" class="text-decoration-none">{{ h['contact_email'] }}</a>{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-end small">{% if h['proposed_rate'] %}${{ '{:,.2f}'.format(h['proposed_rate']|float) }}{% else %}—{% endif %}</td>
+          <td class="text-center small">{% if h['commission_pct'] %}{{ '{:.1f}'.format(h['commission_pct']|float) }}%{% else %}—{% endif %}</td>
+          <td>
+            {% if h['status'] == 'selected' %}
+            <span class="badge bg-success">Selected</span>
+            {% elif h['status'] == 'declined' %}
+            <span class="badge bg-danger">Declined</span>
+            {% else %}
+            <span class="badge bg-secondary">Pending</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if h['proposal_data'] %}
+            <a href="{{ url_for('rfp_hotel_proposal_download', rid=rfp['id'], hid=h['id']) }}"
+               class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-download"></i>
+            </a>
+            {% else %}
+            <form method="post" action="{{ url_for('rfp_hotel_upload_proposal', rid=rfp['id'], hid=h['id']) }}"
+                  enctype="multipart/form-data" class="d-inline">
+              <label class="btn btn-sm btn-outline-secondary mb-0">
+                <i class="bi bi-upload"></i>
+                <input type="file" name="proposal_file" class="d-none" onchange="this.closest('form').submit()">
+              </label>
+            </form>
+            {% endif %}
+          </td>
+          <td class="text-end text-nowrap">
+            {% if h['status'] != 'selected' %}
+            <form method="post" action="{{ url_for('rfp_hotel_select', rid=rfp['id'], hid=h['id']) }}" class="d-inline">
+              <button class="btn btn-sm btn-success" title="Select this hotel">
+                <i class="bi bi-check-lg"></i>
+              </button>
+            </form>
+            {% endif %}
+            <a href="{{ url_for('rfp_hotel_edit', rid=rfp['id'], hid=h['id']) }}"
+               class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <form method="post" action="{{ url_for('rfp_hotel_delete', rid=rfp['id'], hid=h['id']) }}"
+                  class="d-inline" onsubmit="return confirm('Remove {{ h['hotel_name'] }}?')">
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted small">No hotels added yet.</div>
+  {% endif %}
+</div>
+
+<!-- Notes -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-sticky me-2"></i>Notes</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('rfp_note_add', rid=rfp['id']) }}" class="d-flex gap-2 mb-3">
+      <textarea name="note_text" class="form-control form-control-sm" rows="2"
+                placeholder="Add a note…" style="resize:none"></textarea>
+      <div class="d-flex flex-column gap-1">
+        <select name="note_type" class="form-select form-select-sm">
+          <option value="internal">Internal</option>
+          <option value="client">Client</option>
+          <option value="hotel">Hotel</option>
+        </select>
+        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus"></i> Add</button>
+      </div>
+    </form>
+    {% if notes %}
+    <ul class="list-group list-group-flush">
+      {% for n in notes %}
+      <li class="list-group-item d-flex justify-content-between align-items-start">
+        <div>
+          <span class="badge {% if n['note_type'] == 'client' %}bg-info{% elif n['note_type'] == 'hotel' %}bg-warning text-dark{% else %}bg-secondary{% endif %} me-2 small">{{ n['note_type'] }}</span>
+          <span class="small text-muted me-2">{{ n['note_date'] | us_date }}</span>
+          <span>{{ n['note_text'] }}</span>
+        </div>
+        <form method="post" action="{{ url_for('rfp_note_delete', rid=rfp['id'], nid=n['id']) }}" class="d-inline">
+          <button class="btn btn-sm btn-outline-danger py-0 px-1"><i class="bi bi-x"></i></button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted small mb-0">No notes yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

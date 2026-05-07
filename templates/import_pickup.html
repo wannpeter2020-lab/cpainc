@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Import Housing History Reports — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Bookings</a>
+  <h4 class="mt-1">Import Housing History Reports</h4>
+</div>
+
+<div class="card" style="max-width:640px">
+  <div class="card-header">Upload Housing History Report Files</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Supports the <strong>TeamHouse Post Event History Report</strong> format (.xlsx).<br>
+      You can select multiple files at once — hold <kbd>Cmd</kbd> (Mac) to select more than one.<br>
+      Existing pickup records for a booking will be <strong>updated</strong>; new ones will be created.
+    </p>
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Select File(s)</label>
+        <input type="file" name="files" class="form-control" accept=".xlsx,.xls" multiple required>
+        <div class="form-text">Accepted format: .xlsx — the standard TeamHouse Housing History Report</div>
+      </div>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Import Housing History</button>
+      <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

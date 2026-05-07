@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Upload Contract Template — CPAinc{% endblock %}
+{% block content %}
+
+<div class="mb-2">
+  <a href="{{ url_for('contract_templates') }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Templates
+  </a>
+</div>
+
+<div class="d-flex align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-upload me-2 text-primary"></i>Upload Contract Template</h4>
+</div>
+
+<div class="row justify-content-center">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header fw-semibold">Template Details</div>
+      <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Hotel Chain <span class="text-danger">*</span></label>
+            <select class="form-select mb-2" id="chainSelect" onchange="syncChain(this)">
+              <option value="">— Select or type below —</option>
+              <option value="Hilton">Hilton</option>
+              <option value="Marriott">Marriott</option>
+              <option value="Hyatt">Hyatt</option>
+              <option value="Omni">Omni</option>
+              <option value="IHG">IHG</option>
+              <option value="Wyndham">Wyndham</option>
+              <option value="Independent">Independent</option>
+            </select>
+            <input type="text" name="chain" id="chainInput" class="form-control"
+                   placeholder="Or type a chain name…" required>
+            <div class="form-text">Chain name used to group templates.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Template Name <span class="text-danger">*</span></label>
+            <input type="text" name="template_name" class="form-control"
+                   placeholder="e.g. Hilton Standard 2025" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description</label>
+            <textarea name="description" class="form-control" rows="2"
+                      placeholder="Optional notes — intended use, version, special clauses…"></textarea>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Template File <span class="text-danger">*</span></label>
+            <input type="file" name="template_file" class="form-control"
+                   accept=".docx,.docm,.doc" required>
+            <div class="form-text">
+              <i class="bi bi-info-circle me-1"></i>
+              Accepts <code>.docx</code>, <code>.docm</code>.
+              Merge fields and section headings are extracted automatically.
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-upload me-1"></i>Upload &amp; Analyze
+            </button>
+            <a href="{{ url_for('contract_templates') }}" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function syncChain(sel) {
+  if (sel.value) {
+    document.getElementById('chainInput').value = sel.value;
+  }
+}
+</script>
+
+{% endblock %}

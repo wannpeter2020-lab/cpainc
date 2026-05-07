@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="mb-0">Dashboard — {{ now.year }} &mdash; {{ title_suffix }}</h4>
+  <div class="btn-group">
+    <a href="/dashboard?who=kristin"
+       class="btn btn-sm {% if who == 'kristin' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+      <i class="bi bi-person-circle me-1"></i>Kristin House
+    </a>
+    <a href="/dashboard?who=team"
+       class="btn btn-sm {% if who == 'team' %}btn-primary{% else %}btn-outline-primary{% endif %}">
+      <i class="bi bi-people me-1"></i>Team Associates
+    </a>
+  </div>
+</div>
+
+<!-- Stat Cards -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-4">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="rounded-circle d-flex align-items-center justify-content-center"
+             style="width:52px;height:52px;background:#e6f4ea;flex-shrink:0">
+          <i class="bi bi-cash-stack fs-4" style="color:#198754"></i>
+        </div>
+        <div>
+          <div class="text-muted small">Total Paid YTD</div>
+          <div class="fw-bold fs-4" style="color:#198754">${{ '{:,.2f}'.format(total_paid) }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="rounded-circle d-flex align-items-center justify-content-center"
+             style="width:52px;height:52px;background:#fde8e8;flex-shrink:0">
+          <i class="bi bi-alarm fs-4" style="color:#dc3545"></i>
+        </div>
+        <div>
+          <div class="text-muted small">Meetings Next 30 Days</div>
+          <div class="fw-bold fs-4">{{ meetings_next30 }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-4">
+    <div class="card h-100">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="rounded-circle d-flex align-items-center justify-content-center"
+             style="width:52px;height:52px;background:#fff3cd;flex-shrink:0">
+          <i class="bi bi-exclamation-triangle fs-4" style="color:#fd7e14"></i>
+        </div>
+        <div>
+          <div class="text-muted small">Completed, Unpaid</div>
+          <div class="fw-bold fs-4">{{ missing_commission_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pie Chart + Summary Table -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header">Commission by Status — {{ now.year }}</div>
+      <div class="card-body d-flex align-items-center justify-content-center">
+        <canvas id="pieChart" style="max-height:320px"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header">Summary by Category</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th class="text-end"># Bookings</th>
+              <th class="text-end">Revenue</th>
+              <th class="text-end">Amount</th>
+              <th class="text-end text-muted small">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if who == 'team' %}
+              {% for i in [1, 5] %}
+              {% set c = cats[i] %}
+              <tr>
+                <td>
+                  <span class="badge rounded-pill me-2" style="background:{{ c.color }}">&nbsp;</span>
+                  {{ c.label }}
+                </td>
+                <td class="text-end">{{ c.count }}</td>
+                <td class="text-end">${{ '{:,.0f}'.format(c.revenue) }}</td>
+                <td class="text-end fw-bold {% if i == 1 %}text-success{% endif %}">
+                  ${{ '{:,.2f}'.format(c.value) }}
+                </td>
+                <td class="text-end text-muted small">
+                  {% if i == 1 %}Actual paid{% endif %}
+                  {% if i == 5 %}Est. commission{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              {% for i in [1,2,3,4,5] %}
+              {% set c = cats[i] %}
+              <tr>
+                <td>
+                  <span class="badge rounded-pill me-2" style="background:{{ c.color }}">&nbsp;</span>
+                  {{ c.label }}
+                </td>
+                <td class="text-end">{{ c.count }}</td>
+                <td class="text-end">${{ '{:,.0f}'.format(c.revenue) }}</td>
+                <td class="text-end fw-bold
+                  {% if i == 1 %}text-success
+                  {% elif i == 2 %}" style="color:#20c997
+                  {% elif i == 3 %}text-warning
+                  {% elif i == 4 %}text-danger
+                  {% endif %}">
+                  ${{ '{:,.2f}'.format(c.value) }}
+                </td>
+                <td class="text-end text-muted small">
+                  {% if i == 1 %}Actual paid{% endif %}
+                  {% if i == 2 %}Incentive paid{% endif %}
+                  {% if i == 3 %}Actual commission{% endif %}
+                  {% if i == 4 %}Est. commission{% endif %}
+                  {% if i == 5 %}Est. commission{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% endif %}
+          </tbody>
+          <tfoot class="fw-bold">
+            <tr style="border-top:2px solid #dee2e6">
+              <td>Total</td>
+              {% if who == 'team' %}
+              <td class="text-end">{{ cats[1].count + cats[5].count }}</td>
+              <td class="text-end">${{ '{:,.0f}'.format(cats[1].revenue + cats[5].revenue) }}</td>
+              {% else %}
+              <td class="text-end">{{ cats[1].count + cats[2].count + cats[3].count + cats[4].count + cats[5].count }}</td>
+              <td class="text-end">${{ '{:,.0f}'.format(cats[1].revenue + cats[2].revenue + cats[3].revenue + cats[4].revenue + cats[5].revenue) }}</td>
+              {% endif %}
+              <td class="text-end">${{ '{:,.2f}'.format(total_commission) }}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-body pt-2 pb-2">
+        <div class="d-flex gap-2">
+          <a href="/reports/commission?who=kristin" class="btn btn-sm btn-warning"><i class="bi bi-exclamation-circle me-1"></i>Kristin — Missing Commission</a>
+          <a href="/reports/commission?who=team" class="btn btn-sm btn-outline-warning"><i class="bi bi-exclamation-circle me-1"></i>Team — Missing Commission</a>
+          <a href="/reports/payments" class="btn btn-sm btn-success"><i class="bi bi-cash-stack me-1"></i>Payment Report</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Upcoming Meetings -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Upcoming Meetings</span>
+    <a href="/" class="btn btn-sm btn-outline-light">All Bookings</a>
+  </div>
+  <div class="table-responsive" style="max-height:320px;overflow-y:auto;">
+    <table class="table table-hover table-sm mb-0 align-middle">
+      <thead style="position:sticky;top:0;z-index:1">
+        <tr>
+          <th>ID</th>
+          <th>Event</th>
+          <th>Hotel</th>
+          <th>Account</th>
+          <th style="white-space:nowrap">Start Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in upcoming %}
+        <tr>
+          <td><a href="/booking/{{ u['BookingId'] }}"><code>{{ u['BookingId'] }}</code></a></td>
+          <td>{{ u['EventName'] or '—' }}</td>
+          <td>{{ u['Customer'] or '—' }}</td>
+          <td>{{ u['AccountName'] or '—' }}</td>
+          <td style="white-space:nowrap">{{ u['StartDate'] | us_date if u['StartDate'] else '—' }}</td>
+          <td>
+            {% set s = u['BookingStatus'] or '' %}
+            <span class="badge rounded-pill
+              {% if 'Definite' in s %}bg-success
+              {% elif 'Tentative' in s or 'Prospect' in s %}bg-warning text-dark
+              {% elif 'Cancel' in s %}bg-danger
+              {% else %}bg-secondary{% endif %}">{{ s }}</span>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted py-3">No upcoming meetings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  {% if who == 'team' %}
+  var chartLabels = [{{ cats[1].label | tojson }}, {{ cats[5].label | tojson }}];
+  var chartData   = [{{ cats[1].value | round(2) }}, {{ cats[5].value | round(2) }}];
+  var chartColors = [{{ cats[1].color | tojson }}, {{ cats[5].color | tojson }}];
+  {% else %}
+  var chartLabels = [{{ cats[1].label | tojson }}, {{ cats[2].label | tojson }}, {{ cats[3].label | tojson }}, {{ cats[4].label | tojson }}, {{ cats[5].label | tojson }}];
+  var chartData   = [{{ cats[1].value | round(2) }}, {{ cats[2].value | round(2) }}, {{ cats[3].value | round(2) }}, {{ cats[4].value | round(2) }}, {{ cats[5].value | round(2) }}];
+  var chartColors = [{{ cats[1].color | tojson }}, {{ cats[2].color | tojson }}, {{ cats[3].color | tojson }}, {{ cats[4].color | tojson }}, {{ cats[5].color | tojson }}];
+  {% endif %}
+  new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: {
+      labels: chartLabels,
+      datasets: [{
+        data: chartData,
+        backgroundColor: chartColors,
+        borderWidth: 2,
+        borderColor: '#fff'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { padding: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const val = ctx.parsed;
+              const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+              const pct = total > 0 ? (val/total*100).toFixed(1) : 0;
+              return ' $' + val.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' (' + pct + '%)';
+            }
+          }
+        }
+      }
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Outlook Calendar — CPAinc{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Outlook Calendar</h4>
+  <div class="d-flex gap-2">
+    <a href="/outlook/inbox"  class="btn btn-outline-secondary btn-sm"><i class="bi bi-envelope me-1"></i> Inbox</a>
+    <a href="/outlook/status" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear me-1"></i> Connection</a>
+  </div>
+</div>
+
+{% if events %}
+<div class="card">
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Date &amp; Time</th>
+          <th>Event</th>
+          <th>Location</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ev in events %}
+        {% set start = ev.get('start', {}).get('dateTime', '')[:16].replace('T', ' ') %}
+        {% set end   = ev.get('end',   {}).get('dateTime', '')[:16].replace('T', ' ') %}
+        {% set loc   = ev.get('location', {}).get('displayName', '') if ev.get('location') else '' %}
+        <tr>
+          <td class="text-nowrap">
+            <span class="fw-semibold">{{ start[:10] | us_date if start else '—' }}</span><br>
+            <small class="text-muted">{{ start[11:] if start[11:] else '' }}{% if end[11:] %} – {{ end[11:] }}{% endif %}</small>
+          </td>
+          <td>
+            {{ ev.get('subject', '') }}
+            {% if ev.get('bodyPreview') %}
+            <div class="text-muted small">{{ ev.bodyPreview[:100] }}</div>
+            {% endif %}
+          </td>
+          <td class="text-muted small">{{ loc }}</td>
+          <td>
+            {% if ev.get('webLink') %}
+            <a href="{{ ev.webLink }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-box-arrow-up-right"></i>
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card"><div class="card-body text-muted text-center py-5">
+  <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
+  No upcoming events in the next 60 days.
+</div></div>
+{% endif %}
+{% endblock %}

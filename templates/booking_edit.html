@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Edit Booking — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/booking/{{ booking.BookingId }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Booking</a>
+  <h4 class="mt-1">Edit Booking <code>{{ booking.BookingId }}</code></h4>
+</div>
+<form method="post">
+  <div class="card mb-4">
+    <div class="card-header">Booking Info</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">Booking Associate</label>
+          <input type="text" name="BookingAssociate" class="form-control" value="{{ booking.BookingAssociate or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Booking Status</label>
+          <select name="BookingStatus" class="form-select">
+            {% for s in ['Definite','Cancelled'] %}
+              <option {% if booking.BookingStatus == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Booking Type</label>
+          <select name="BookingType" class="form-select">
+            {% for t in ['Hotel','Other'] %}
+              <option {% if booking.BookingType == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Addendum</label>
+          <select name="Addendum" class="form-select">
+            <option value="N" {% if booking.Addendum == 'N' %}selected{% endif %}>N</option>
+            <option value="Y" {% if booking.Addendum == 'Y' %}selected{% endif %}>Y</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Booking Name <span class="text-muted small">(if different from Event Name)</span></label>
+          <input type="text" name="BookingName" class="form-control" value="{{ booking.BookingName or '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Event Name</label>
+          <input type="text" name="EventName" class="form-control" value="{{ booking.EventName or '' }}">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Account Name</label>
+          <input type="text" name="AccountName" class="form-control" value="{{ booking.AccountName or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Booked Date</label>
+          <input type="date" name="BookedDate" class="form-control" value="{{ (booking.BookedDate or '')[:10] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Start Date</label>
+          <input type="date" name="StartDate" class="form-control" value="{{ (booking.StartDate or '')[:10] }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">End Date</label>
+          <input type="date" name="EndDate" class="form-control" value="{{ (booking.EndDate or '')[:10] }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">Hotel / Property</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Hotel Name (Customer)</label>
+          <input type="text" name="Customer" class="form-control" value="{{ booking.Customer or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Brand</label>
+          <input type="text" name="Brand" class="form-control" value="{{ booking.Brand or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Chain</label>
+          <input type="text" name="Chain" class="form-control" value="{{ booking.Chain or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Address</label>
+          <input type="text" name="Address" class="form-control" value="{{ booking.Address or '' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">City</label>
+          <input type="text" name="City" class="form-control" value="{{ booking.City or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">State</label>
+          <input type="text" name="State" class="form-control" value="{{ booking.State or '' }}" maxlength="2">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Country</label>
+          <input type="text" name="Country" class="form-control" value="{{ booking.Country or '' }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header">Financials</div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-2">
+          <label class="form-label">Peak Rooms</label>
+          <input type="number" name="PeakRooms" class="form-control" value="{{ booking.PeakRooms or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Total Room Nights</label>
+          <input type="number" name="TotalRoomNights" class="form-control" value="{{ booking.TotalRoomNights or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Room Rate</label>
+          <input type="number" step="0.01" name="RoomRate" class="form-control" value="{{ booking.RoomRate or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Contracted Amount</label>
+          <input type="number" step="0.01" name="ContractedAmount" class="form-control" value="{{ booking.ContractedAmount or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Revenue</label>
+          <input type="number" step="0.01" name="Revenue" class="form-control" value="{{ booking.Revenue or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Other Revenue</label>
+          <input type="number" step="0.01" name="OtherRevenue" class="form-control" value="{{ booking.OtherRevenue or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Currency</label>
+          <input type="text" name="Currency" class="form-control" value="{{ booking.Currency or 'USD' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Exchange Rate</label>
+          <input type="number" step="0.0001" name="ExchangeRate" class="form-control" value="{{ booking.ExchangeRate or '1' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">USD Rate</label>
+          <input type="number" step="0.01" name="USDRate" class="form-control" value="{{ booking.USDRate or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">USD Revenue</label>
+          <input type="number" step="0.01" name="USDRevenue" class="form-control" value="{{ booking.USDRevenue or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Commission %</label>
+          <input type="number" step="0.001" name="CommissionPercent" class="form-control" value="{{ booking.CommissionPercent or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">USD Commissionable Amt</label>
+          <input type="number" step="0.01" name="USDCommissionableAmount" class="form-control" value="{{ booking.USDCommissionableAmount or '' }}">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Advance</label>
+          <select name="Advance" class="form-select">
+            <option value="N" {% if booking.Advance in ('N','n') %}selected{% endif %}>N</option>
+            <option value="Y" {% if booking.Advance in ('Y','y') %}selected{% endif %}>Y</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Share Type</label>
+          <input type="text" name="ShareType" class="form-control" value="{{ booking.ShareType or '' }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> Save Changes</button>
+    <a href="/booking/{{ booking.BookingId }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+{% endblock %}

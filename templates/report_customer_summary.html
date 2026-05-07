@@ -1,0 +1,672 @@
+{% extends "base.html" %}
+{% block title %}Customer Summary Report{% endblock %}
+{% block content %}
+
+{%- set ns = namespace(cq='') -%}
+{%- for c in selected_customers -%}
+  {%- set ns.cq = ns.cq ~ 'customer=' ~ (c | urlencode) ~ '&' -%}
+{%- endfor -%}
+{%- set tm_param = ('team_member=' ~ team_member|urlencode ~ '&') if team_member else '' -%}
+{%- set export_qs = ns.cq ~ tm_param ~ 'date_from=' ~ date_from ~ '&date_to=' ~ date_to -%}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Customer Summary Report</h4>
+  {% if submitted and brand_rows %}
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('report_customer_summary') }}?{{ export_qs }}&export=word"
+       class="btn btn-outline-primary btn-sm"><i class="bi bi-file-word me-1"></i>Export Word</a>
+    <a href="{{ url_for('report_customer_summary') }}?{{ export_qs }}&export=pptx"
+       class="btn btn-outline-warning btn-sm"><i class="bi bi-file-earmark-slides me-1"></i>Export PowerPoint</a>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Filter Form ──────────────────────────────────────────────────────────── #}
+<div class="card mb-4">
+  <div class="card-body py-3">
+    <form method="post" class="row g-3 align-items-end">
+
+      {# Team Member — always shown, comes first #}
+      {% if team_members %}
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Team Member</label>
+        <select name="team_member" id="teamMemberSelect" class="form-select">
+          <option value="">— All Team Members —</option>
+          {% for tm in team_members %}
+          <option value="{{ tm }}" {% if tm == team_member %}selected{% endif %}>{{ tm }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      {# Customer — multi-select, filtered by team member via JS #}
+      <div class="{% if team_members %}col-md-3{% else %}col-md-4{% endif %}">
+        <label class="form-label fw-semibold">Customer <span class="text-muted fw-normal small">(hold Ctrl/⌘ for multiple)</span></label>
+        <select name="customer" id="customerSelect" class="form-select" multiple size="5">
+          {% for c in customers %}
+          <option value="{{ c }}" {% if c in selected_customers %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Leave all unselected for all customers</div>
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Date From</label>
+        <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Date To</label>
+        <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search me-1"></i>Run Report</button>
+      </div>
+    </form>
+
+    {# Active filter badges #}
+    {% if submitted and (team_member or selected_customers) %}
+    <div class="mt-2 d-flex flex-wrap gap-1">
+      {% if team_member %}
+      <span class="badge bg-secondary fs-6"><i class="bi bi-person-fill me-1"></i>{{ team_member }}</span>
+      {% endif %}
+      {% for c in selected_customers %}
+      <span class="badge bg-info text-dark"><i class="bi bi-building me-1"></i>{{ c }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if submitted %}
+  {% if not brand_rows %}
+  <div class="alert alert-info">No bookings found for the selected filters.</div>
+  {% else %}
+
+  {# ── Summary cards ───────────────────────────────────────────────────────── #}
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card text-center border-primary">
+        <div class="card-body py-2">
+          <div class="section-label">Total Bookings</div>
+          <div class="fs-3 fw-bold text-primary">{{ grand_bookings }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center border-success">
+        <div class="card-body py-2">
+          <div class="section-label">Total Revenue</div>
+          <div class="fs-3 fw-bold text-success">${{ '{:,.0f}'.format(grand_total) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="section-label">Hotel Chains</div>
+          <div class="fs-3 fw-bold">{{ brand_rows | length }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center">
+        <div class="card-body py-2">
+          <div class="section-label">Cities</div>
+          <div class="fs-3 fw-bold">{{ city_count }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Meeting Map ─────────────────────────────────────────────────────────── #}
+  {% if city_map_data %}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold"><i class="bi bi-geo-alt-fill me-2"></i>Meeting Locations</div>
+    <div class="card-body p-0">
+      <div id="meetingMap" style="height:460px;width:100%;border-radius:0 0 .375rem .375rem;"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Charts ──────────────────────────────────────────────────────────────── #}
+  <div class="row g-4 mb-4">
+    <div class="col-md-5">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Revenue by Hotel Chain</div>
+        <div class="card-body d-flex align-items-center justify-content-center" style="min-height:320px">
+          <canvas id="chainChart" style="max-height:300px"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-7">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">Top Cities by Revenue</div>
+        <div class="card-body d-flex align-items-center justify-content-center" style="min-height:320px">
+          <canvas id="cityChart" style="max-height:300px;max-width:100%"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Brand Summary Table ─────────────────────────────────────────────────── #}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Summary by Hotel Chain</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>Hotel Chain</th>
+            <th class="text-center"># Bookings</th>
+            <th class="text-end">Revenue (USD)</th>
+            <th class="text-end">% of Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in brand_rows %}
+          <tr>
+            <td>
+              <span class="me-2" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ chain_colors[loop.index0] }}"></span>
+              {{ r.chain }}
+            </td>
+            <td class="text-center">{{ r.bookings }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(r.revenue or 0) }}</td>
+            <td class="text-end">
+              {% if grand_total %}{{ '{:.1f}'.format((r.revenue or 0) / grand_total * 100) }}%{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="table-secondary fw-bold">
+          <tr>
+            <td>TOTAL</td>
+            <td class="text-center">{{ grand_bookings }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(grand_total) }}</td>
+            <td class="text-end">100.0%</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  {# ── Detail Table by Chain > City ────────────────────────────────────────── #}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Revenue by Chain and City</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>Chain / City</th>
+            <th class="text-center"># Bookings</th>
+            <th class="text-end">Revenue (USD)</th>
+            <th class="text-end">% of Chain</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for chain, data in chain_groups.items() %}
+          <tr style="background:#dce8f5;font-weight:600">
+            <td>{{ chain }}</td>
+            <td class="text-center">{{ data.bookings }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(data.revenue) }}</td>
+            <td class="text-end">—</td>
+          </tr>
+          {% for c in data.cities %}
+          <tr>
+            <td class="ps-4 text-muted">
+              {{ c.city }}{% if c.state %}, {{ c.state }}{% endif %}
+            </td>
+            <td class="text-center">{{ c.bookings }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(c.revenue) }}</td>
+            <td class="text-end">
+              {% if data.revenue %}{{ '{:.1f}'.format(c.revenue / data.revenue * 100) }}%{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+        <tfoot class="table-secondary fw-bold">
+          <tr>
+            <td>GRAND TOTAL</td>
+            <td class="text-center">{{ grand_bookings }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(grand_total) }}</td>
+            <td class="text-end">—</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  {# ── Meeting Summary by City ─────────────────────────────────────────────── #}
+  {% if city_meetings %}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Meeting Summary by City</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>City / Meeting Name</th>
+            <th>Start Date</th>
+            <th>Hotel</th>
+            <th class="text-center">Booking ID</th>
+            <th class="text-end">Revenue (USD)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for city, data in city_meetings.items() %}
+          <tr style="background:#dce8f5;font-weight:600">
+            <td>{{ city }}{% if data.state %}, {{ data.state }}{% endif %}</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td class="text-end">${{ '{:,.2f}'.format(data.total_revenue) }}</td>
+          </tr>
+          {% for m in data.meetings %}
+          <tr>
+            <td class="ps-4">{{ m.event_name }}</td>
+            <td class="text-muted small">{{ m.start_date | us_date if m.start_date else '—' }}</td>
+            <td class="small text-muted">{{ m.hotel }}</td>
+            <td class="text-center">
+              <a href="/booking/{{ m.booking_id | int }}" class="text-decoration-none small">
+                <code>{{ m.booking_id | int }}</code>
+              </a>
+            </td>
+            <td class="text-end">${{ '{:,.2f}'.format(m.revenue) }}</td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+        <tfoot class="table-secondary fw-bold">
+          <tr>
+            <td>GRAND TOTAL</td>
+            <td></td><td></td><td></td>
+            <td class="text-end">${{ '{:,.2f}'.format(grand_total) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Export Buttons (bottom) ─────────────────────────────────────────────── #}
+  <div class="d-flex gap-2 mb-4">
+    <a href="{{ url_for('report_customer_summary') }}?{{ export_qs }}&export=word"
+       class="btn btn-outline-primary"><i class="bi bi-file-word me-2"></i>Export to Word</a>
+    <a href="{{ url_for('report_customer_summary') }}?{{ export_qs }}&export=pptx"
+       class="btn btn-outline-warning"><i class="bi bi-file-earmark-slides me-2"></i>Export to PowerPoint</a>
+  </div>
+
+  {% endif %}
+{% endif %}
+
+{% if submitted and brand_rows %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// ── Color palette (matches Word/PPTX export) ──────────────────────────────
+const CHAIN_COLOR_MAP = {
+  'Hilton':                               '#003580',
+  'Marriott Bonvoy':                      '#c41230',
+  'Hyatt Hotels':                         '#8B2635',
+  'IHG':                                  '#21a038',
+  'Omni Hotels':                          '#2c4a2e',
+  'Wyndham Hotels & Resorts':             '#005EB8',
+  'Choice Hotels and Radisson Americas':  '#FF6600',
+  'Independent / Other':                  '#6c757d',
+  'Independent/Other':                    '#6c757d',
+  'BWH Hotels':                           '#003087',
+  'Loews Hotels':                         '#c8a951',
+  'Sonesta':                              '#8B0000',
+  'Two Roads Hospitality':                '#4a4a4a',
+  'Posadas':                              '#B5651D',
+};
+const DEFAULT_COLORS = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+  '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf','#aec7e8','#ffbb78'];
+
+function chainColor(name, idx) {
+  return CHAIN_COLOR_MAP[name] || DEFAULT_COLORS[idx % DEFAULT_COLORS.length];
+}
+
+// ── Data from server ─────────────────────────────────────────────────────
+const brandLabels  = {{ brand_labels  | tojson }};
+const brandValues  = {{ brand_values  | tojson }};
+const cityLabels   = {{ city_labels   | tojson }};
+const cityValues   = {{ city_values   | tojson }};
+
+const brandColors = brandLabels.map((l, i) => chainColor(l, i));
+
+// ── Donut Chart ──────────────────────────────────────────────────────────
+new Chart(document.getElementById('chainChart'), {
+  type: 'doughnut',
+  data: {
+    labels: brandLabels,
+    datasets: [{ data: brandValues, backgroundColor: brandColors, borderWidth: 1 }]
+  },
+  options: {
+    cutout: '55%',
+    plugins: {
+      legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+      tooltip: {
+        callbacks: {
+          label: ctx => {
+            const v = ctx.parsed;
+            const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+            return ` $${v.toLocaleString('en-US',{minimumFractionDigits:0})} (${(v/total*100).toFixed(1)}%)`;
+          }
+        }
+      }
+    }
+  }
+});
+
+// ── Horizontal Bar Chart (Top Cities) ───────────────────────────────────
+new Chart(document.getElementById('cityChart'), {
+  type: 'bar',
+  data: {
+    labels: cityLabels,
+    datasets: [{
+      label: 'Revenue',
+      data: cityValues,
+      backgroundColor: '#1a3a5c',
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    indexAxis: 'y',
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: ctx => ` $${ctx.parsed.x.toLocaleString('en-US',{minimumFractionDigits:0})}`
+        }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { callback: v => '$' + Number(v).toLocaleString('en-US',{minimumFractionDigits:0}) },
+        grid: { color: '#e9ecef' }
+      },
+      y: { ticks: { font: { size: 11 } } }
+    }
+  }
+});
+</script>
+{% endif %}
+
+{# ── Meeting Map JS ──────────────────────────────────────────────────────── #}
+{% if submitted and city_map_data %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  .meeting-pin {
+    background: #1a3a5c;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,.35);
+    line-height: 1;
+  }
+</style>
+<script>
+(function(){
+  const allPins = {{ city_map_data | tojson }};
+
+  // Continental 48 states + DC only — shown as map pins.
+  // AK, HI, territories, and foreign cities go into the side boxes.
+  const CONTINENTAL = new Set([
+    'AL','AZ','AR','CA','CO','CT','DE','FL','GA','ID','IL','IN','IA',
+    'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+    'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+    'VA','WA','WV','WI','WY','DC',
+    'Alabama','Arizona','Arkansas','California','Colorado','Connecticut',
+    'Delaware','Florida','Georgia','Idaho','Illinois','Indiana','Iowa',
+    'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
+    'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada',
+    'New Hampshire','New Jersey','New Mexico','New York','North Carolina',
+    'North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island',
+    'South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
+    'Virginia','Washington','West Virginia','Wisconsin','Wyoming',
+    'District of Columbia'
+  ]);
+
+  const AK_STATES = new Set(['AK','Alaska']);
+  const HI_STATES = new Set(['HI','Hawaii']);
+  const TERR_NORM = {
+    'Puerto Rico':'Puerto Rico','PR':'Puerto Rico',
+    'Guam':'Guam','GU':'Guam',
+    'Virgin Islands':'Virgin Islands','VI':'Virgin Islands',
+    'American Samoa':'American Samoa','AS':'American Samoa',
+  };
+
+  function groupOffMap(arr) {
+    // AK/HI/territories → grouped by name; foreign → individual city entries
+    const grouped = {};
+    const foreign = [];
+    const TERR_ORDER = ['Alaska','Hawaii','Puerto Rico','Guam',
+                        'Virgin Islands','American Samoa'];
+    arr.forEach(p => {
+      const s = p.state || '';
+      if (AK_STATES.has(s)) {
+        grouped['Alaska'] = (grouped['Alaska'] || 0) + p.count;
+      } else if (HI_STATES.has(s)) {
+        grouped['Hawaii'] = (grouped['Hawaii'] || 0) + p.count;
+      } else if (TERR_NORM[s]) {
+        const lbl = TERR_NORM[s];
+        grouped[lbl] = (grouped[lbl] || 0) + p.count;
+      } else {
+        // International — list individually by city
+        const lbl = s ? `${p.city}, ${s}` : p.city;
+        foreign.push({label: lbl, count: p.count});
+      }
+    });
+    const result = [];
+    TERR_ORDER.forEach(lbl => { if (grouped[lbl]) result.push({label:lbl, count:grouped[lbl]}); });
+    // Any unexpected grouped labels
+    Object.keys(grouped).forEach(lbl => {
+      if (!TERR_ORDER.includes(lbl)) result.push({label:lbl, count:grouped[lbl]});
+    });
+    // Individual foreign cities, sorted by count descending
+    foreign.sort((a,b) => b.count - a.count);
+    result.push(...foreign);
+    return result;
+  }
+
+  // Map pins: continental 48 + DC only (must have a state in CONTINENTAL)
+  const pins = allPins.filter(p => p.state && CONTINENTAL.has(p.state));
+
+  // Off-map: everything else, including empty-state foreign cities (e.g. Reykjavik)
+  const offMap   = allPins.filter(p => !p.state || !CONTINENTAL.has(p.state));
+  const intlWest = groupOffMap(offMap.filter(p => (p.lng ?? 0) <= -30));
+  const intlEast = groupOffMap(offMap.filter(p => (p.lng ?? 0) >  -30));
+  const maxCount = Math.max(...allPins.map(p => p.count), 1);
+
+  const map = L.map('meetingMap', {
+    center: [38.5, -96],
+    zoom: 4,
+    scrollWheelZoom: false
+  });
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 18
+  }).addTo(map);
+
+  // Custom pane so terminal dots always render above pin bubbles (z 640 > marker z 600)
+  map.createPane('dotsPane');
+  map.getPane('dotsPane').style.zIndex = 640;
+
+  const markerLayer = L.layerGroup().addTo(map);
+  const lineLayer   = L.layerGroup().addTo(map);
+
+  function pinSize(count) {
+    return Math.round(32 + (count / maxCount) * 20);
+  }
+
+  function makeIcon(count) {
+    const sz = pinSize(count);
+    return L.divIcon({
+      html: `<div class="meeting-pin" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz*0.38)}px;">${count}</div>`,
+      className: '', iconSize: [sz,sz], iconAnchor: [sz/2,sz/2], popupAnchor: [0,-(sz/2+4)]
+    });
+  }
+
+  // Clip line segment [from→to] so it stops just before entering a circle
+  function clipLine(from, to, center, radius) {
+    const dx=to.x-from.x, dy=to.y-from.y;
+    const fx=from.x-center.x, fy=from.y-center.y;
+    const a=dx*dx+dy*dy;
+    if (a < 0.0001) return to;
+    const b=2*(fx*dx+fy*dy), c=fx*fx+fy*fy-radius*radius;
+    const disc=b*b-4*a*c;
+    if (disc < 0) return to;
+    const t=(-b-Math.sqrt(disc))/(2*a);
+    if (t > 0.05 && t < 0.98) {
+      const tClip=Math.max(0, t - 4/Math.sqrt(a));
+      return L.point(from.x+tClip*dx, from.y+tClip*dy);
+    }
+    return to;
+  }
+
+  function render() {
+    markerLayer.clearLayers();
+    lineLayer.clearLayers();
+
+    const pixPts = pins.map(p => map.latLngToLayerPoint([p.lat, p.lng]));
+
+    // ── Repulsion spreading: pins start at true positions, push apart as needed ──
+    // This keeps coastal cities (like Boston) on land — pins only move as far as
+    // necessary to clear overlaps, in the direction away from their neighbour.
+    const SPREAD_D = 58;   // minimum centre-to-centre separation (px)
+    const finalPx  = pixPts.map(p => L.point(p.x, p.y));
+    for (let iter = 0; iter < 80; iter++) {
+      let anyMoved = false;
+      for (let a = 0; a < pins.length; a++) {
+        for (let b = a+1; b < pins.length; b++) {
+          const dx = finalPx[b].x - finalPx[a].x;
+          const dy = finalPx[b].y - finalPx[a].y;
+          const d  = Math.sqrt(dx*dx + dy*dy);
+          if (d < SPREAD_D) {
+            const push = (SPREAD_D - d) / 2 + 0.5;
+            const nx = d > 0.01 ? dx/d : 1;
+            const ny = d > 0.01 ? dy/d : 0;
+            finalPx[a] = L.point(finalPx[a].x - nx*push, finalPx[a].y - ny*push);
+            finalPx[b] = L.point(finalPx[b].x + nx*push, finalPx[b].y + ny*push);
+            anyMoved = true;
+          }
+        }
+      }
+      if (!anyMoved) break;
+    }
+
+    // ── Render: marker at spread position; leader line if pin moved ──
+    const LEADER_MIN = 8;  // px — skip leader for tiny nudges
+    for (let idx = 0; idx < pins.length; idx++) {
+      const p      = pins[idx];
+      const fPx    = finalPx[idx];
+      const tPx    = pixPts[idx];
+      const moved  = Math.hypot(fPx.x - tPx.x, fPx.y - tPx.y);
+      const spreadLL = map.layerPointToLatLng(fPx);
+      const rev    = p.revenue.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+      const label  = p.state ? `${p.city}, ${p.state}` : p.city;
+
+      L.marker(spreadLL, {icon: makeIcon(p.count)})
+        .bindPopup(`<b>${label}</b><br>${p.count} meeting${p.count!==1?'s':''}<br>Revenue: ${rev}`)
+        .addTo(markerLayer);
+
+      if (moved > LEADER_MIN) {
+        let endPx = tPx;
+        // Clip leader so it never terminates under any other pin bubble
+        for (let oi = 0; oi < pins.length; oi++) {
+          if (oi === idx) continue;
+          endPx = clipLine(fPx, endPx, finalPx[oi], pinSize(pins[oi].count)/2 + 4);
+        }
+        const termLL = map.layerPointToLatLng(endPx);
+        L.polyline([spreadLL, termLL],{
+          color:'#1a3a5c', weight:3, opacity:0.75, dashArray:'6,4'
+        }).addTo(lineLayer);
+        L.circleMarker(termLL,{
+          pane:'dotsPane', radius:3.5,
+          color:'#fff', weight:1.5, fillColor:'#1a3a5c', fillOpacity:1
+        }).addTo(lineLayer);
+      }
+    }
+  }
+
+  render();
+  map.on('zoomend', render);
+
+  // ── International boxes overlaid on the map ──────────────────────────────
+  // groups = [{label, count}, ...] already ordered
+  function buildIntlBox(groups, side) {
+    if (!groups.length) return;
+    const box = document.createElement('div');
+    box.style.cssText = [
+      'position:absolute', 'top:10px',
+      side === 'east' ? 'right:10px' : 'left:10px',
+      'background:rgba(255,255,255,0.93)',
+      'border:2px solid #1a3a5c', 'border-radius:6px',
+      'padding:7px 10px', 'z-index:900',
+      'font-size:12px', 'min-width:170px', 'max-width:220px',
+      'box-shadow:0 2px 8px rgba(0,0,0,.25)'
+    ].join(';');
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:700;color:#1a3a5c;margin-bottom:5px;font-size:12px;';
+    title.textContent = side === 'east' ? '🌍 International (East)' : '🌏 International (West)';
+    box.appendChild(title);
+
+    groups.forEach(g => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
+      const bubble = document.createElement('span');
+      const sz = Math.round(20 + (g.count / maxCount) * 10);
+      bubble.style.cssText = `display:inline-flex;align-items:center;justify-content:center;
+        width:${sz}px;height:${sz}px;border-radius:50%;background:#1a3a5c;
+        color:#fff;font-size:${Math.round(sz*0.42)}px;font-weight:700;flex-shrink:0;`;
+      bubble.textContent = g.count;
+      const lbl = document.createElement('span');
+      lbl.style.color = '#333';
+      lbl.textContent = g.label;
+      row.appendChild(bubble);
+      row.appendChild(lbl);
+      box.appendChild(row);
+    });
+
+    document.getElementById('meetingMap').appendChild(box);
+  }
+
+  buildIntlBox(intlEast, 'east');
+  buildIntlBox(intlWest, 'west');
+})();
+</script>
+{% endif %}
+
+{# ── Team-member → Customer dynamic filtering ────────────────────────────── #}
+{% if team_members %}
+<script>
+const allCustomers    = {{ customers | tojson }};
+const tmCustomers     = {{ tm_customers | tojson }};
+const prevSelected    = {{ selected_customers | tojson }};
+
+const tmSelect   = document.getElementById('teamMemberSelect');
+const custSelect = document.getElementById('customerSelect');
+
+function rebuildCustomers(filterTm) {
+  const pool = filterTm ? (tmCustomers[filterTm] || []) : allCustomers;
+  custSelect.innerHTML = '';
+  pool.forEach(c => {
+    const opt = new Option(c, c);
+    if (prevSelected.includes(c)) opt.selected = true;
+    custSelect.appendChild(opt);
+  });
+}
+
+tmSelect.addEventListener('change', () => rebuildCustomers(tmSelect.value));
+
+// On page load, apply existing team member filter
+rebuildCustomers(tmSelect.value);
+</script>
+{% endif %}
+
+{% endblock %}

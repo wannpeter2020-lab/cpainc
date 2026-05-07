@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Housing History Import Results — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <h4 class="mt-1">Housing History Import Results</h4>
+</div>
+
+{% set imported = results | selectattr('status','equalto','imported') | list %}
+{% set updated  = results | selectattr('status','equalto','updated')  | list %}
+{% set errors   = results | rejectattr('status','in',['imported','updated']) | list %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card text-center border-success">
+      <div class="card-body py-2">
+        <div class="section-label">New Pickups Added</div>
+        <div class="fs-3 fw-bold text-success">{{ imported | length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center border-primary">
+      <div class="card-body py-2">
+        <div class="section-label">Existing Pickups Updated</div>
+        <div class="fs-3 fw-bold text-primary">{{ updated | length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center {% if errors %}border-danger{% endif %}">
+      <div class="card-body py-2">
+        <div class="section-label">Errors / Skipped</div>
+        <div class="fs-3 fw-bold {% if errors %}text-danger{% else %}text-muted{% endif %}">{{ errors | length }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if imported or updated %}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-check-circle me-2"></i>Successfully Processed</div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Booking ID</th>
+          <th>Event</th>
+          <th>Hotel</th>
+          <th class="text-end">Total Pickup</th>
+          <th class="text-end">Total Revenue</th>
+          <th class="text-end">Avg Rate</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in imported + updated %}
+        <tr>
+          <td class="small text-muted">{{ r.filename }}</td>
+          <td><a href="/booking/{{ r.booking_id }}" class="text-decoration-none"><code>{{ r.booking_id }}</code></a></td>
+          <td>{{ r.event or '—' }}</td>
+          <td class="small">{{ r.hotel or '—' }}</td>
+          <td class="text-end">{{ r.pickup | int if r.pickup else '—' }}</td>
+          <td class="text-end">{% if r.revenue %}${{ '{:,.2f}'.format(r.revenue | float) }}{% else %}—{% endif %}</td>
+          <td class="text-end">{% if r.avg_rate %}${{ '{:,.2f}'.format(r.avg_rate | float) }}{% else %}—{% endif %}</td>
+          <td>
+            {% if r.status == 'imported' %}
+              <span class="badge bg-success">New</span>
+            {% else %}
+              <span class="badge bg-primary">Updated</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if errors %}
+<div class="card mb-4 border-danger">
+  <div class="card-header" style="background:#f8d7da;color:#842029">
+    <i class="bi bi-exclamation-triangle me-2"></i>Errors / Skipped
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>File</th><th>Reason</th><th>Booking ID</th><th></th></tr></thead>
+      <tbody>
+        {% for r in errors %}
+        <tr>
+          <td class="small">{{ r.filename }}</td>
+          <td class="text-danger small">{{ r.reason }}</td>
+          <td>{% if r.booking_id %}<code>{{ r.booking_id }}</code>{% else %}—{% endif %}</td>
+          <td>
+            {% if r.status == 'no_booking' and r.create_url %}
+            <a href="{{ r.create_url }}" class="btn btn-sm btn-warning">
+              <i class="bi bi-plus-circle me-1"></i>Create Booking
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="d-flex gap-2">
+  <a href="/import/pickup" class="btn btn-primary"><i class="bi bi-upload"></i> Import More Housing History</a>
+  <a href="/" class="btn btn-outline-secondary">Back to Bookings</a>
+</div>
+{% endblock %}

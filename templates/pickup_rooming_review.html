@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Rooming List Review — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-people me-2"></i>Rooming List Review
+    <span class="text-muted fw-normal fs-6 ms-2">{{ config['event_name'] or config['organization'] }}</span>
+  </h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back to Event
+  </a>
+</div>
+
+{# AI-parsed notice #}
+{% if ai_parsed %}
+<div class="alert alert-info mb-3 d-flex align-items-center gap-2">
+  <i class="bi bi-stars fs-5"></i>
+  <div>
+    <strong>AI-parsed format</strong> — This rooming list used a hotel format that wasn't in our library,
+    so Claude analyzed it automatically. Please review the guest records below to confirm they look correct
+    before saving.
+  </div>
+</div>
+{% endif %}
+
+{# Reconciliation status banner #}
+<div class="alert {% if rl['reconciliation_status'] == 'match' %}alert-success{% elif rl['reconciliation_status'] == 'discrepancy' %}alert-danger{% else %}alert-secondary{% endif %} mb-3">
+  {% if rl['reconciliation_status'] == 'match' %}
+    ✅ <strong>Match</strong> — Combined rooming list night counts match last weekly pickup report.
+  {% elif rl['reconciliation_status'] == 'discrepancy' %}
+    ⚠️ <strong>Discrepancy</strong>
+    {% if rl['discrepancy_notes'] %}
+    <ul class="mb-0 mt-1 small">
+      {% for line in rl['discrepancy_notes'].split('\n') if line.strip() %}
+      <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  {% else %}
+    <strong>Pending</strong> — Not yet reconciled.
+  {% endif %}
+</div>
+
+{# Shared rooms (dedup by Hotel Confirmation #) #}
+{% if dedup_summary %}
+<div class="card mb-3 border-warning">
+  <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-people-fill me-2"></i>Shared Rooms — {{ dedup_summary|length }} reservation{{ 's' if dedup_summary|length != 1 }} with multiple guests</span>
+    <span class="text-muted small">Same Hotel Confirmation # = one room counted once</span>
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Hotel Conf #</th>
+          <th class="text-center">Guests</th>
+          <th>Names</th>
+          <th>Arrival</th>
+          <th>Departure</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in dedup_summary %}
+        <tr>
+          <td class="font-monospace small">{{ d.conf_no }}</td>
+          <td class="text-center"><span class="badge bg-warning text-dark">{{ d.count }}</span></td>
+          <td class="small">{{ d.names }}</td>
+          <td class="small">{{ d.arrival | us_date }}</td>
+          <td class="small">{{ d.departure | us_date }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer text-muted small">
+    {{ guests|length }} total guests → {{ unique_rooms }} unique rooms ({{ (guests|length) - unique_rooms }} duplicate guest{{ 's' if (guests|length) - unique_rooms != 1 else '' }} removed from room count)
+  </div>
+</div>
+{% endif %}
+
+{# Night-by-night comparison — combined totals #}
+{% if pickup_by_night or nights_by_date %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Night-by-Night Comparison — Combined</span>
+    {% if sources|length > 1 %}
+    <span class="text-muted small">{{ sources|length }} lists: {{ sources|join(', ') }}</span>
+    {% endif %}
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th class="text-end">Contracted</th>
+          <th class="text-end">Pickup (last weekly)</th>
+          {% for src in sources %}
+          <th class="text-end">{{ src }}</th>
+          {% endfor %}
+          {% if sources|length > 1 %}
+          <th class="text-end fw-semibold">Total Rooming</th>
+          {% endif %}
+          <th class="text-end">vs Pickup</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set all_dates = ((pickup_by_night.keys()|list) + (nights_by_date.keys()|list))|unique|sort %}
+        {% for date in all_dates %}
+        {% set p = pickup_by_night.get(date, 0) %}
+        {% set r = nights_by_date.get(date, 0) %}
+        {% set c = block.get(date, 0) %}
+        {% set diff = r - p %}
+        <tr class="{% if diff != 0 and p != 0 %}table-warning{% endif %}">
+          <td>{{ date | us_date }}</td>
+          <td class="text-end">{{ c if c else '—' }}</td>
+          <td class="text-end">{{ p if p else '—' }}</td>
+          {% for src in sources %}
+          {% set src_total = nights_by_source.get(src, {}).get(date, 0) %}
+          <td class="text-end text-muted">{{ src_total if src_total else '—' }}</td>
+          {% endfor %}
+          {% if sources|length > 1 %}
+          <td class="text-end fw-semibold">{{ r if r else '—' }}</td>
+          {% endif %}
+          <td class="text-end">
+            {% if p == 0 %}
+              <span class="text-muted small">shoulder</span>
+            {% elif diff > 0 %}<span class="text-success">+{{ diff }}</span>
+            {% elif diff < 0 %}<span class="text-danger">{{ diff }}</span>
+            {% else %}<span class="text-muted">0</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr class="table-light fw-semibold">
+          <td>Total</td>
+          <td class="text-end">{{ block.values()|sum }}</td>
+          <td class="text-end">{{ pickup_by_night.values()|sum }}</td>
+          {% for src in sources %}
+          <td class="text-end">{{ nights_by_source.get(src, {}).values()|sum }}</td>
+          {% endfor %}
+          {% if sources|length > 1 %}
+          <td class="text-end">{{ nights_by_date.values()|sum }}</td>
+          {% endif %}
+          <td class="text-end">
+            {% set diff = nights_by_date.values()|sum - pickup_by_night.values()|sum %}
+            {% if diff > 0 %}<span class="text-success">+{{ diff }}</span>
+            {% elif diff < 0 %}<span class="text-danger">{{ diff }}</span>
+            {% else %}0{% endif %}
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# Guest list — one card per source list #}
+{% for src in sources %}
+{% set src_guests = guests_by_source[src] %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>
+      <i class="bi bi-person-lines-fill me-1"></i>
+      {{ src }}
+      <span class="badge bg-secondary ms-1">{{ src_guests|length }}</span>
+    </span>
+    <span class="text-muted small">{{ nights_by_source.get(src, {}).values()|sum }} room-nights</span>
+  </div>
+  {% if src_guests %}
+  <div class="table-responsive" style="max-height:340px;overflow-y:auto;">
+    <table class="table table-sm table-hover mb-0">
+      <thead class="sticky-top table-light">
+        <tr>
+          <th>#</th>
+          <th>Name</th>
+          <th>Conf #</th>
+          <th>Arrival</th>
+          <th>Departure</th>
+          <th class="text-end">Nights</th>
+          <th class="text-end">Rooms</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in src_guests %}
+        <tr>
+          <td class="text-muted small">{{ loop.index }}</td>
+          <td>{{ g.name }}</td>
+          <td class="font-monospace small">{{ g.conf_no }}</td>
+          <td>{{ g.arrival | us_date }}</td>
+          <td>{{ g.departure | us_date }}</td>
+          <td class="text-end">{{ g.nights }}</td>
+          <td class="text-end">{{ g.rooms }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted small">No guests in this list.</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{# Confirm / override status #}
+<div class="card mb-3">
+  <div class="card-header">Confirm Reconciliation</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('pickup_rooming_confirm', cid=config['id'], rl_id=rl['id']) }}">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Status</label>
+        <select name="status" class="form-select" style="width:200px">
+          <option value="match"       {% if rl['reconciliation_status']=='match'       %}selected{% endif %}>✅ Match</option>
+          <option value="discrepancy" {% if rl['reconciliation_status']=='discrepancy' %}selected{% endif %}>⚠️ Discrepancy</option>
+          <option value="pending"     {% if rl['reconciliation_status']=='pending'     %}selected{% endif %}>Pending</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-check-lg me-1"></i>Confirm &amp; Save
+      </button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

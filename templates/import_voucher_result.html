@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Voucher Import Results — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Voucher Import Complete</h4>
+  <a href="{{ url_for('import_voucher') }}" class="btn btn-sm btn-outline-primary">
+    <i class="bi bi-upload me-1"></i>Import Another Voucher
+  </a>
+</div>
+
+{# Summary banner #}
+<div class="row g-3 mb-4">
+  <div class="col-auto">
+    <div class="card text-center px-4 py-3">
+      <div class="fs-2 fw-bold text-success">{{ added }}</div>
+      <div class="text-muted small">Payment{{ 's' if added != 1 }} Added</div>
+    </div>
+  </div>
+  <div class="col-auto">
+    <div class="card text-center px-4 py-3">
+      <div class="fs-2 fw-bold text-warning">{{ skipped }}</div>
+      <div class="text-muted small">Already Existed</div>
+    </div>
+  </div>
+  {% if errors %}
+  <div class="col-auto">
+    <div class="card text-center px-4 py-3">
+      <div class="fs-2 fw-bold text-danger">{{ errors|length }}</div>
+      <div class="text-muted small">Error{{ 's' if errors|length != 1 }}</div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# Per-file breakdown #}
+{% if file_summaries %}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-files me-2"></i>File Breakdown ({{ file_count }} file{{ 's' if file_count != 1 }})</div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Date</th>
+          <th>Reference</th>
+          <th>Currency</th>
+          <th class="text-end">USD Total</th>
+          <th class="text-center">Added</th>
+          <th class="text-center">Skipped</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in file_summaries %}
+        <tr>
+          <td class="small">{{ s.filename }}</td>
+          <td class="small">{{ s.payment_date | us_date if s.payment_date else '—' }}</td>
+          <td class="font-monospace small">{{ s.reference or '—' }}</td>
+          <td class="small">{{ s.currency or '—' }}</td>
+          <td class="text-end small">${{ '%.2f'|format(s.amt_usd) if s.amt_usd else '—' }}</td>
+          <td class="text-center">
+            {% if s.error %}
+              <span class="text-danger">—</span>
+            {% else %}
+              <span class="fw-semibold {% if s.added > 0 %}text-success{% else %}text-muted{% endif %}">{{ s.added }}</span>
+            {% endif %}
+          </td>
+          <td class="text-center">
+            {% if s.error %}
+              <span class="badge bg-danger">Error</span>
+            {% else %}
+              <span class="text-warning">{{ s.skipped }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.error %}<span class="text-danger small">{{ s.error }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# Errors #}
+{% if errors %}
+<div class="card mb-4 border-danger">
+  <div class="card-header bg-danger text-white"><i class="bi bi-exclamation-triangle me-2"></i>Errors</div>
+  <ul class="list-group list-group-flush">
+    {% for e in errors %}
+    <li class="list-group-item text-danger">{{ e }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{# New booking stubs created #}
+{% if new_bookings %}
+<div class="card mb-4">
+  <div class="card-header bg-warning text-dark">
+    <i class="bi bi-exclamation-circle me-2"></i>New Booking Stubs Created ({{ new_bookings|length }})
+  </div>
+  <div class="card-body">
+    <p class="text-muted small mb-2">
+      These Booking IDs were not found in the pipeline — stub records were created so the payment could be linked.
+      Please edit each booking to fill in missing details.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Booking ID</th><th>Event / Account</th><th>Hotel</th><th></th></tr></thead>
+        <tbody>
+          {% for b in new_bookings %}
+          <tr>
+            <td class="font-monospace small">{{ b.booking_id }}</td>
+            <td>
+              <div>{{ b.event or '—' }}</div>
+              <div class="text-muted small">{{ b.account or '' }}</div>
+            </td>
+            <td class="small">{{ b.hotel or '—' }}</td>
+            <td>
+              <a href="{{ url_for('booking_edit', booking_id=b.booking_id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if added == 0 and skipped > 0 %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  All payments in this voucher were already recorded — nothing new was added.
+</div>
+{% elif added > 0 %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle me-2"></i>
+  {{ added }} payment{{ 's' if added != 1 }} recorded successfully.
+</div>
+{% endif %}
+
+<a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+  <i class="bi bi-list-ul me-1"></i>Back to Bookings
+</a>
+
+{% endblock %}

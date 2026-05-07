@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Fill Missing Pickup Events — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-calendar-plus me-2"></i>Create Missing Pickup Tracking Events</h4>
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back to Pickup Dashboard
+  </a>
+</div>
+
+{% if missing %}
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-2"></i>
+  Found <strong>{{ missing|length }}</strong> future booking{{ 's' if missing|length != 1 }} with no pickup tracking entry.
+  Select the ones you want to create and click <strong>Create Selected</strong>.
+  The contracted block will be filled in automatically using each booking's start date, end date, and peak rooms.
+</div>
+
+<form method="post">
+  <div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-table me-2"></i>Bookings Without Pickup Tracking</span>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAll(true)">Select All</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAll(false)">Deselect All</button>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0 align-middle">
+        <thead>
+          <tr>
+            <th style="width:36px;">
+              <input type="checkbox" id="check-all" onchange="toggleAll(this.checked)">
+            </th>
+            <th>Booking ID</th>
+            <th>Event / Account</th>
+            <th>Hotel</th>
+            <th>Associate</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th class="text-center">Peak Rooms</th>
+            <th class="text-end">Room Rate</th>
+            <th class="text-center">Nights</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in missing %}
+          {% set nights = 0 %}
+          {% if r.StartDate and r.EndDate %}
+            {# Calculate nights in Jinja — rough estimate #}
+          {% endif %}
+          <tr>
+            <td>
+              <input type="checkbox" name="booking_ids" value="{{ r.BookingId }}" class="row-check" checked>
+            </td>
+            <td class="font-monospace small">
+              <a href="{{ url_for('booking_detail', booking_id=r.BookingId) }}" class="text-decoration-none" target="_blank">
+                {{ r.BookingId }}
+              </a>
+            </td>
+            <td>
+              <div class="fw-semibold">{{ r.BookingName or r.EventName or '—' }}</div>
+              {% if r.BookingName and r.EventName and r.BookingName != r.EventName %}
+                <div class="text-muted small">{{ r.EventName }}</div>
+              {% endif %}
+              <div class="text-muted small">{{ r.AccountName or '' }}</div>
+            </td>
+            <td class="small">{{ r.Customer or '—' }}</td>
+            <td class="small">{{ r.BookingAssociate or '—' }}</td>
+            <td class="small text-nowrap">{{ r.StartDate | us_date }}</td>
+            <td class="small text-nowrap">{{ r.EndDate | us_date }}</td>
+            <td class="text-center">
+              {% if r.PeakRooms %}
+                <span class="badge bg-secondary">{{ r.PeakRooms | int }}</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="text-end small">
+              {% if r.RoomRate %}${{ '%.2f'|format(r.RoomRate|float) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-center small" id="nights-{{ r.BookingId }}">
+              {% if r.StartDate and r.EndDate %}
+                <span class="text-muted">calculating…</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-calendar-plus me-1"></i>Create Selected
+    </button>
+    <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+
+{% else %}
+<div class="card">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-check-circle-fill text-success fs-1 d-block mb-3"></i>
+    <h5>All future bookings already have pickup tracking entries.</h5>
+    <p class="text-muted">Nothing to create.</p>
+    <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-primary">Back to Pickup Dashboard</a>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>
+function toggleAll(checked) {
+  document.querySelectorAll('.row-check').forEach(function(c) { c.checked = checked; });
+  document.getElementById('check-all').checked = checked;
+}
+
+// Calculate nights for each row client-side
+document.querySelectorAll('tbody tr').forEach(function(tr) {
+  var bid    = tr.querySelector('[name="booking_ids"]');
+  if (!bid) return;
+  var id     = bid.value;
+  var cell   = document.getElementById('nights-' + id);
+  if (!cell) return;
+  var startEl = tr.querySelector('td:nth-child(6)');
+  var endEl   = tr.querySelector('td:nth-child(7)');
+  if (!startEl || !endEl) return;
+  var startTxt = startEl.textContent.trim();
+  var endTxt   = endEl.textContent.trim();
+  if (startTxt === '—' || endTxt === '—') { cell.innerHTML = '<span class="text-muted">—</span>'; return; }
+  function parseDate(s) {
+    // MM/DD/YYYY
+    var p = s.split('/');
+    if (p.length === 3) return new Date(p[2], p[0]-1, p[1]);
+    return null;
+  }
+  var s = parseDate(startTxt), e = parseDate(endTxt);
+  if (s && e && e > s) {
+    var nights = Math.round((e - s) / 86400000);
+    cell.textContent = nights;
+  } else {
+    cell.innerHTML = '<span class="text-muted">—</span>';
+  }
+});
+</script>
+{% endblock %}

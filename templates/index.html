@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Bookings — CPAinc Pipeline{% endblock %}
+{% block content %}
+
+<div id="sticky-filters" style="position:sticky; z-index:100; background:#f4f6f9; padding-top:0.25rem; padding-bottom:0.5rem; border-bottom:1px solid #dee2e6;">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0 text-muted">Bookings <span class="badge bg-secondary ms-1">{{ bookings|length }}</span></h5>
+  </div>
+
+  <form method="get" class="row g-2 mb-0">
+    <div class="col-md-4">
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input type="text" class="form-control" name="search" value="{{ search }}"
+               placeholder="Search event, account, hotel, booking ID…">
+      </div>
+    </div>
+    <div class="col-md-2">
+      <select class="form-select" name="status">
+        <option value="">All Statuses</option>
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <select class="form-select" name="associate">
+        <option value="">All Associates</option>
+        {% for a in associates %}
+        <option value="{{ a }}" {% if a == associate %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-primary">Filter</button>
+      <a href="/" class="btn btn-outline-secondary ms-1">Clear</a>
+    </div>
+  </form>
+</div>
+
+<table class="table table-hover table-sm align-middle bg-white shadow-sm mb-0" style="table-layout:auto; width:100%;">
+  <thead id="sticky-thead">
+    <tr>
+      <th>Booking ID</th>
+      <th>Event Name</th>
+      <th>Account</th>
+      <th>Hotel</th>
+      <th>Associate</th>
+      <th style="white-space:nowrap">Start Date</th>
+      <th style="white-space:nowrap">End Date</th>
+      <th class="text-end">Revenue</th>
+      <th>Status</th>
+      <th class="text-end">Total Commission</th>
+      <th class="text-end">Kristin's Commission</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for b in bookings %}
+    <tr onclick="window.location='/booking/{{ b.BookingId }}'" style="cursor:pointer">
+      <td class="text-muted small">{{ b.BookingId }}</td>
+      <td>
+        {{ b.BookingName or b.EventName or '—' }}
+        {% if b.BookingName and b.EventName and b.BookingName != b.EventName %}
+        <div class="text-muted small">{{ b.EventName }}</div>
+        {% endif %}
+      </td>
+      <td class="small">{{ b.AccountName or '—' }}</td>
+      <td class="small">{{ b.Customer or '—' }}</td>
+      <td class="small">{{ b.BookingAssociate or '—' }}</td>
+      <td class="small text-nowrap">{{ b.StartDate | us_date if b.StartDate else '—' }}</td>
+      <td class="small text-nowrap">{{ b.EndDate | us_date if b.EndDate else '—' }}</td>
+      <td class="small text-end text-nowrap">{% if b.USDRevenue %}${{ '{:,.0f}'.format(b.USDRevenue|float) }}{% elif b.Revenue %}${{ '{:,.0f}'.format(b.Revenue|float) }}{% else %}—{% endif %}</td>
+      <td>
+        {% set s = b.BookingStatus or '' %}
+        <span class="badge rounded-pill
+          {% if s == 'Definite' %}bg-success
+          {% elif s == 'Cancelled' %}bg-danger
+          {% else %}bg-secondary{% endif %}">{{ s or '—' }}</span>
+      </td>
+      <td class="text-end small">
+        {% if b.USDCommissionableAmount %}${{ '{:,.0f}'.format(b.USDCommissionableAmount|float) }}{% else %}—{% endif %}
+      </td>
+      <td class="text-end fw-semibold">
+        {% if b.kristin_comm %}${{ '{:,.0f}'.format(b.kristin_comm) }}{% else %}—{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="11" class="text-center text-muted py-4">No results found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var navbar = document.querySelector('.navbar');
+  var filters = document.getElementById('sticky-filters');
+
+  var navH = navbar.offsetHeight;
+  filters.style.top = navH + 'px';
+
+  // Measure filters after it's positioned
+  setTimeout(function() {
+    var filtersBottom = navH + filters.offsetHeight;
+    var ths = document.querySelectorAll('#sticky-thead th');
+    ths.forEach(function(th) {
+      th.style.position = 'sticky';
+      th.style.top = filtersBottom + 'px';
+      th.style.zIndex = '99';
+      th.style.background = '#eaf0fb';
+      th.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1)';
+    });
+  }, 50);
+});
+</script>
+{% endblock %}

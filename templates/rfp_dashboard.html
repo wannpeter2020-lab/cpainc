@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}RFP Tracking — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>RFP Tracking
+    <span class="badge bg-secondary ms-1">{{ rfps|length }}</span>
+  </h4>
+  <div class="d-flex gap-2">
+    {% if show_archived %}
+    <a href="/rfp" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Active RFPs</a>
+    {% else %}
+    <a href="/rfp?archived=1" class="btn btn-outline-secondary btn-sm"><i class="bi bi-archive me-1"></i>Archived</a>
+    <a href="{{ url_for('rfp_new') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1"></i>New RFP</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if rfps %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Client / Organization</th>
+          <th>Event Name</th>
+          <th>Dates</th>
+          <th class="text-center">Hotels</th>
+          <th>Status</th>
+          <th>Response Due</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rfps %}
+        {% set st = statuses.get(r['status'], ('secondary', r['status'])) %}
+        <tr onclick="window.location='/rfp/{{ r['id'] }}'" style="cursor:pointer">
+          <td class="fw-semibold">{{ r['client_org'] }}</td>
+          <td class="small">{{ r['event_name'] or '—' }}</td>
+          <td class="small text-nowrap">
+            {{ r['start_date'] | us_date if r['start_date'] else '—' }}
+            {% if r['end_date'] %} – {{ r['end_date'] | us_date }}{% endif %}
+          </td>
+          <td class="text-center">
+            <span class="badge bg-secondary">{{ r['hotel_count'] }}</span>
+          </td>
+          <td>
+            <span class="badge bg-{{ st[0] }}">{{ st[1] }}</span>
+          </td>
+          <td class="small text-nowrap">{{ r['response_due_date'] | us_date if r['response_due_date'] else '—' }}</td>
+          <td class="small text-muted">{{ r['created_at'][:10] | us_date if r['created_at'] else '—' }}</td>
+          <td class="text-end" onclick="event.stopPropagation()">
+            <a href="/rfp/{{ r['id'] }}" class="btn btn-sm btn-outline-secondary">View</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="card-body text-center text-muted py-5">
+    <i class="bi bi-file-earmark-text display-4 d-block mb-3 opacity-25"></i>
+    <p>{% if show_archived %}No archived RFPs.{% else %}No active RFPs. Create your first one!{% endif %}</p>
+    {% if not show_archived %}
+    <a href="{{ url_for('rfp_new') }}" class="btn btn-primary">
+      <i class="bi bi-plus me-1"></i>New RFP
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
