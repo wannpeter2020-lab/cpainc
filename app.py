@@ -2222,8 +2222,6 @@ def report_commission_export():
 
 # ── Customer Summary Report ────────────────────────────────────────────────────
 
-import sys as _sys_cs, os as _os_cs
-_sys_cs.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from cs_report_utils import (
     _chain_color, _query_customer_summary, _query_meeting_summary,
     _build_word_doc, _build_pptx, build_city_map_data
