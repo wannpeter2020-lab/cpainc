@@ -4972,32 +4972,41 @@ def rfp_dashboard():
 def rfp_new():
     if request.method == 'POST':
         db = get_db()
+        f = request.form
         db.execute('''
-            INSERT INTO rfp (client_org, event_name, rfp_name, start_date, end_date,
-                alt_start_date, alt_end_date, peak_rooms, total_room_nights,
-                total_attendees, f_and_b_budget, response_due_date, decision_due_date,
-                status, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO rfp (rfp_code, client_org, event_name, rfp_name, booking_id,
+                start_date, end_date, alt_start_date, alt_end_date, peak_rooms,
+                total_room_nights, total_attendees, f_and_b_budget,
+                response_due_date, decision_due_date, status, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (
-            request.form.get('client_org', '').strip(),
-            request.form.get('event_name', '').strip() or None,
-            request.form.get('rfp_name', '').strip() or None,
-            request.form.get('start_date') or None,
-            request.form.get('end_date') or None,
-            request.form.get('alt_start_date') or None,
-            request.form.get('alt_end_date') or None,
-            request.form.get('peak_rooms') or None,
-            request.form.get('total_room_nights') or None,
-            request.form.get('total_attendees') or None,
-            request.form.get('f_and_b_budget') or None,
-            request.form.get('response_due_date') or None,
-            request.form.get('decision_due_date') or None,
-            request.form.get('status', 'sourcing'),
-            request.form.get('notes', '').strip() or None,
+            f.get('rfp_code', '').strip() or None,
+            f.get('client_org', '').strip(),
+            f.get('event_name', '').strip() or None,
+            f.get('rfp_name', '').strip() or None,
+            f.get('booking_id', '').strip() or None,
+            f.get('start_date') or None,
+            f.get('end_date') or None,
+            f.get('alt_start_date') or None,
+            f.get('alt_end_date') or None,
+            f.get('peak_rooms') or None,
+            f.get('total_room_nights') or None,
+            f.get('total_attendees') or None,
+            f.get('f_and_b_budget') or None,
+            f.get('response_due_date') or None,
+            f.get('decision_due_date') or None,
+            f.get('status', 'sourcing'),
+            f.get('notes', '').strip() or None,
         ))
         db.commit()
-        flash('RFP created.', 'success')
         new_id = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+        # Save uploaded RFP document if provided
+        rfp_file = request.files.get('rfp_file')
+        if rfp_file and rfp_file.filename:
+            db.execute("UPDATE rfp SET rfp_filename=?, rfp_data=? WHERE id=?",
+                       (rfp_file.filename, rfp_file.read(), new_id))
+            db.commit()
+        flash('RFP created.', 'success')
         return redirect(url_for('rfp_detail', rid=new_id))
     return render_template('rfp_form.html', rfp=None, all_statuses=RFP_STATUSES)
 
@@ -5023,35 +5032,56 @@ def rfp_edit(rid):
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
     if request.method == 'POST':
+        f = request.form
         db.execute('''
-            UPDATE rfp SET client_org=?, event_name=?, rfp_name=?, start_date=?,
-                end_date=?, alt_start_date=?, alt_end_date=?, peak_rooms=?,
-                total_room_nights=?, total_attendees=?, f_and_b_budget=?,
+            UPDATE rfp SET rfp_code=?, client_org=?, event_name=?, rfp_name=?,
+                booking_id=?, start_date=?, end_date=?, alt_start_date=?, alt_end_date=?,
+                peak_rooms=?, total_room_nights=?, total_attendees=?, f_and_b_budget=?,
                 response_due_date=?, decision_due_date=?, status=?, notes=?,
                 updated_at=datetime('now')
             WHERE id=?
         ''', (
-            request.form.get('client_org', '').strip(),
-            request.form.get('event_name', '').strip() or None,
-            request.form.get('rfp_name', '').strip() or None,
-            request.form.get('start_date') or None,
-            request.form.get('end_date') or None,
-            request.form.get('alt_start_date') or None,
-            request.form.get('alt_end_date') or None,
-            request.form.get('peak_rooms') or None,
-            request.form.get('total_room_nights') or None,
-            request.form.get('total_attendees') or None,
-            request.form.get('f_and_b_budget') or None,
-            request.form.get('response_due_date') or None,
-            request.form.get('decision_due_date') or None,
-            request.form.get('status', 'sourcing'),
-            request.form.get('notes', '').strip() or None,
+            f.get('rfp_code', '').strip() or None,
+            f.get('client_org', '').strip(),
+            f.get('event_name', '').strip() or None,
+            f.get('rfp_name', '').strip() or None,
+            f.get('booking_id', '').strip() or None,
+            f.get('start_date') or None,
+            f.get('end_date') or None,
+            f.get('alt_start_date') or None,
+            f.get('alt_end_date') or None,
+            f.get('peak_rooms') or None,
+            f.get('total_room_nights') or None,
+            f.get('total_attendees') or None,
+            f.get('f_and_b_budget') or None,
+            f.get('response_due_date') or None,
+            f.get('decision_due_date') or None,
+            f.get('status', 'sourcing'),
+            f.get('notes', '').strip() or None,
             rid,
         ))
+        # Save uploaded RFP document if provided
+        rfp_file = request.files.get('rfp_file')
+        if rfp_file and rfp_file.filename:
+            db.execute("UPDATE rfp SET rfp_filename=?, rfp_data=? WHERE id=?",
+                       (rfp_file.filename, rfp_file.read(), rid))
         db.commit()
         flash('RFP updated.', 'success')
         return redirect(url_for('rfp_detail', rid=rid))
     return render_template('rfp_form.html', rfp=rfp, all_statuses=RFP_STATUSES)
+
+
+@app.route('/rfp/parse-document', methods=['POST'])
+def rfp_parse_document():
+    """AJAX — parse an uploaded Cvent RFP .docx and return field values as JSON."""
+    from pickup_utils import parse_rfp_docx
+    f = request.files.get('rfp_file')
+    if not f or not f.filename.lower().endswith('.docx'):
+        return jsonify({})
+    try:
+        return jsonify(parse_rfp_docx(f.read()))
+    except Exception as e:
+        return jsonify({'_error': str(e)})
 
 
 @app.route('/rfp/<int:rid>/archive', methods=['POST'])

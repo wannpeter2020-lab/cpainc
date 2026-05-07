@@ -2,123 +2,220 @@
 {% block title %}{% if rfp %}Edit RFP{% else %}New RFP{% endif %} — CPAinc{% endblock %}
 {% block content %}
 
-<div class="mb-2">
-  <a href="{{ url_for('rfp_dashboard') }}" class="text-decoration-none text-muted small">
-    <i class="bi bi-arrow-left"></i> Back to RFP Tracking
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-file-earmark-text me-2"></i>
+    {% if rfp %}Edit RFP{% else %}New RFP{% endif %}
+  </h4>
+  <a href="{{ url_for('rfp_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
   </a>
 </div>
 
-<h4 class="mb-3">{% if rfp %}Edit RFP{% else %}New RFP{% endif %}</h4>
+<form method="post" enctype="multipart/form-data">
 
-<div class="row justify-content-center">
-  <div class="col-lg-8">
-    <div class="card">
-      <div class="card-body">
-        <form method="post">
+<div class="card mb-3" style="max-width:800px">
+  <div class="card-header">RFP Document</div>
+  <div class="card-body">
+    {% if rfp and rfp['rfp_filename'] %}
+    <div class="mb-2 small text-muted">
+      <i class="bi bi-file-earmark-word me-1 text-primary"></i>
+      Current: <strong>{{ rfp['rfp_filename'] }}</strong>
+      <a href="{{ url_for('rfp_document_download', rid=rfp['id']) }}" class="ms-2">Download</a>
+    </div>
+    {% endif %}
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <input type="file" name="rfp_file" id="rfpFileInput"
+             class="form-control form-control-sm" style="max-width:400px"
+             accept=".docx,.doc,.pdf">
+      <span class="text-muted small">
+        {% if rfp and rfp['rfp_filename'] %}Replace existing document{% else %}Upload RFP document{% endif %}
+        — .docx files auto-fill form fields
+      </span>
+    </div>
+  </div>
+</div>
 
-          <div class="row g-3 mb-3">
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Client / Organization <span class="text-danger">*</span></label>
-              <input type="text" name="client_org" class="form-control" required
-                     value="{{ rfp['client_org'] if rfp else '' }}">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">Event Name</label>
-              <input type="text" name="event_name" class="form-control"
-                     value="{{ rfp['event_name'] if rfp and rfp['event_name'] else '' }}">
-            </div>
-          </div>
-
-          <div class="mb-3">
-            <label class="form-label fw-semibold">RFP Name / Reference</label>
-            <input type="text" name="rfp_name" class="form-control"
-                   placeholder="e.g. 2026 Annual Conference RFP"
-                   value="{{ rfp['rfp_name'] if rfp and rfp['rfp_name'] else '' }}">
-          </div>
-
-          <div class="row g-3 mb-3">
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Start Date</label>
-              <input type="date" name="start_date" class="form-control"
-                     value="{{ rfp['start_date'] if rfp and rfp['start_date'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">End Date</label>
-              <input type="date" name="end_date" class="form-control"
-                     value="{{ rfp['end_date'] if rfp and rfp['end_date'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Alt. Start</label>
-              <input type="date" name="alt_start_date" class="form-control"
-                     value="{{ rfp['alt_start_date'] if rfp and rfp['alt_start_date'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Alt. End</label>
-              <input type="date" name="alt_end_date" class="form-control"
-                     value="{{ rfp['alt_end_date'] if rfp and rfp['alt_end_date'] else '' }}">
-            </div>
-          </div>
-
-          <div class="row g-3 mb-3">
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Peak Rooms</label>
-              <input type="number" name="peak_rooms" class="form-control"
-                     value="{{ rfp['peak_rooms'] if rfp and rfp['peak_rooms'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Total Room Nights</label>
-              <input type="number" name="total_room_nights" class="form-control"
-                     value="{{ rfp['total_room_nights'] if rfp and rfp['total_room_nights'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">Total Attendees</label>
-              <input type="number" name="total_attendees" class="form-control"
-                     value="{{ rfp['total_attendees'] if rfp and rfp['total_attendees'] else '' }}">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label fw-semibold">F&B Budget ($)</label>
-              <input type="number" name="f_and_b_budget" step="0.01" class="form-control"
-                     value="{{ rfp['f_and_b_budget'] if rfp and rfp['f_and_b_budget'] else '' }}">
-            </div>
-          </div>
-
-          <div class="row g-3 mb-3">
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Response Due</label>
-              <input type="date" name="response_due_date" class="form-control"
-                     value="{{ rfp['response_due_date'] if rfp and rfp['response_due_date'] else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Decision Due</label>
-              <input type="date" name="decision_due_date" class="form-control"
-                     value="{{ rfp['decision_due_date'] if rfp and rfp['decision_due_date'] else '' }}">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label fw-semibold">Status</label>
-              <select name="status" class="form-select">
-                {% for val, color, label in all_statuses %}
-                <option value="{{ val }}" {% if rfp and rfp['status'] == val %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-
-          <div class="mb-3">
-            <label class="form-label fw-semibold">Notes</label>
-            <textarea name="notes" class="form-control" rows="3">{{ rfp['notes'] if rfp and rfp['notes'] else '' }}</textarea>
-          </div>
-
-          <div class="d-flex gap-2">
-            <button type="submit" class="btn btn-primary">
-              <i class="bi bi-check-lg me-1"></i>{% if rfp %}Save Changes{% else %}Create RFP{% endif %}
-            </button>
-            <a href="{{ url_for('rfp_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
-          </div>
-
-        </form>
+<div class="card mb-3" style="max-width:800px">
+  <div class="card-header">Event Details</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Client Organization <span class="text-danger">*</span></label>
+        <input type="text" name="client_org" class="form-control" required
+               value="{{ rfp['client_org'] if rfp else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Event Name</label>
+        <input type="text" name="event_name" class="form-control"
+               value="{{ rfp['event_name'] if rfp else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Cvent RFP Code</label>
+        <input type="text" name="rfp_code" class="form-control font-monospace"
+               value="{{ rfp['rfp_code'] if rfp and rfp['rfp_code'] else '' }}"
+               placeholder="e.g. K2N4XQYNFQL">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">RFP Name</label>
+        <input type="text" name="rfp_name" class="form-control"
+               value="{{ rfp['rfp_name'] if rfp and rfp['rfp_name'] else '' }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Linked Booking ID</label>
+        <input type="text" name="booking_id" class="form-control"
+               value="{{ rfp['booking_id'] if rfp and rfp['booking_id'] else '' }}"
+               placeholder="Once contracted">
       </div>
     </div>
   </div>
 </div>
 
+<div class="card mb-3" style="max-width:800px">
+  <div class="card-header">Dates</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Preferred Start</label>
+        <input type="date" name="start_date" class="form-control"
+               value="{{ rfp['start_date'] if rfp and rfp['start_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Preferred End</label>
+        <input type="date" name="end_date" class="form-control"
+               value="{{ rfp['end_date'] if rfp and rfp['end_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt Start</label>
+        <input type="date" name="alt_start_date" class="form-control"
+               value="{{ rfp['alt_start_date'] if rfp and rfp['alt_start_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt End</label>
+        <input type="date" name="alt_end_date" class="form-control"
+               value="{{ rfp['alt_end_date'] if rfp and rfp['alt_end_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Response Due</label>
+        <input type="date" name="response_due_date" class="form-control"
+               value="{{ rfp['response_due_date'] if rfp and rfp['response_due_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Decision Due</label>
+        <input type="date" name="decision_due_date" class="form-control"
+               value="{{ rfp['decision_due_date'] if rfp and rfp['decision_due_date'] else '' }}">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3" style="max-width:800px">
+  <div class="card-header">Room Block &amp; Budget</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Peak Rooms</label>
+        <input type="number" name="peak_rooms" class="form-control"
+               value="{{ rfp['peak_rooms'] if rfp and rfp['peak_rooms'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Total Room Nights</label>
+        <input type="number" name="total_room_nights" class="form-control"
+               value="{{ rfp['total_room_nights'] if rfp and rfp['total_room_nights'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Total Attendees</label>
+        <input type="number" name="total_attendees" class="form-control"
+               value="{{ rfp['total_attendees'] if rfp and rfp['total_attendees'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">F&amp;B Budget ($)</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="number" step="100" name="f_and_b_budget" class="form-control"
+                 value="{{ rfp['f_and_b_budget']|int if rfp and rfp['f_and_b_budget'] else '' }}">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3" style="max-width:800px">
+  <div class="card-header">Status &amp; Notes</div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Status</label>
+        <select name="status" class="form-select">
+          {% for val, color, label in all_statuses %}
+          <option value="{{ val }}" {% if rfp and rfp['status'] == val %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Notes</label>
+        <textarea name="notes" class="form-control" rows="3">{{ rfp['notes'] if rfp and rfp['notes'] else '' }}</textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="d-flex gap-2" style="max-width:800px">
+  <button type="submit" class="btn btn-primary">
+    <i class="bi bi-check-lg me-1"></i>{% if rfp %}Save Changes{% else %}Create RFP{% endif %}
+  </button>
+  <a href="{{ url_for('rfp_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+</div>
+
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('rfpFileInput').addEventListener('change', function () {
+  var file = this.files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.docx')) return;
+
+  var label = document.getElementById('rfpParseStatus');
+  if (!label) {
+    label = document.createElement('span');
+    label.id = 'rfpParseStatus';
+    label.className = 'text-muted small ms-2';
+    this.parentNode.appendChild(label);
+  }
+  label.textContent = 'Reading…';
+
+  var fd = new FormData();
+  fd.append('rfp_file', file);
+
+  fetch('{{ url_for("rfp_parse_document") }}', { method: 'POST', body: fd })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d._error) { label.textContent = 'Could not parse file.'; return; }
+      var filled = 0;
+      var fieldMap = {
+        rfp_name:          'rfp_name',
+        rfp_code:          'rfp_code',
+        event_name:        'event_name',
+        client_org:        'client_org',
+        start_date:        'start_date',
+        end_date:          'end_date',
+        response_due_date: 'response_due_date',
+        decision_due_date: 'decision_due_date',
+        total_attendees:   'total_attendees',
+        f_and_b_budget:    'f_and_b_budget',
+        total_room_nights: 'total_room_nights',
+        peak_rooms:        'peak_rooms',
+      };
+      Object.keys(fieldMap).forEach(function (key) {
+        if (!d[key]) return;
+        var el = document.querySelector('[name="' + fieldMap[key] + '"]');
+        if (el) { el.value = d[key]; filled++; }
+      });
+      label.className = filled > 0 ? 'text-success small ms-2' : 'text-muted small ms-2';
+      label.textContent = filled > 0 ? '✓ ' + filled + ' fields filled from document' : 'No fields found in document';
+    })
+    .catch(function () { label.textContent = 'Parse failed.'; });
+});
+</script>
 {% endblock %}

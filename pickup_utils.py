@@ -1762,3 +1762,100 @@ def extract_template_metadata(file_bytes):
         pass
 
     return {'merge_fields': merge_fields, 'sections': sections}
+
+
+# ── Cvent RFP Document Parser ─────────────────────────────────────────────────
+
+def parse_rfp_docx(file_bytes):
+    """
+    Parse a Cvent RFP Word document (.docx) and extract key fields.
+    Returns a dict with any of these keys populated (None if not found):
+        rfp_name, rfp_code, event_name, client_org,
+        start_date, end_date, response_due_date, decision_due_date,
+        total_attendees, f_and_b_budget, total_room_nights, peak_rooms
+    """
+    import io as _io
+    import re as _re
+    import zipfile
+    from lxml import etree as _et
+    from datetime import datetime as _dt
+
+    try:
+        with zipfile.ZipFile(_io.BytesIO(file_bytes)) as z:
+            xml = z.read('word/document.xml')
+    except Exception:
+        return {}
+
+    root = _et.fromstring(xml)
+    ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+    lines = []
+    for p in root.findall('.//w:p', ns):
+        line = ''.join(t.text or '' for t in p.findall('.//w:t', ns)).strip()
+        if line:
+            lines.append(line)
+
+    def _after(label_keywords, max_gap=2):
+        for i, l in enumerate(lines):
+            ll = l.lower()
+            if all(kw.lower() in ll for kw in label_keywords):
+                for j in range(1, max_gap + 1):
+                    if i + j < len(lines):
+                        v = lines[i + j].strip()
+                        if v:
+                            return v
+        return None
+
+    def _parse_date(s):
+        if not s:
+            return None
+        s = _re.sub(r'^[A-Za-z]{3},\s*', '', s.strip())
+        for fmt in ('%b %d, %Y', '%B %d, %Y', '%m/%d/%Y', '%Y-%m-%d'):
+            try:
+                return _dt.strptime(s.strip(), fmt).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+        return None
+
+    def _parse_date_range(s):
+        if not s:
+            return None, None
+        parts = _re.split(r'\s*[-–]\s*', s, maxsplit=1)
+        return _parse_date(parts[0]), _parse_date(parts[1]) if len(parts) > 1 else None
+
+    def _parse_currency(s):
+        if not s:
+            return None
+        m = _re.search(r'[\d,]+\.?\d*', s)
+        return float(m.group().replace(',', '')) if m else None
+
+    def _parse_int(s):
+        if not s:
+            return None
+        m = _re.search(r'\d[\d,]*', s)
+        return int(m.group().replace(',', '')) if m else None
+
+    rfp_name          = _after(['RFP Name'])
+    rfp_code          = _after(['RFP Code'])
+    response_due      = _parse_date(_after(['Response Due Date']))
+    decision_due      = _parse_date(_after(['Decision Due Date']))
+    total_attendees   = _parse_int(_after(['Total Attendees']))
+    f_and_b_budget    = _parse_currency(_after(['Food and Beverage Budget']))
+    total_room_nights = _parse_int(_after(['Total Room Nights']))
+    peak_rooms        = _parse_int(_after(['Peak Room Nights']))
+    client_org        = _after(['Organization Name'])
+    start_date, end_date = _parse_date_range(_after(['Event Dates']))
+
+    return {
+        'rfp_name':          rfp_name,
+        'rfp_code':          rfp_code,
+        'event_name':        rfp_name,
+        'client_org':        client_org,
+        'response_due_date': response_due,
+        'decision_due_date': decision_due,
+        'total_attendees':   total_attendees,
+        'f_and_b_budget':    f_and_b_budget,
+        'total_room_nights': total_room_nights,
+        'peak_rooms':        peak_rooms,
+        'start_date':        start_date,
+        'end_date':          end_date,
+    }
