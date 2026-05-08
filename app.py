@@ -5177,7 +5177,9 @@ def rfp_detail(rid):
     if not rfp:
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
-    hotels = db.execute('SELECT * FROM rfp_hotel WHERE rfp_id=? ORDER BY id', (rid,)).fetchall()
+    _hotel_order = {'selected':0,'shortlisted':1,'proposal_received':2,'pending':3,'eliminated':4,'declined':5}
+    hotels = db.execute('SELECT * FROM rfp_hotel WHERE rfp_id=?', (rid,)).fetchall()
+    hotels = sorted(hotels, key=lambda h: _hotel_order.get(h['status'] or 'pending', 3))
     notes = db.execute('SELECT * FROM rfp_note WHERE rfp_id=? ORDER BY note_date DESC', (rid,)).fetchall()
     return render_template('rfp_detail.html', rfp=rfp, hotels=hotels, notes=notes,
                            statuses=RFP_STATUS_MAP, all_statuses=RFP_STATUSES)
@@ -5512,9 +5514,22 @@ def rfp_hotel_delete(rid, hid):
 @app.route('/rfp/<int:rid>/hotel/<int:hid>/select', methods=['POST'])
 def rfp_hotel_select(rid, hid):
     db = get_db()
-    db.execute("UPDATE rfp_hotel SET status='pending' WHERE rfp_id=?", (rid,))
+    # Select this hotel and update the RFP status
     db.execute("UPDATE rfp_hotel SET status='selected' WHERE id=? AND rfp_id=?", (hid, rid))
     db.execute("UPDATE rfp SET status='hotel_selected', updated_at=datetime('now') WHERE id=?", (rid,))
+    # Handle other hotels: remove or mark eliminated
+    others_action = request.form.get('others_action', 'keep')
+    if others_action == 'remove':
+        db.execute("DELETE FROM rfp_hotel WHERE rfp_id=? AND id!=?", (rid, hid))
+    else:
+        db.execute("UPDATE rfp_hotel SET status='eliminated' WHERE rfp_id=? AND id!=? AND status NOT IN ('selected','declined')", (rid, hid))
+    # Optional proposal upload
+    pf = request.files.get('proposal_file')
+    if pf and pf.filename:
+        db.execute(
+            "UPDATE rfp_hotel SET proposal_filename=?, proposal_data=?, updated_at=datetime('now') WHERE id=? AND rfp_id=?",
+            (pf.filename, pf.read(), hid, rid)
+        )
     db.commit()
     flash('Hotel selected.', 'success')
     return redirect(url_for('rfp_detail', rid=rid))

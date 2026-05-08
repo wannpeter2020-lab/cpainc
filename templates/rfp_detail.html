@@ -152,7 +152,8 @@
       </thead>
       <tbody>
         {% for h in hotels %}
-        <tr {% if h['status'] == 'selected' %}class="table-success"{% endif %}>
+        {% set hs = h['status'] or 'pending' %}
+        <tr {% if hs == 'selected' %}class="table-success"{% elif hs == 'eliminated' %}class="text-muted"{% endif %}>
           <td class="fw-semibold">
             {{ h['hotel_name'] }}
             {% if h['brand'] %}<div class="text-muted small">{{ h['brand'] }}</div>{% endif %}
@@ -167,24 +168,30 @@
           <td class="text-end small">{% if h['proposed_rate'] %}${{ '{:,.2f}'.format(h['proposed_rate']|float) }}{% else %}—{% endif %}</td>
           <td class="text-center small">{% if h['commission_pct'] %}{{ '{:.1f}'.format(h['commission_pct']|float) }}%{% else %}—{% endif %}</td>
           <td>
-            {% if h['status'] == 'selected' %}
-            <span class="badge bg-success">Selected</span>
-            {% elif h['status'] == 'declined' %}
-            <span class="badge bg-danger">Declined</span>
+            {% if hs == 'selected' %}
+              <span class="badge bg-success">Selected</span>
+            {% elif hs == 'shortlisted' %}
+              <span class="badge bg-primary">Shortlisted</span>
+            {% elif hs == 'proposal_received' %}
+              <span class="badge bg-info text-dark">Proposal Received</span>
+            {% elif hs == 'eliminated' %}
+              <span class="badge bg-secondary">Eliminated</span>
+            {% elif hs == 'declined' %}
+              <span class="badge bg-danger">Declined</span>
             {% else %}
-            <span class="badge bg-secondary">Pending</span>
+              <span class="badge bg-secondary">Pending</span>
             {% endif %}
           </td>
           <td>
             {% if h['proposal_data'] %}
             <a href="{{ url_for('rfp_hotel_proposal_download', rid=rfp['id'], hid=h['id']) }}"
-               class="btn btn-sm btn-outline-secondary">
+               class="btn btn-sm btn-outline-secondary" title="{{ h['proposal_filename'] }}">
               <i class="bi bi-download"></i>
             </a>
             {% else %}
             <form method="post" action="{{ url_for('rfp_hotel_upload_proposal', rid=rfp['id'], hid=h['id']) }}"
                   enctype="multipart/form-data" class="d-inline">
-              <label class="btn btn-sm btn-outline-secondary mb-0">
+              <label class="btn btn-sm btn-outline-secondary mb-0" title="Upload proposal">
                 <i class="bi bi-upload"></i>
                 <input type="file" name="proposal_file" class="d-none" onchange="this.closest('form').submit()">
               </label>
@@ -192,12 +199,16 @@
             {% endif %}
           </td>
           <td class="text-end text-nowrap">
-            {% if h['status'] != 'selected' %}
-            <form method="post" action="{{ url_for('rfp_hotel_select', rid=rfp['id'], hid=h['id']) }}" class="d-inline">
-              <button class="btn btn-sm btn-success" title="Select this hotel">
-                <i class="bi bi-check-lg"></i>
-              </button>
-            </form>
+            {% if hs != 'selected' %}
+            <button class="btn btn-sm btn-success"
+                    title="Select this hotel"
+                    onclick="openSelectModal(this)"
+                    data-hid="{{ h['id'] }}"
+                    data-hotel-name="{{ h['hotel_name'] | e }}"
+                    data-has-proposal="{{ '1' if h['proposal_data'] else '0' }}"
+                    data-select-url="{{ url_for('rfp_hotel_select', rid=rfp['id'], hid=h['id']) }}">
+              <i class="bi bi-check-lg"></i>
+            </button>
             {% endif %}
             <a href="{{ url_for('rfp_hotel_edit', rid=rfp['id'], hid=h['id']) }}"
                class="btn btn-sm btn-outline-secondary">
@@ -255,4 +266,85 @@
   </div>
 </div>
 
+<!-- ── Select Hotel Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="selectHotelModal" tabindex="-1" aria-labelledby="selectHotelModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="selectHotelForm" method="post" enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title" id="selectHotelModalLabel">
+            <i class="bi bi-check-circle-fill text-success me-2"></i>Select Hotel
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-3">
+            Confirm <strong id="modalHotelName"></strong> as the selected hotel for this RFP.
+          </p>
+
+          <!-- Proposal upload — shown only when no proposal is on file -->
+          <div id="proposalUploadSection" class="alert alert-info py-2 mb-3">
+            <div class="d-flex align-items-start gap-2">
+              <i class="bi bi-file-earmark-word fs-5 mt-1"></i>
+              <div>
+                <div class="fw-semibold">Upload Cvent proposal now?</div>
+                <div class="small text-muted mb-2">Attach the hotel's Word doc proposal from Cvent (optional — you can upload it later too).</div>
+                <input type="file" name="proposal_file" class="form-control form-control-sm" accept=".docx,.doc,.pdf">
+              </div>
+            </div>
+          </div>
+
+          <!-- Other hotels disposition -->
+          <div class="border rounded p-3">
+            <div class="fw-semibold mb-2">What should happen to the other hotels?</div>
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="radio" name="others_action" id="othersKeep" value="keep" checked>
+              <label class="form-check-label" for="othersKeep">
+                <strong>Keep</strong>
+                <span class="text-muted ms-1 small">— mark as <span class="badge bg-secondary">Eliminated</span>, kept for reference</span>
+              </label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="radio" name="others_action" id="othersRemove" value="remove">
+              <label class="form-check-label" for="othersRemove">
+                <strong>Remove from this RFP</strong>
+                <span class="text-danger ms-1 small">— permanently deleted, cannot be undone</span>
+              </label>
+            </div>
+            <div id="removeWarning" class="alert alert-warning py-2 mt-2 small mb-0 d-none">
+              <i class="bi bi-exclamation-triangle-fill me-1"></i>
+              All other hotels will be permanently removed from this RFP.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-check-lg me-1"></i>Confirm Selection
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openSelectModal(btn) {
+  document.getElementById('modalHotelName').textContent = btn.dataset.hotelName;
+  document.getElementById('selectHotelForm').action = btn.dataset.selectUrl;
+  var hasProposal = btn.dataset.hasProposal === '1';
+  document.getElementById('proposalUploadSection').classList.toggle('d-none', hasProposal);
+  document.getElementById('othersKeep').checked = true;
+  document.getElementById('removeWarning').classList.add('d-none');
+  new bootstrap.Modal(document.getElementById('selectHotelModal')).show();
+}
+document.querySelectorAll('input[name="others_action"]').forEach(function(r) {
+  r.addEventListener('change', function() {
+    document.getElementById('removeWarning').classList.toggle('d-none', this.value !== 'remove');
+  });
+});
+</script>
 {% endblock %}
