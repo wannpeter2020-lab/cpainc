@@ -2250,6 +2250,18 @@ def _parse_one_grid(ws, sheet_name, start_col):
             if isinstance(v, (int, float)) and v > 0:
                 contracted_block[ds] = int(v)
 
+    # Remove any entry where the value = sum of all others AND > each individual value
+    # (it's a "Total" column that shares a date column with a real checkout date)
+    if len(contracted_block) > 2:
+        block_vals = list(contracted_block.values())
+        total_sum  = sum(block_vals)
+        last_date  = max(contracted_block.keys())
+        last_val   = contracted_block[last_date]
+        rest_vals  = [v for d, v in contracted_block.items() if d != last_date]
+        rest_sum   = sum(rest_vals)
+        if last_val == rest_sum and last_val > max(rest_vals):
+            del contracted_block[last_date]
+
     total_block_rooms = sum(contracted_block.values()) if contracted_block else 0
 
     # ── Rate & attrition from cutoff row ─────────────────────────────────────
