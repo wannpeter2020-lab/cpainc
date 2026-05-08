@@ -4821,13 +4821,13 @@ def _open_in_outlook(cid, subject, to_addr, cc_list, body_html, email_type,
                      attachments=None):
     """Open an Outlook compose window with subject, recipients, HTML body, and optional attachments.
     Returns (True, None) on success or (False, error_str) on failure.
-    Only works on macOS (osascript) — callers should guard against Linux/Windows as needed.
+    Only works on macOS (osascript).
     """
     import subprocess, tempfile, os, platform
     from datetime import date as _date
 
-    if platform.system() not in ('Darwin', 'Windows'):
-        return False, 'Outlook launch is only available when running the app locally on your Mac or PC — not from the hosted site.'
+    if platform.system() != 'Darwin':
+        return False, 'Outlook launch is only available when running the app locally on your Mac — not from the hosted site.'
 
     def esc(s):
         return str(s or '').replace('\\', '\\\\').replace('"', '\\"')
@@ -4850,17 +4850,17 @@ def _open_in_outlook(cid, subject, to_addr, cc_list, body_html, email_type,
         for p in (attachments or []) if p and os.path.exists(p)
     )
 
-    script = (
-        'tell application "Microsoft Outlook"\n'
-        f'    set htmlContent to (read (POSIX file "{tmp.name}") as «class utf8»)\n'
-        f'    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}", content:htmlContent}}\n'
-        f'    {to_line}\n'
-        f'    {cc_lines}\n'
-        f'    {attach_lines}\n'
-        '    open theMsg\n'
-        '    activate\n'
-        'end tell\n'
-    )
+    script = f'''
+tell application "Microsoft Outlook"
+    set htmlContent to (read (POSIX file "{tmp.name}") as «class utf8»)
+    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}", content:htmlContent}}
+    {to_line}
+    {cc_lines}
+    {attach_lines}
+    open theMsg
+    activate
+end tell
+'''
     try:
         subprocess.run(['osascript', '-e', script], timeout=20)
         attach_note = f' + {len(attachments)} attachment(s)' if attachments else ''
@@ -4883,13 +4883,14 @@ def _open_in_outlook(cid, subject, to_addr, cc_list, body_html, email_type,
 
 @app.route('/pickup/<int:cid>/email/housing')
 def pickup_email_housing(cid):
-    """Build Housing History Form, attach it, and open in Outlook addressed to hotel."""
+    """Generate the Housing History Form, save to temp file, and open in Outlook with attachment."""
     from datetime import datetime as dt
+
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
         flash('Event not found.', 'error')
-        return redirect(url_for('pickup_dashboard'))
+        return redirect(url_for('pickup_event', cid=cid))
 
     pipeline = None
     if config['booking_id']:
@@ -4897,9 +4898,11 @@ def pickup_email_housing(cid):
             'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
         ).fetchone()
 
-    hotel_contacts = json.loads(config['hotel_contacts'] or '[]')
-    hotel_email    = next((c.get('email', '') for c in hotel_contacts if c.get('email')), '') or ''
-    hotel_contact  = next((c.get('name', '') for c in hotel_contacts if c.get('name')), '') or ''
+    sorted_dates  = sorted(json.loads(config['contracted_block'] or '{}').keys())
+    org_name      = (pipeline['AccountName'] or '') if pipeline else (config['organization'] or '')
+    event_name    = config['event_name'] or config['organization'] or ''
+    hotel_email   = config['hotel_contact_email'] or ''
+    hotel_contact = config['hotel_contact'] or ''
 
     if not hotel_email.strip():
         flash(
@@ -4909,10 +4912,6 @@ def pickup_email_housing(cid):
         )
         return redirect(url_for('pickup_event', cid=cid))
 
-    sorted_dates = sorted(json.loads(config['contracted_block'] or '{}').keys())
-    event_name   = config['event_name'] or config['organization'] or ''
-    org_name     = (pipeline['AccountName'] if pipeline else None) or config['organization'] or ''
-
     if sorted_dates:
         start_str  = dt.strptime(sorted_dates[0],  '%Y-%m-%d').strftime('%m/%d/%Y')
         end_str    = dt.strptime(sorted_dates[-1], '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -4920,7 +4919,7 @@ def pickup_email_housing(cid):
     else:
         date_range = ''
 
-    # Build the Excel form and save with a proper event-based filename
+    # Build filled Excel and save to a named temp file (must persist until Outlook attaches it)
     wb, _ = _build_housing_form_wb(config, pipeline)
     safe_name   = event_name.replace('/', '-').replace(' ', '_')[:50]
     attach_path = f'/tmp/Housing_History_{safe_name}.xlsx'
@@ -4937,9 +4936,8 @@ def pickup_email_housing(cid):
         f"If you have any questions please reach out.</p>"
     )
 
-    cc_list = [a.strip() for a in (config['cc_emails'] or '').replace(';', ',').split(',') if a.strip()]
-    ok, err = _open_in_outlook(cid, subject, hotel_email, cc_list, body_html,
-                               'housing', attachments=[attach_path])
+    ok, err = _open_in_outlook(cid, subject, hotel_email, [],
+                               body_html, 'housing', attachments=[attach_path])
     if ok:
         flash('Housing History email opened in Outlook with form attached — review and send.', 'success')
     else:
@@ -4957,9 +4955,8 @@ def pickup_email_hotel(cid):
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
 
-    hotel_contacts = json.loads(config['hotel_contacts'] or '[]')
-    hotel_email    = next((c.get('email', '') for c in hotel_contacts if c.get('email')), '') or ''
-    hotel_contact  = next((c.get('name', '') for c in hotel_contacts if c.get('name')), '') or ''
+    hotel_email   = config['hotel_contact_email'] or ''
+    hotel_contact = config['hotel_contact'] or ''
 
     if not hotel_email.strip():
         flash(
@@ -4969,9 +4966,9 @@ def pickup_email_hotel(cid):
         )
         return redirect(url_for('pickup_event', cid=cid))
 
-    email      = build_hotel_email(config)
-    body_html  = email.get('body', '').replace('\n', '<br>')
-    cc_list    = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+    email     = build_hotel_email(config)
+    body_html = email.get('body', '').replace('\n', '<br>')
+    cc_list   = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
 
     ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
                                cc_list, body_html, 'hotel')
