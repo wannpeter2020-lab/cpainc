@@ -4817,16 +4817,169 @@ def pickup_rooming_download_csv(cid, rl_id):
                     headers={'Content-Disposition': f'attachment; filename="{base}_parsed.csv"'})
 
 
+def _open_in_outlook(cid, subject, to_addr, cc_list, body_html, email_type,
+                     attachments=None):
+    """Open an Outlook compose window with subject, recipients, HTML body, and optional attachments.
+    Returns (True, None) on success or (False, error_str) on failure.
+    Only works on macOS (osascript) — callers should guard against Linux/Windows as needed.
+    """
+    import subprocess, tempfile, os, platform
+    from datetime import date as _date
+
+    if platform.system() not in ('Darwin', 'Windows'):
+        return False, 'Outlook launch is only available when running the app locally on your Mac or PC — not from the hosted site.'
+
+    def esc(s):
+        return str(s or '').replace('\\', '\\\\').replace('"', '\\"')
+
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+    tmp.write(body_html)
+    tmp.close()
+
+    to_line = (
+        f'make new to recipient at theMsg with properties '
+        f'{{email address:{{address:"{esc(to_addr)}"}}}}'
+        if to_addr else ''
+    )
+    cc_lines = '\n    '.join(
+        f'make new cc recipient at theMsg with properties {{email address:{{address:"{esc(a)}"}}}}'
+        for a in cc_list if a
+    )
+    attach_lines = '\n    '.join(
+        f'make new attachment at theMsg with properties {{file:(POSIX file "{esc(p)}") as alias}}'
+        for p in (attachments or []) if p and os.path.exists(p)
+    )
+
+    script = (
+        'tell application "Microsoft Outlook"\n'
+        f'    set htmlContent to (read (POSIX file "{tmp.name}") as «class utf8»)\n'
+        f'    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}", content:htmlContent}}\n'
+        f'    {to_line}\n'
+        f'    {cc_lines}\n'
+        f'    {attach_lines}\n'
+        '    open theMsg\n'
+        '    activate\n'
+        'end tell\n'
+    )
+    try:
+        subprocess.run(['osascript', '-e', script], timeout=20)
+        attach_note = f' + {len(attachments)} attachment(s)' if attachments else ''
+        db = get_db()
+        db.execute(
+            "INSERT INTO pickup_contact_log (config_id, contact_date, contact_type, notes) VALUES (?,?,?,?)",
+            (cid, _date.today().isoformat(), 'email_sent',
+             f'Opened in Outlook — {email_type} email{attach_note} — To: {to_addr}')
+        )
+        db.commit()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
+@app.route('/pickup/<int:cid>/email/housing')
+def pickup_email_housing(cid):
+    """Build Housing History Form, attach it, and open in Outlook addressed to hotel."""
+    from datetime import datetime as dt
+    db = get_db()
+    config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    pipeline = None
+    if config['booking_id']:
+        pipeline = db.execute(
+            'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
+        ).fetchone()
+
+    hotel_contacts = json.loads(config['hotel_contacts'] or '[]')
+    hotel_email    = next((c.get('email', '') for c in hotel_contacts if c.get('email')), '') or ''
+    hotel_contact  = next((c.get('name', '') for c in hotel_contacts if c.get('name')), '') or ''
+
+    if not hotel_email.strip():
+        flash(
+            f'No email address on file for {hotel_contact or "the hotel contact"}. '
+            f'Please add it using the Edit button.',
+            'warning'
+        )
+        return redirect(url_for('pickup_event', cid=cid))
+
+    sorted_dates = sorted(json.loads(config['contracted_block'] or '{}').keys())
+    event_name   = config['event_name'] or config['organization'] or ''
+    org_name     = (pipeline['AccountName'] if pipeline else None) or config['organization'] or ''
+
+    if sorted_dates:
+        start_str  = dt.strptime(sorted_dates[0],  '%Y-%m-%d').strftime('%m/%d/%Y')
+        end_str    = dt.strptime(sorted_dates[-1], '%Y-%m-%d').strftime('%m/%d/%Y')
+        date_range = f"{start_str} – {end_str}"
+    else:
+        date_range = ''
+
+    # Build the Excel form and save with a proper event-based filename
+    wb, _ = _build_housing_form_wb(config, pipeline)
+    safe_name   = event_name.replace('/', '-').replace(' ', '_')[:50]
+    attach_path = f'/tmp/Housing_History_{safe_name}.xlsx'
+    wb.save(attach_path)
+
+    first_name = hotel_contact.split(',')[-1].strip().split()[0] if hotel_contact else 'Team'
+    subject    = f"Final Housing History Form for {event_name}, {org_name}, {date_range}"
+    body_html  = (
+        f"<p>Dear {first_name},</p>"
+        f"<p>Please see the attached Housing History form for <strong>{event_name}</strong>. "
+        f"Please fill in all the relevant areas highlighted in yellow. "
+        f"Please include the relevant pre and post days in the count. "
+        f"Attach the final rooming list to your email response to me. "
+        f"If you have any questions please reach out.</p>"
+    )
+
+    cc_list = [a.strip() for a in (config['cc_emails'] or '').replace(';', ',').split(',') if a.strip()]
+    ok, err = _open_in_outlook(cid, subject, hotel_email, cc_list, body_html,
+                               'housing', attachments=[attach_path])
+    if ok:
+        flash('Housing History email opened in Outlook with form attached — review and send.', 'success')
+    else:
+        flash(f'Could not open Outlook: {err}', 'error')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
 @app.route('/pickup/<int:cid>/email/hotel')
 def pickup_email_hotel(cid):
+    """Open a hotel pickup-status email directly in Outlook."""
     from pickup_utils import build_hotel_email
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
-    email = build_hotel_email(config)
-    return render_template('pickup_email_preview.html', config=config, email=email, email_type='hotel')
+
+    hotel_contacts = json.loads(config['hotel_contacts'] or '[]')
+    hotel_email    = next((c.get('email', '') for c in hotel_contacts if c.get('email')), '') or ''
+    hotel_contact  = next((c.get('name', '') for c in hotel_contacts if c.get('name')), '') or ''
+
+    if not hotel_email.strip():
+        flash(
+            f'No email address on file for {hotel_contact or "the hotel contact"}. '
+            f'Please add it using the Edit button.',
+            'warning'
+        )
+        return redirect(url_for('pickup_event', cid=cid))
+
+    email      = build_hotel_email(config)
+    body_html  = email.get('body', '').replace('\n', '<br>')
+    cc_list    = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+
+    ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
+                               cc_list, body_html, 'hotel')
+    if ok:
+        flash('Hotel email opened in Outlook — review and send when ready.', 'success')
+    else:
+        flash(f'Could not open Outlook: {err}', 'error')
+    return redirect(url_for('pickup_event', cid=cid))
 
 
 @app.route('/pickup/<int:cid>/email/client')
