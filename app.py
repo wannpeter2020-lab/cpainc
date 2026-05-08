@@ -4921,69 +4921,116 @@ def pickup_export_row(cid):
     return render_template('pickup_export_row.html', config=config, row_text=row_text)
 
 
-@app.route('/pickup/<int:cid>/upload-hhr', methods=['POST'])
-def pickup_upload_hhr(cid):
-    """Upload a Cvent Housing History Report and store parsed stats."""
-    db = get_db()
-    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
-    if not config:
-        flash('Event not found.', 'error')
-        return redirect(url_for('pickup_dashboard'))
-    f = request.files.get('hhr_file')
-    if not f or not f.filename:
-        flash('No file selected.', 'warning')
-        return redirect(url_for('pickup_event', cid=cid))
-    file_bytes = f.read()
-    try:
-        from pickup_utils import parse_hhr_excel
-        stats = parse_hhr_excel(file_bytes)
-    except Exception as e:
-        flash(f'Could not parse HHR file: {e}', 'danger')
-        return redirect(url_for('pickup_event', cid=cid))
-    db.execute(
-        "UPDATE pickup_config SET hhr_filename=?, hhr_data=?, hhr_stats=? WHERE id=?",
-        (f.filename, file_bytes, json.dumps(stats), cid)
-    )
-    db.commit()
-    flash(f'Housing History Report uploaded — {int(stats.get("final_total_pickup") or 0)} rooms final pickup.', 'success')
-    return redirect(url_for('pickup_event', cid=cid))
-
-
 @app.route('/pickup/<int:cid>/hhr/download')
 def pickup_hhr_download(cid):
     import io as _io
     db = get_db()
     config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
-    if not config or not config['hhr_data']:
-        flash('No HHR on file.', 'error')
+    if not config:
+        flash('Event not found.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    return send_file(_io.BytesIO(config['hhr_data']),
-                     download_name=config['hhr_filename'] or 'housing_history.xlsx',
+    hhr = db.execute(
+        'SELECT filename, file_data FROM housing_history_files WHERE booking_id=? ORDER BY id DESC LIMIT 1',
+        (config['booking_id'],)
+    ).fetchone()
+    if not hhr or not hhr['file_data']:
+        flash('No Housing History Report on file.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    return send_file(_io.BytesIO(bytes(hhr['file_data'])),
+                     download_name=hhr['filename'] or 'housing_history.xlsx',
                      as_attachment=True)
+
+
+def _get_post_report_data(cid):
+    """Assemble stats and config_dict for the Post Report from correct DB sources."""
+    db = get_db()
+    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
+    if not config:
+        return None, None, None
+
+    fh = db.execute(
+        "SELECT * FROM pickup_weekly WHERE config_id=? AND label='Final History' ORDER BY id DESC LIMIT 1",
+        (cid,)
+    ).fetchone()
+    if not fh:
+        return config, None, None
+
+    hhr_row = db.execute(
+        'SELECT filename, file_data FROM housing_history_files WHERE booking_id=? ORDER BY id DESC LIMIT 1',
+        (config['booking_id'],)
+    ).fetchone()
+
+    pickup_row = db.execute(
+        'SELECT ActualPickup, TotalRevenue FROM Pickup WHERE BookingID=?',
+        (config['booking_id'],)
+    ).fetchone()
+
+    hhr_stats = {}
+    if hhr_row and hhr_row['file_data']:
+        try:
+            from pickup_utils import parse_hhr_excel
+            hhr_stats = parse_hhr_excel(bytes(hhr_row['file_data']))
+        except Exception:
+            pass
+
+    block = json.loads(config['contracted_block'] or '{}')
+    contracted_total = sum(block.values()) or hhr_stats.get('contracted_total') or 0
+    pbn = json.loads(fh['pickup_by_night'] or '{}') if fh['pickup_by_night'] else {}
+    final_total_pickup = (fh['total_rooms'] or hhr_stats.get('final_total_pickup')
+                          or (float(pickup_row['ActualPickup']) if pickup_row and pickup_row['ActualPickup'] else 0))
+
+    stats = {
+        'organization':         config['organization'] or hhr_stats.get('organization', ''),
+        'hotel':                config['hotel']        or hhr_stats.get('hotel', ''),
+        'event_name':           config['event_name']   or hhr_stats.get('event_name', ''),
+        'contracted_total':     contracted_total,
+        'contracted_block':     block,
+        'contracted_rate':      hhr_stats.get('contracted_rate') or config['contracted_rate'],
+        'final_total_pickup':   final_total_pickup,
+        'final_pickup_by_night': pbn,
+        'pct_of_block':         fh['pct_of_block'] or hhr_stats.get('pct_of_block'),
+        'pct_of_attrition':     fh['pct_of_attrition'],
+        'room_revenue':         hhr_stats.get('room_revenue') or (float(pickup_row['TotalRevenue']) if pickup_row and pickup_row['TotalRevenue'] else None),
+        'fb_revenue':           hhr_stats.get('fb_revenue'),
+        'audit_pickup':         hhr_stats.get('audit_pickup'),
+        'no_shows':             hhr_stats.get('no_shows'),
+        'cancellations':        hhr_stats.get('cancellations'),
+        'hotel_approver':       hhr_stats.get('hotel_approver'),
+        'hotel_approver_email': hhr_stats.get('hotel_approver_email'),
+    }
+
+    config_dict = dict(config)
+    config_dict['hhr_filename'] = (hhr_row['filename'] if hhr_row else None) or 'housing_history.xlsx'
+    config_dict['_hhr_file_data'] = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
+
+    return config_dict, stats, fh
 
 
 @app.route('/pickup/<int:cid>/email/post-report')
 def pickup_email_post_report(cid):
-    db = get_db()
-    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
-    if not config or not config['hhr_stats']:
-        flash('Upload a Housing History Report first.', 'warning')
+    config_dict, stats, fh = _get_post_report_data(cid)
+    if config_dict is None:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+    if stats is None:
+        flash('No Final History on file — import the HHR first via Import → HHR.', 'warning')
         return redirect(url_for('pickup_event', cid=cid))
-    stats = json.loads(config['hhr_stats'])
-    email = _build_post_report_email(config, stats)
-    return render_template('pickup_post_report_email.html', config=config, stats=stats, email=email)
+    email = _build_post_report_email(config_dict, stats)
+    return render_template('pickup_post_report_email.html', config=config_dict, stats=stats, email=email)
 
 
 @app.route('/pickup/<int:cid>/email/post-report/launch-outlook')
 def pickup_email_post_report_outlook(cid):
-    import subprocess, tempfile, os as _os
-    db = get_db()
-    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
-    if not config or not config['hhr_stats']:
-        flash('Upload a Housing History Report first.', 'warning')
+    import subprocess, tempfile
+    config_dict, stats, fh = _get_post_report_data(cid)
+    if config_dict is None:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+    if stats is None:
+        flash('No Final History on file — import the HHR first via Import → HHR.', 'warning')
         return redirect(url_for('pickup_event', cid=cid))
-    stats  = json.loads(config['hhr_stats'])
-    email  = _build_post_report_email(config, stats)
+
+    email     = _build_post_report_email(config_dict, stats)
     html_body = email.get('html_body', '')
     subject   = email.get('subject', '')
     to_addr   = email.get('to', '')
@@ -4992,28 +5039,33 @@ def pickup_email_post_report_outlook(cid):
         return s.replace('\\', '\\\\').replace('"', '\\"')
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
-        t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False, encoding=encoding if mode == 'w' else None)
+        t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
+                                        encoding=encoding if mode == 'w' else None)
         t.write(content); t.close(); return t.name
 
-    # Write HTML to clipboard
     tmp_html = write_tmp(html_body, '.html')
-    clip_jxa = f"""ObjC.import('AppKit'); ObjC.import('Foundation');
-var nsStr = $.NSString.alloc.initWithContentsOfFileEncodingError('{tmp_html}', $.NSUTF8StringEncoding, null);
-var html = ObjC.unwrap(nsStr);
-var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;
-pb.setStringForType($.NSString.all.initWithUTF8String(html), $.NSPasteboardTypeHTML);"""
+    clip_jxa = (
+        "ObjC.import('AppKit'); ObjC.import('Foundation');\n"
+        f"var nsStr = $.NSString.alloc.initWithContentsOfFileEncodingError('{tmp_html}', $.NSUTF8StringEncoding, null);\n"
+        "var html = ObjC.unwrap(nsStr);\n"
+        "var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;\n"
+        "pb.setStringForType($.NSString.alloc.initWithUTF8String(html), $.NSPasteboardTypeHTML);"
+    )
 
-    # Write HHR attachment to temp file
     attach_line = ''
-    if config['hhr_data']:
+    file_data = config_dict.get('_hhr_file_data')
+    if file_data:
         tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
-        tmp_att.write(config['hhr_data']); tmp_att.close()
+        tmp_att.write(file_data); tmp_att.close()
         attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{tmp_att.name}"}}'
 
-    to_line = f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}' if to_addr else ''
+    to_line = (
+        f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}'
+        if to_addr else ''
+    )
 
     from pickup_utils import _build_cc_recipients
-    cc_recipients = _build_cc_recipients(config)
+    cc_recipients = _build_cc_recipients(config_dict)
     cc_lines = '\n    '.join(
         f'make new cc recipient at theMsg with properties {{email address:{{name:"{esc(r["name"])}", address:"{esc(r["email"])}"}}}}'
         for r in cc_recipients
@@ -5036,32 +5088,38 @@ pb.setStringForType($.NSString.all.initWithUTF8String(html), $.NSPasteboardTypeH
     except Exception as exc:
         flash(f'Could not launch Outlook: {exc}', 'error')
         return redirect(url_for('pickup_email_post_report', cid=cid))
-    return render_template('pickup_outlook_paste.html', config=config)
+    return render_template('pickup_outlook_paste.html', config=config_dict)
 
 
 def _build_post_report_email(config, stats):
     """Build the post-event housing history email dict."""
+    from datetime import date as _date
     org        = config['organization'] or stats.get('organization', '')
     event_name = config['event_name']   or stats.get('event_name', '')
     hotel      = config['hotel']        or stats.get('hotel', '')
     to_addr    = config['group_contact_email'] or ''
 
-    ct  = stats.get('contracted_total') or 0
-    fp  = stats.get('final_total_pickup') or 0
-    pct = stats.get('pct_of_block')
+    ct       = stats.get('contracted_total') or 0
+    fp       = stats.get('final_total_pickup') or 0
+    pct      = stats.get('pct_of_block')
     rate     = stats.get('contracted_rate')
-    rev      = stats.get('room_revenue') or stats.get('room_revenue_calc')
+    rev      = stats.get('room_revenue')
     fb_rev   = stats.get('fb_revenue')
     audit    = stats.get('audit_pickup') or 0
     no_shows = stats.get('no_shows') or 0
     cancels  = stats.get('cancellations') or 0
 
-    attrition_rooms = round(ct * (config['attrition_pct'] or 0)) if ct and config['attrition_pct'] else None
-    pct_attrition   = round(fp / attrition_rooms * 100, 1) if attrition_rooms else None
+    attrition_rooms = round(ct * float(config['attrition_pct'] or 0)) if ct and config.get('attrition_pct') else None
+    pct_attrition   = round(fp / attrition_rooms * 100, 1) if attrition_rooms and fp else None
+    if not pct_attrition:
+        pct_attrition_val = stats.get('pct_of_attrition')
+        if pct_attrition_val:
+            pct_attrition = pct_attrition_val
 
     subject = f'{org} — {event_name} | Final Housing History Report'
 
-    # Per-night comparison table rows
+    _dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
     block_nights  = stats.get('contracted_block', {})
     pickup_nights = stats.get('final_pickup_by_night', {})
     all_dates = sorted(set(list(block_nights.keys()) + list(pickup_nights.keys())))
@@ -5070,25 +5128,32 @@ def _build_post_report_email(config, stats):
         b = block_nights.get(d, 0)
         p = pickup_nights.get(d, 0)
         diff = p - b
-        diff_str = (f'+{diff}' if diff > 0 else str(diff)) if diff != 0 else '—'
+        diff_str   = (f'+{diff}' if diff > 0 else str(diff)) if diff != 0 else '—'
         diff_color = '#16a34a' if diff > 0 else ('#dc2626' if diff < 0 else '#6b7280')
+        try:
+            dow = _dow[_date.fromisoformat(d).weekday()]
+        except Exception:
+            dow = ''
+        date_label = f'{d[5:].replace("-", "/")} ({dow})' if dow else d[5:].replace('-', '/')
         night_rows += (
             f'<tr>'
-            f'<td style="padding:4px 10px;border-bottom:1px solid #e5e7eb">{d[5:].replace("-","/")} ({["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][0]})</td>'
+            f'<td style="padding:4px 10px;border-bottom:1px solid #e5e7eb">{date_label}</td>'
             f'<td style="padding:4px 10px;text-align:center;border-bottom:1px solid #e5e7eb">{b or "—"}</td>'
             f'<td style="padding:4px 10px;text-align:center;border-bottom:1px solid #e5e7eb">{p or "—"}</td>'
             f'<td style="padding:4px 10px;text-align:center;border-bottom:1px solid #e5e7eb;color:{diff_color}">{diff_str}</td>'
             f'</tr>'
         )
 
-    pct_str      = f'{pct:.1f}%' if pct is not None else 'N/A'
-    pct_att_str  = f'{pct_attrition:.1f}%' if pct_attrition is not None else 'N/A'
-    rate_str     = f'${rate:,.2f}' if rate else 'N/A'
-    rev_str      = f'${rev:,.2f}' if rev else 'N/A'
-    fb_str       = f'${fb_rev:,.2f}' if fb_rev else 'N/A'
+    pct_str     = f'{pct:.1f}%' if pct is not None else 'N/A'
+    pct_att_str = f'{pct_attrition:.1f}%' if pct_attrition is not None else 'N/A'
+    rate_str    = f'${rate:,.2f}' if rate else 'N/A'
+    rev_str     = f'${rev:,.2f}' if rev else 'N/A'
+    fb_str      = f'${fb_rev:,.2f}' if fb_rev else 'N/A'
+    pct_color   = '#16a34a' if (pct or 0) >= 100 else '#d97706'
+    att_color   = '#16a34a' if (pct_attrition or 0) >= 100 else '#d97706'
 
     html_body = f'''<div style="font-family:Arial,sans-serif;max-width:640px;color:#1f2937">
-<p>Hi {config["group_contact"] or ""},</p>
+<p>Hi {config.get("group_contact") or ""},</p>
 <p>Please find attached the final housing history report for <strong>{event_name}</strong> at <strong>{hotel}</strong>. Below is a summary of the pickup performance.</p>
 
 <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f9fafb;border-radius:8px;overflow:hidden">
@@ -5100,29 +5165,17 @@ def _build_post_report_email(config, stats):
   <tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Final Total Pickup</td>
       <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600">{int(fp):,} room nights</td></tr>
   <tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">% of Contracted Block</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:{'#16a34a' if (pct or 0) >= 100 else '#d97706'}">{pct_str}</td></tr>
-  {f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">% of Attrition Commitment</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:{chr(35)}{"16a34a" if (pct_attrition or 0) >= 100 else "d97706"}">{pct_att_str}</td></tr>' if pct_attrition else ''}
+      <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:{pct_color}">{pct_str}</td></tr>
+  {'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">% of Attrition Commitment</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-weight:600;color:' + att_color + '">' + pct_att_str + '</td></tr>' if pct_attrition else ''}
   <tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Contracted Rate</td>
       <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{rate_str}</td></tr>
   <tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Total Room Revenue</td>
       <td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{rev_str}</td></tr>
-  {f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Food &amp; Beverage Revenue</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{fb_str}</td></tr>' if fb_rev else ''}
-  {f'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Audit Pickup (Outside Block)</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">{int(audit):,} rooms</td></tr>' if audit else ''}
-  {f'<tr><td style="padding:6px 10px">No Shows / Cancellations</td><td style="padding:6px 10px">{int(no_shows):,} / {int(cancels):,}</td></tr>' if (no_shows or cancels) else ''}
+  {'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Food &amp; Beverage Revenue</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">' + fb_str + '</td></tr>' if fb_rev else ''}
+  {'<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">Audit Pickup (Outside Block)</td><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">' + f'{int(audit):,} rooms' + '</td></tr>' if audit else ''}
+  {'<tr><td style="padding:6px 10px">No Shows / Cancellations</td><td style="padding:6px 10px">' + f'{int(no_shows):,} / {int(cancels):,}' + '</td></tr>' if (no_shows or cancels) else ''}
 </table>
-
-<table style="width:100%;border-collapse:collapse;margin:16px 0">
-  <thead>
-    <tr style="background:#e5e7eb">
-      <th style="padding:6px 10px;text-align:left">Night</th>
-      <th style="padding:6px 10px;text-align:center">Block</th>
-      <th style="padding:6px 10px;text-align:center">Pickup</th>
-      <th style="padding:6px 10px;text-align:center">+/−</th>
-    </tr>
-  </thead>
-  <tbody>{night_rows}</tbody>
-</table>
-
+{'<table style="width:100%;border-collapse:collapse;margin:16px 0"><thead><tr style="background:#e5e7eb"><th style="padding:6px 10px;text-align:left">Night</th><th style="padding:6px 10px;text-align:center">Block</th><th style="padding:6px 10px;text-align:center">Pickup</th><th style="padding:6px 10px;text-align:center">+/−</th></tr></thead><tbody>' + night_rows + '</tbody></table>' if night_rows else ''}
 <p>The full Housing History Report is attached. Please don't hesitate to reach out with any questions.</p>
 <p>Best regards,</p>
 </div>'''
