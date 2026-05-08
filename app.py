@@ -5114,7 +5114,9 @@ def pickup_email_hotel(cid):
 
 @app.route('/pickup/<int:cid>/email/client')
 def pickup_email_client(cid):
-    from pickup_utils import build_client_email
+    import platform
+    from datetime import date as _date
+    from pickup_utils import build_client_email, _build_cc_recipients
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     last = db.execute("SELECT * FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC LIMIT 1", (cid,)).fetchone()
@@ -5125,14 +5127,43 @@ def pickup_email_client(cid):
         return redirect(url_for('pickup_dashboard'))
     rl_status    = rl['reconciliation_status'] if rl else None
     weekly_dicts = [dict(w) for w in weekly_list]
-    email = build_client_email(config, last, rl_status, weekly_list=weekly_dicts)
+    email        = build_client_email(config, last, rl_status, weekly_list=weekly_dicts)
+
+    user   = get_current_user()
+    ms_row = db.execute('SELECT user_id FROM UserMicrosoftTokens WHERE user_id=?',
+                        (user['id'],)).fetchone() if user else None
+
+    # ── Web: try Graph API if user has connected Microsoft account ─────────
+    if platform.system() != 'Darwin' and ms_row:
+        html_body     = email.get('html_body') or email.get('body', '').replace('\n', '<br>')
+        to_addr       = (email.get('to') or '').strip()
+        cc_recipients = _build_cc_recipients(config)
+        cc_list       = [r['email'] for r in cc_recipients if r.get('email')]
+        draft_id, err = _create_outlook_draft(
+            user_id=user['id'], subject=email.get('subject', ''),
+            to_addr=to_addr, cc_list=cc_list, body_html=html_body,
+        )
+        if draft_id:
+            db.execute(
+                "INSERT INTO pickup_contact_log (config_id, contact_date, contact_type, notes) VALUES (?,?,?,?)",
+                (cid, _date.today().isoformat(), 'email_sent',
+                 f'Client draft created via Graph API — To: {to_addr}')
+            )
+            db.commit()
+            flash('Draft created in your Outlook Drafts folder. Open Outlook to review and send.', 'success')
+            return redirect(url_for('pickup_event', cid=cid))
+        else:
+            flash(f'Could not create Outlook draft: {err}', 'error')
+
     return render_template('pickup_email_preview.html', config=config, email=email,
-                           email_type='client', rooming_list=rl)
+                           email_type='client', rooming_list=rl,
+                           ms_connected=bool(ms_row))
 
 
 @app.route('/pickup/<int:cid>/email/client/launch-outlook')
 def pickup_email_client_launch_outlook(cid):
-    import subprocess, tempfile
+    import subprocess, tempfile, platform
+    from datetime import date as _date
     from pickup_utils import build_client_email, _build_cc_recipients
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
@@ -5144,12 +5175,37 @@ def pickup_email_client_launch_outlook(cid):
         return redirect(url_for('pickup_dashboard'))
     rl_status    = rl['reconciliation_status'] if rl else None
     weekly_dicts = [dict(w) for w in weekly_list]
-    email = build_client_email(config, last, rl_status, weekly_list=weekly_dicts)
+    email         = build_client_email(config, last, rl_status, weekly_list=weekly_dicts)
     html_body     = email.get('html_body', '')
     subject       = (email.get('subject') or '').strip()
     to_addr       = (email.get('to') or '').strip()
     cc_recipients = _build_cc_recipients(config)
+    cc_list       = [r['email'] for r in cc_recipients if r.get('email')]
 
+    # ── Web: Graph API draft ───────────────────────────────────────────────
+    if platform.system() != 'Darwin':
+        user   = get_current_user()
+        ms_row = db.execute('SELECT user_id FROM UserMicrosoftTokens WHERE user_id=?',
+                            (user['id'],)).fetchone() if user else None
+        if ms_row:
+            draft_id, err = _create_outlook_draft(
+                user_id=user['id'], subject=subject,
+                to_addr=to_addr, cc_list=cc_list, body_html=html_body,
+            )
+            if draft_id:
+                db.execute(
+                    "INSERT INTO pickup_contact_log (config_id, contact_date, contact_type, notes) VALUES (?,?,?,?)",
+                    (cid, _date.today().isoformat(), 'email_sent',
+                     f'Client draft created via Graph API — To: {to_addr}')
+                )
+                db.commit()
+                flash('Draft created in your Outlook Drafts folder. Open Outlook to review and send.', 'success')
+                return redirect(url_for('pickup_event', cid=cid))
+            else:
+                flash(f'Could not create Outlook draft: {err}', 'error')
+        return redirect(url_for('pickup_email_client', cid=cid))
+
+    # ── Local Mac: JXA clipboard + AppleScript ────────────────────────────
     def write_tmp(content, suffix):
         t = tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False, encoding='utf-8')
         t.write(content); t.close(); return t.name
@@ -5164,7 +5220,7 @@ var html = ObjC.unwrap(nsStr);
 var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;
 pb.setStringForType($.NSString.alloc.initWithUTF8String(html), $.NSPasteboardTypeHTML);"""
 
-    to_line = (f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}' if to_addr else '')
+    to_line  = (f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}' if to_addr else '')
     cc_lines = '\n    '.join(f'make new cc recipient at theMsg with properties {{email address:{{name:"{esc(r["name"])}", address:"{esc(r["email"])}"}}}}' for r in cc_recipients)
     outlook_script = (
         'tell application "Microsoft Outlook"\n'
@@ -5176,8 +5232,8 @@ pb.setStringForType($.NSString.alloc.initWithUTF8String(html), $.NSPasteboardTyp
     try:
         clip_path    = write_tmp(clip_jxa, '.js')
         outlook_path = write_tmp(outlook_script, '.applescript')
-        subprocess.run(['osascript', '-l', 'JavaScript', clip_path], check=True)
-        subprocess.Popen(['osascript', outlook_path])
+        subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', clip_path], check=True)
+        subprocess.Popen(['/usr/bin/osascript', outlook_path])
     except Exception as exc:
         flash(f'Could not launch Outlook: {exc}', 'error')
         return redirect(url_for('pickup_email_client', cid=cid))
@@ -5324,9 +5380,7 @@ def pickup_email_post_report(cid):
 @app.route('/pickup/<int:cid>/email/post-report/launch-outlook')
 def pickup_email_post_report_outlook(cid):
     import subprocess, tempfile, platform
-    if platform.system() not in ('Darwin', 'Windows'):
-        flash('Outlook launch is only available when running the app locally on your Mac or PC — not from the hosted site.', 'warning')
-        return redirect(url_for('pickup_email_post_report', cid=cid))
+    from datetime import date as _date
 
     config_dict, stats, fh = _get_post_report_data(cid)
     if config_dict is None:
@@ -5335,6 +5389,35 @@ def pickup_email_post_report_outlook(cid):
     if stats is None:
         flash('No Final History on file — import the HHR first via Import → HHR.', 'warning')
         return redirect(url_for('pickup_event', cid=cid))
+
+    # ── Web: Graph API draft with HHR attachment ───────────────────────────
+    if platform.system() not in ('Darwin', 'Windows'):
+        user   = get_current_user()
+        db     = get_db()
+        ms_row = db.execute('SELECT user_id FROM UserMicrosoftTokens WHERE user_id=?',
+                            (user['id'],)).fetchone() if user else None
+        if ms_row:
+            email        = _build_post_report_email(config_dict, stats)
+            html_body    = email.get('html_body', '')
+            subject      = email.get('subject', '')
+            to_addr      = email.get('to', '')
+            file_data    = config_dict.get('_hhr_file_data')
+            hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
+            from pickup_utils import _build_cc_recipients
+            cc_list = [r['email'] for r in _build_cc_recipients(config_dict) if r.get('email')]
+            draft_id, err = _create_outlook_draft(
+                user_id=user['id'], subject=subject,
+                to_addr=to_addr, cc_list=cc_list, body_html=html_body,
+                attachment_bytes=file_data, attachment_filename=hhr_filename,
+            )
+            if draft_id:
+                flash('Post Report draft created in your Outlook Drafts folder with HHR attached. Open Outlook to review and send.', 'success')
+                return redirect(url_for('pickup_event', cid=config_dict['id']))
+            else:
+                flash(f'Could not create Outlook draft: {err}', 'error')
+        else:
+            flash('Connect your Microsoft account (My Account) to create Outlook drafts from the website.', 'warning')
+        return redirect(url_for('pickup_email_post_report', cid=config_dict['id']))
 
     email     = _build_post_report_email(config_dict, stats)
     html_body = email.get('html_body', '')
