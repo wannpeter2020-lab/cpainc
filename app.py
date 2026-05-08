@@ -5096,7 +5096,13 @@ def pickup_email_post_report_outlook(cid):
         + (f'    {to_line}\n' if to_line else '')
         + (f'    {cc_lines}\n' if cc_lines else '')
         + (f'    {attach_line}\n' if attach_line else '')
-        + '    open theMsg\n    activate\nend tell\n'
+        + '    open theMsg\n'
+        + '    activate\n'
+        + 'end tell\n'
+        + 'delay 2\n'
+        + 'tell application "System Events"\n'
+        + '    keystroke "v" using {command down}\n'
+        + 'end tell\n'
     )
 
     try:
@@ -5107,7 +5113,7 @@ def pickup_email_post_report_outlook(cid):
     except Exception as exc:
         flash(f'Could not launch Outlook: {exc}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    flash('Outlook opened — paste the body with ⌘V after the message loads.', 'success')
+    flash('Post Report email opened in Outlook.', 'success')
     return redirect(url_for('pickup_event', cid=cid))
 
 
