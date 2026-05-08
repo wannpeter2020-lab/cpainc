@@ -2090,3 +2090,227 @@ def parse_crf_excel(file_bytes):
         hotels.append(hotel_dict)
 
     return {'rfp_meta': rfp_meta, 'hotels': hotels}
+
+
+# ── NCSL Pickup Report Excel Importer ────────────────────────────────────────
+
+def parse_pickup_xlsx(file_bytes):
+    """
+    Parse an NCSL-style pickup report Excel workbook.
+    Each sheet = one event/hotel (two side-by-side grids on multi-hotel sheets).
+    Returns list of dicts, one per hotel grid:
+      {sheet_name, organization, hotel, event_name, contact_name, contact_email,
+       booking_id, contracted_block, contracted_rate, attrition_pct, pickups}
+    """
+    import io as _io
+    import re as _re
+    from datetime import date as _date, timedelta as _td, datetime as _dt
+    import openpyxl
+
+    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True)
+    results = []
+
+    for sheet_name in wb.sheetnames:
+        if sheet_name.lower() == 'template':
+            continue
+        ws = wb[sheet_name]
+
+        # Find all grid start columns: look for "PICK-UP UPDATE" in row 1
+        grid_cols = []
+        for col in range(1, 40):
+            v = str(ws.cell(row=1, column=col).value or '').strip().upper()
+            if 'PICK-UP' in v or 'PICKUP' in v:
+                grid_cols.append(col)
+        if not grid_cols:
+            grid_cols = [1]
+
+        for gc in grid_cols:
+            grid = _parse_one_grid(ws, sheet_name, gc)
+            if grid:
+                results.append(grid)
+
+    return results
+
+
+def _parse_one_grid(ws, sheet_name, start_col):
+    """Parse a single hotel grid starting at 1-based start_col."""
+    from datetime import date as _date, timedelta as _td, datetime as _dt
+
+    def _sv(v):
+        if v is None:
+            return ''
+        return str(v).strip()
+
+    def _cell(row, col_offset=0):
+        return ws.cell(row=row, column=start_col + col_offset).value
+
+    def _to_date(val):
+        if val is None:
+            return None
+        if isinstance(val, _dt):
+            return val.strftime('%Y-%m-%d')
+        if hasattr(val, 'strftime'):
+            return val.strftime('%Y-%m-%d')
+        if isinstance(val, (int, float)) and 1000 < val < 100000:
+            try:
+                return (_date(1899, 12, 30) + _td(days=int(val))).strftime('%Y-%m-%d')
+            except Exception:
+                pass
+        s = _sv(val)
+        for fmt in ('%m/%d/%Y', '%Y-%m-%d', '%m/%d/%y', '%B %d, %Y'):
+            try:
+                from datetime import datetime as _dt2
+                return _dt2.strptime(s, fmt).strftime('%Y-%m-%d')
+            except Exception:
+                pass
+        return None
+
+    # ── Scan label rows ───────────────────────────────────────────────────────
+    org_row = hotel_row = event_row = contact_row = email_row = None
+    booking_row = dates_row = block_row = cutoff_row = None
+    first_pickup_row = None
+
+    for row in range(1, 55):
+        lbl = _sv(_cell(row, 0)).lower().rstrip(':').strip()
+        if 'organization' in lbl and org_row is None:
+            org_row = row
+        elif ('hotel' in lbl or 'location' in lbl) and hotel_row is None and 'contact' not in lbl:
+            hotel_row = row
+        elif ('name' in lbl and 'date' in lbl) and event_row is None:
+            event_row = row
+        elif 'contact' in lbl and 'number' not in lbl and 'email' not in lbl and contact_row is None:
+            contact_row = row
+        elif 'email' in lbl and email_row is None:
+            email_row = row
+        elif 'booking' in lbl and booking_row is None:
+            booking_row = row
+        elif lbl == 'dates' and dates_row is None:
+            dates_row = row
+        elif lbl == 'day' and dates_row is None:
+            dates_row = row
+        elif 'amended block' in lbl:
+            block_row = row          # prefer amended over original
+        elif lbl == 'block' and block_row is None:
+            block_row = row
+        elif ('cut-off' in lbl or 'cutoff' in lbl) and cutoff_row is None:
+            cutoff_row = row
+        elif 'date called' in lbl and first_pickup_row is None:
+            first_pickup_row = row
+
+    if dates_row is None:
+        return None
+
+    # ── Header fields ─────────────────────────────────────────────────────────
+    organization  = _sv(_cell(org_row, 1))  if org_row  else 'NCSL'
+    hotel_name    = _sv(_cell(hotel_row, 1)) if hotel_row else ''
+    event_name    = _sv(_cell(event_row, 1)) if event_row else ''
+    contact_name  = _sv(_cell(contact_row, 1)) if contact_row else ''
+    contact_email = _sv(_cell(email_row, 1))   if email_row  else ''
+    booking_id    = _sv(_cell(booking_row, 1)) if booking_row else ''
+
+    # ── Event dates (row 9 equivalent, cols C+ = col_offset 2+) ──────────────
+    event_dates = {}   # col_offset → 'YYYY-MM-DD'
+    for co in range(2, 30):
+        d = _to_date(_cell(dates_row, co))
+        if d:
+            event_dates[co] = d
+        elif event_dates:
+            # Allow one None gap in case cells are merged
+            d2 = _to_date(_cell(dates_row, co + 1))
+            if d2 is None:
+                break
+
+    if not event_dates and dates_row is not None:
+        # Some sheets have day-names on "Dates:" row and actual dates on the next "Day:" row
+        for co in range(2, 30):
+            d = _to_date(_cell(dates_row + 1, co))
+            if d:
+                event_dates[co] = d
+            elif event_dates:
+                d2 = _to_date(_cell(dates_row + 1, co + 1))
+                if d2 is None:
+                    break
+        if event_dates:
+            dates_row = dates_row + 1  # update so block row uses same column mapping
+
+    if not event_dates:
+        return None
+
+    # ── Contracted block ──────────────────────────────────────────────────────
+    contracted_block = {}
+    if block_row:
+        for co, ds in event_dates.items():
+            v = _cell(block_row, co)
+            if isinstance(v, (int, float)) and v > 0:
+                contracted_block[ds] = int(v)
+
+    total_block_rooms = sum(contracted_block.values()) if contracted_block else 0
+
+    # ── Rate & attrition from cutoff row ─────────────────────────────────────
+    contracted_rate = None
+    attrition_pct   = None
+    attrition_rooms = None
+    if cutoff_row:
+        for co in range(4, 12):
+            v = _cell(cutoff_row, co)
+            if isinstance(v, (int, float)) and 50 < v < 2000:
+                contracted_rate = float(v)
+        att_v = _cell(cutoff_row, 5)
+        if isinstance(att_v, (int, float)):
+            attrition_pct   = float(att_v) if att_v <= 1 else att_v / 100.0
+            attrition_rooms = round(total_block_rooms * attrition_pct) if total_block_rooms else None
+
+    # ── Weekly pickup rows ────────────────────────────────────────────────────
+    pickups = []
+    if first_pickup_row:
+        prev_total = None
+        row = first_pickup_row
+        max_row = first_pickup_row + 120
+        while row <= max_row:
+            lbl = _sv(_cell(row, 0)).lower()
+            if 'date called' in lbl:
+                report_date = _to_date(_cell(row, 1))
+                if report_date:
+                    # Pickup values are on the NEXT row
+                    pr = row + 1
+                    pickup_by_night = {}
+                    for co, ds in event_dates.items():
+                        v = _cell(pr, co)
+                        if isinstance(v, (int, float)):
+                            pickup_by_night[ds] = int(v)
+                    # Total column = first col_offset after last date col
+                    total_co = max(event_dates.keys()) + 1
+                    total_v  = _cell(pr, total_co)
+                    if isinstance(total_v, (int, float)):
+                        total_rooms = int(total_v)
+                    else:
+                        total_rooms = sum(pickup_by_night.values())
+
+                    change = (total_rooms - prev_total) if prev_total is not None else None
+                    pct_block    = round(total_rooms / total_block_rooms, 4) if total_block_rooms else None
+                    pct_attrition = round(total_rooms / attrition_rooms, 4) if attrition_rooms else None
+
+                    pickups.append({
+                        'report_date':    report_date,
+                        'pickup_by_night': pickup_by_night,
+                        'total_rooms':    total_rooms,
+                        'change_from_last': change,
+                        'pct_of_block':   pct_block,
+                        'pct_of_attrition': pct_attrition,
+                    })
+                    prev_total = total_rooms
+            row += 1
+
+    return {
+        'sheet_name':      sheet_name,
+        'organization':    organization or 'NCSL',
+        'hotel':           hotel_name,
+        'event_name':      event_name,
+        'contact_name':    contact_name,
+        'contact_email':   contact_email,
+        'booking_id':      booking_id,
+        'contracted_block': contracted_block,
+        'contracted_rate': contracted_rate,
+        'attrition_pct':   attrition_pct,
+        'pickups':         pickups,
+    }

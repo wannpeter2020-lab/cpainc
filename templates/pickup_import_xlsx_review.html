@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Review Pickup Import — CPAinc{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Review Pickup Import</h4>
+  <a href="{{ url_for('pickup_import_xlsx') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<div class="alert alert-info small mb-3">
+  <strong>{{ grids|length }} hotel grid{{ 's' if grids|length != 1 else '' }}</strong> parsed from
+  <strong>{{ filename }}</strong>.
+  Check the boxes for the events you want to import, then click Confirm Import.
+  Events with an existing pickup record will have their block data and pickup reports updated.
+</div>
+
+<form method="post" action="{{ url_for('pickup_import_xlsx_confirm') }}">
+  <input type="hidden" name="grids_json" value="{{ grids_json | e }}">
+
+  <div class="d-flex gap-2 mb-2">
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="checkAll">Check All</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="uncheckAll">Uncheck All</button>
+  </div>
+
+  <div class="table-responsive mb-3">
+    <table class="table table-sm table-bordered align-middle">
+      <thead class="table-light">
+        <tr>
+          <th><input type="checkbox" id="masterCheck" title="Toggle all"></th>
+          <th>Tab</th>
+          <th>Event Name</th>
+          <th>Hotel</th>
+          <th>Booking ID</th>
+          <th class="text-center">Block Nights</th>
+          <th class="text-end">Rate</th>
+          <th class="text-center">Pickups</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in grids %}
+        {% set bid = g.booking_id %}
+        {% set ex = existing.get(bid) %}
+        <tr {% if ex %}class="table-warning"{% endif %}>
+          <td>
+            <input type="checkbox" name="selected" value="{{ loop.index0 }}" checked
+                   class="row-check">
+          </td>
+          <td class="small text-muted">{{ g.sheet_name }}</td>
+          <td>
+            <div class="fw-semibold">{{ g.event_name or '—' }}</div>
+            <div class="text-muted small">{{ g.organization }}</div>
+          </td>
+          <td class="small">{{ g.hotel or '—' }}</td>
+          <td class="small font-monospace">{{ g.booking_id or '—' }}</td>
+          <td class="text-center small">
+            {% set total = g.contracted_block.values() | list | sum %}
+            {{ total if total else '—' }}
+          </td>
+          <td class="text-end small">
+            {% if g.contracted_rate %}
+            ${{ '%.2f' | format(g.contracted_rate) }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-center">
+            <span class="badge bg-secondary">{{ g.pickups | length }}</span>
+          </td>
+          <td class="small">
+            {% if ex %}
+            <span class="badge bg-warning text-dark">Update existing</span>
+            <div class="text-muted" style="font-size:0.75rem">{{ ex.event_name }}</div>
+            {% else %}
+            <span class="badge bg-success">New</span>
+            {% endif %}
+          </td>
+        </tr>
+        <!-- Pickup detail collapse -->
+        {% if g.pickups %}
+        <tr class="pickup-detail d-none" id="detail-{{ loop.index0 }}">
+          <td colspan="9" class="bg-light">
+            <div class="small px-2">
+              <strong>Pickup history ({{ g.pickups | length }} records):</strong>
+              {% for p in g.pickups %}
+              <span class="me-3 text-muted">
+                {{ p.report_date }}: <strong>{{ p.total_rooms }}</strong> rooms
+                {% if p.change_from_last is not none %}
+                ({{ '+' if p.change_from_last >= 0 else '' }}{{ p.change_from_last }})
+                {% endif %}
+              </span>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-check-lg me-1"></i>Confirm Import
+    </button>
+    <a href="{{ url_for('pickup_import_xlsx') }}" class="btn btn-outline-secondary">Cancel</a>
+  </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('checkAll').addEventListener('click', function() {
+  document.querySelectorAll('.row-check').forEach(cb => cb.checked = true);
+  document.getElementById('masterCheck').checked = true;
+});
+document.getElementById('uncheckAll').addEventListener('click', function() {
+  document.querySelectorAll('.row-check').forEach(cb => cb.checked = false);
+  document.getElementById('masterCheck').checked = false;
+});
+document.getElementById('masterCheck').addEventListener('change', function() {
+  document.querySelectorAll('.row-check').forEach(cb => cb.checked = this.checked);
+});
+</script>
+{% endblock %}

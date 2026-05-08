@@ -3910,6 +3910,136 @@ def pickup_dashboard():
                            today=today_str)
 
 
+# ── Import pickup data from Excel (NCSL-style master spreadsheet) ─────────────
+
+@app.route('/pickup/import-xlsx', methods=['GET', 'POST'])
+def pickup_import_xlsx():
+    if request.method == 'GET':
+        return render_template('pickup_import_xlsx.html')
+
+    f = request.files.get('xlsx_file')
+    if not f or not f.filename:
+        flash('Please select an Excel file.', 'warning')
+        return redirect(url_for('pickup_import_xlsx'))
+
+    file_bytes = f.read()
+    try:
+        from pickup_utils import parse_pickup_xlsx
+        grids = parse_pickup_xlsx(file_bytes)
+    except Exception as e:
+        flash(f'Error parsing file: {e}', 'danger')
+        return redirect(url_for('pickup_import_xlsx'))
+
+    if not grids:
+        flash('No valid hotel grids found in the file.', 'warning')
+        return redirect(url_for('pickup_import_xlsx'))
+
+    # Check which booking IDs already have pickup_config records
+    db = get_db()
+    existing = {}
+    for g in grids:
+        bid = g['booking_id']
+        if bid:
+            row = db.execute(
+                'SELECT id, event_name, hotel FROM pickup_config WHERE booking_id=?', (bid,)
+            ).fetchone()
+            if row:
+                existing[bid] = dict(row)
+
+    import json as _json
+    grids_json = _json.dumps(grids)
+    return render_template('pickup_import_xlsx_review.html',
+                           grids=grids, grids_json=grids_json, existing=existing,
+                           filename=f.filename)
+
+
+@app.route('/pickup/import-xlsx/confirm', methods=['POST'])
+def pickup_import_xlsx_confirm():
+    import json as _json
+    from datetime import date
+    grids = _json.loads(request.form.get('grids_json', '[]'))
+    selected_indices = set(request.form.getlist('selected'))
+    db = get_db()
+    today = date.today().isoformat()
+
+    created = updated = skipped = pickups_added = 0
+    for i, g in enumerate(grids):
+        if str(i) not in selected_indices:
+            skipped += 1
+            continue
+
+        bid = g.get('booking_id') or None
+        contracted_block = g.get('contracted_block') or {}
+        contracted_rate  = g.get('contracted_rate')
+        attrition_pct    = g.get('attrition_pct')
+        pickups          = g.get('pickups', [])
+
+        # Derive cutoff_date from last date in contracted_block
+        cutoff_date = None
+        if contracted_block:
+            cutoff_date = max(contracted_block.keys())
+
+        # Build hotel_contacts JSON
+        hc = []
+        if g.get('contact_name') or g.get('contact_email'):
+            hc = [{'name': g.get('contact_name', ''), 'email': g.get('contact_email', '')}]
+
+        # Check existing
+        existing_row = None
+        if bid:
+            existing_row = db.execute(
+                'SELECT id FROM pickup_config WHERE booking_id=?', (bid,)
+            ).fetchone()
+
+        if existing_row:
+            cid = existing_row['id']
+            db.execute('''UPDATE pickup_config SET
+                contracted_block=?, contracted_rate=?, attrition_pct=?, cutoff_date=?,
+                hotel_contacts=?
+                WHERE id=?''',
+                (_json.dumps(contracted_block), contracted_rate, attrition_pct,
+                 cutoff_date, _json.dumps(hc), cid))
+            updated += 1
+        else:
+            db.execute('''INSERT INTO pickup_config
+                (booking_id, organization, event_name, hotel, contracted_block, contracted_rate,
+                 attrition_pct, cutoff_date, hotel_contacts, cc_emails, status,
+                 force_current, force_past)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (bid, g.get('organization', 'NCSL'), g.get('event_name', ''),
+                 g.get('hotel', ''),
+                 _json.dumps(contracted_block), contracted_rate, attrition_pct,
+                 cutoff_date, _json.dumps(hc), '[]', 'active', 0, 0))
+            cid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
+            created += 1
+
+        # Insert pickup_weekly records (skip duplicates by report_date)
+        existing_dates = {r['report_date'] for r in db.execute(
+            'SELECT report_date FROM pickup_weekly WHERE config_id=?', (cid,)).fetchall()}
+
+        for p in pickups:
+            rd = p.get('report_date')
+            if not rd or rd in existing_dates:
+                continue
+            db.execute('''INSERT INTO pickup_weekly
+                (config_id, report_date, pickup_by_night, total_rooms, change_from_last,
+                 pct_of_block, pct_of_attrition, label, notes)
+                VALUES (?,?,?,?,?,?,?,?,?)''',
+                (cid, rd, _json.dumps(p.get('pickup_by_night', {})),
+                 p.get('total_rooms'), p.get('change_from_last'),
+                 p.get('pct_of_block'), p.get('pct_of_attrition'), None, None))
+            pickups_added += 1
+            existing_dates.add(rd)
+
+    db.commit()
+    parts = []
+    if created:   parts.append(f'{created} event{"s" if created != 1 else ""} created')
+    if updated:   parts.append(f'{updated} event{"s" if updated != 1 else ""} updated')
+    if skipped:   parts.append(f'{skipped} skipped')
+    if pickups_added: parts.append(f'{pickups_added} pickup record{"s" if pickups_added != 1 else ""} added')
+    flash('Import complete: ' + ', '.join(parts) + '.', 'success')
+    return redirect(url_for('pickup_dashboard'))
+
 
 @app.route('/pickup/new', methods=['GET', 'POST'])
 def pickup_new_event():
