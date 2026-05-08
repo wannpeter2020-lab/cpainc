@@ -2567,6 +2567,16 @@ def strip_hhr_commission_rows(file_bytes):
 
     gross_revenue = inside_revenue + audit_revenue
 
+    # ── Clear internal fields in row 1 (L1:Q1 — CD Booking #, Currency) ───────
+    for mr in list(ws.merged_cells.ranges):
+        if mr.min_row == 1 and mr.max_row == 1 and mr.min_col >= 12 and mr.max_col <= 17:
+            ws.unmerge_cells(str(mr))
+    for col in range(12, 18):   # columns L through Q
+        try:
+            ws.cell(row=1, column=col).value = None
+        except AttributeError:
+            pass
+
     # ── Delete AUDIT DETAIL section (all rows from that header to end) ────────
     if audit_detail_row:
         ws.delete_rows(audit_detail_row, ws.max_row - audit_detail_row + 1)
