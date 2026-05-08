@@ -54,6 +54,17 @@
       <input type="text" id="email-subject" class="form-control" value="{{ email.subject }}">
     </div>
 
+    {% if show_housing_download %}
+    <div class="alert alert-info py-2 px-3 mb-3" style="font-size:.875rem">
+      <i class="bi bi-paperclip me-1"></i>
+      <strong>Attachment:</strong>
+      <a href="{{ url_for('pickup_housing_form', cid=config['id']) }}" class="ms-1">
+        Download Housing History Form
+      </a>
+      <span class="text-muted ms-2">— download and attach to your email before sending.</span>
+    </div>
+    {% endif %}
+
     {% if email_type == 'client' and rooming_list %}
     <div class="alert alert-info py-2 px-3 mb-3" style="font-size:.875rem">
       <i class="bi bi-paperclip me-1"></i>

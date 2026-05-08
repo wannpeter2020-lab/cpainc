@@ -4884,10 +4884,6 @@ def pickup_email_housing(cid):
     import platform
     from datetime import datetime as dt
 
-    if platform.system() != 'Darwin':
-        flash('Outlook launch only works when running the app locally on your Mac. Open the app at localhost:5051 to use this feature.', 'warning')
-        return redirect(url_for('pickup_event', cid=cid))
-
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
@@ -4913,30 +4909,36 @@ def pickup_email_housing(cid):
     else:
         date_range = ''
 
-    # Build filled Excel and save to a named temp file (must persist until Outlook attaches it)
-    wb, _ = _build_housing_form_wb(config, pipeline)
-    safe_name   = event_name.replace('/', '-').replace(' ', '_')[:50]
-    attach_path = f'/tmp/Housing_History_{safe_name}.xlsx'
-    wb.save(attach_path)
-
     first_name = hotel_contact.split(',')[-1].strip().split()[0] if hotel_contact else 'Team'
     subject    = f"Final Housing History Form for {event_name}, {org_name}, {date_range}"
-    body_html  = (
-        f"<p>Dear {first_name},</p>"
-        f"<p>Please see the attached Housing History form for <strong>{event_name}</strong>. "
+    body_text  = (
+        f"Dear {first_name},\n\n"
+        f"Please see the attached Housing History form for {event_name}. "
         f"Please fill in all the relevant areas highlighted in yellow. "
         f"Please include the relevant pre and post days in the count. "
         f"Attach the final rooming list to your email response to me. "
-        f"If you have any questions please reach out.</p>"
+        f"If you have any questions please reach out."
     )
+    body_html  = body_text.replace('\n\n', '<br><br>').replace('\n', '<br>')
 
-    ok, err = _open_in_outlook(cid, subject, hotel_email, [],
-                               body_html, 'housing', attachments=[attach_path])
-    if ok:
-        flash('Housing History email opened in Outlook with form attached — review and send.', 'success')
-    else:
-        flash(f'Could not open Outlook: {err}', 'error')
-    return redirect(url_for('pickup_event', cid=cid))
+    # ── Local Mac: auto-open Outlook with form attached ────────────────────
+    if platform.system() == 'Darwin':
+        wb, _ = _build_housing_form_wb(config, pipeline)
+        safe_name   = event_name.replace('/', '-').replace(' ', '_')[:50]
+        attach_path = f'/tmp/Housing_History_{safe_name}.xlsx'
+        wb.save(attach_path)
+        ok, err = _open_in_outlook(cid, subject, hotel_email, [],
+                                   body_html, 'housing', attachments=[attach_path])
+        if ok:
+            flash('Housing History email opened in Outlook with form attached — review and send.', 'success')
+        else:
+            flash(f'Could not open Outlook: {err}', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    # ── Web (Railway): show preview page with download + mailto ───────────
+    email = {'to': hotel_email, 'cc': '', 'subject': subject, 'body': body_text}
+    return render_template('pickup_email_preview.html', config=config, email=email,
+                           email_type='hotel', show_housing_download=True)
 
 
 @app.route('/pickup/<int:cid>/email/hotel')
@@ -4945,30 +4947,30 @@ def pickup_email_hotel(cid):
     import platform
     from pickup_utils import build_hotel_email
 
-    if platform.system() != 'Darwin':
-        flash('Outlook launch only works when running the app locally on your Mac. Open the app at localhost:5051 to use this feature.', 'warning')
-        return redirect(url_for('pickup_event', cid=cid))
-
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
 
-    hotel_email   = config['hotel_contact_email'] or ''
-    hotel_contact = config['hotel_contact'] or ''
+    email   = build_hotel_email(config)
+    cc_list = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
 
-    email     = build_hotel_email(config)
-    body_html = email.get('body', '').replace('\n', '<br>')
-    cc_list   = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+    # ── Local Mac: auto-open Outlook ───────────────────────────────────────
+    if platform.system() == 'Darwin':
+        hotel_email = config['hotel_contact_email'] or ''
+        body_html   = email.get('body', '').replace('\n', '<br>')
+        ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
+                                   cc_list, body_html, 'hotel')
+        if ok:
+            flash('Hotel email opened in Outlook — review and send when ready.', 'success')
+        else:
+            flash(f'Could not open Outlook: {err}', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
 
-    ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
-                               cc_list, body_html, 'hotel')
-    if ok:
-        flash('Hotel email opened in Outlook — review and send when ready.', 'success')
-    else:
-        flash(f'Could not open Outlook: {err}', 'error')
-    return redirect(url_for('pickup_event', cid=cid))
+    # ── Web (Railway): show preview page ──────────────────────────────────
+    return render_template('pickup_email_preview.html', config=config, email=email,
+                           email_type='hotel')
 
 
 @app.route('/pickup/<int:cid>/email/client')
