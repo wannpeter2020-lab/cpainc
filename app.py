@@ -4906,14 +4906,6 @@ def pickup_email_housing(cid):
     hotel_email   = config['hotel_contact_email'] or ''
     hotel_contact = config['hotel_contact'] or ''
 
-    if not hotel_email.strip():
-        flash(
-            f'No email address on file for {hotel_contact or "the hotel contact"}. '
-            f'Please add it using the Edit button.',
-            'warning'
-        )
-        return redirect(url_for('pickup_event', cid=cid))
-
     if sorted_dates:
         start_str  = dt.strptime(sorted_dates[0],  '%Y-%m-%d').strftime('%m/%d/%Y')
         end_str    = dt.strptime(sorted_dates[-1], '%Y-%m-%d').strftime('%m/%d/%Y')
@@ -4965,14 +4957,6 @@ def pickup_email_hotel(cid):
 
     hotel_email   = config['hotel_contact_email'] or ''
     hotel_contact = config['hotel_contact'] or ''
-
-    if not hotel_email.strip():
-        flash(
-            f'No email address on file for {hotel_contact or "the hotel contact"}. '
-            f'Please add it using the Edit button.',
-            'warning'
-        )
-        return redirect(url_for('pickup_event', cid=cid))
 
     email     = build_hotel_email(config)
     body_html = email.get('body', '').replace('\n', '<br>')
