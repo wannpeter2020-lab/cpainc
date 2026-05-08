@@ -4859,7 +4859,7 @@ tell application "Microsoft Outlook"
 end tell
 '''
     try:
-        subprocess.run(['osascript', '-e', script], timeout=20)
+        subprocess.run(['/usr/bin/osascript', '-e', script], timeout=20)
         attach_note = f' + {len(attachments)} attachment(s)' if attachments else ''
         db = get_db()
         db.execute(
