@@ -5041,6 +5041,10 @@ def pickup_email_post_report(cid):
 @app.route('/pickup/<int:cid>/email/post-report/launch-outlook')
 def pickup_email_post_report_outlook(cid):
     import subprocess, tempfile, platform
+    if platform.system() not in ('Darwin', 'Windows'):
+        flash('Outlook launch is only available when running the app locally on your Mac or PC — not from the hosted site.', 'warning')
+        return redirect(url_for('pickup_email_post_report', cid=cid))
+
     config_dict, stats, fh = _get_post_report_data(cid)
     if config_dict is None:
         flash('Event not found.', 'error')
