@@ -6448,7 +6448,11 @@ def outlook_calendar():
 # ── Per-user Microsoft OAuth ──────────────────────────────────────────────────
 
 def _ms_redirect_uri():
-    return request.host_url.rstrip('/') + '/auth/microsoft/callback'
+    base = request.host_url.rstrip('/')
+    # Railway is always https — fix scheme if Flask reports http
+    if 'railway.app' in base:
+        base = base.replace('http://', 'https://')
+    return base + '/auth/microsoft/callback'
 
 
 @app.route('/auth/microsoft')
