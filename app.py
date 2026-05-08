@@ -4823,11 +4823,8 @@ def _open_in_outlook(cid, subject, to_addr, cc_list, body_html, email_type,
     Returns (True, None) on success or (False, error_str) on failure.
     Only works on macOS (osascript).
     """
-    import subprocess, tempfile, os, platform
+    import subprocess, tempfile, os
     from datetime import date as _date
-
-    if platform.system() != 'Darwin':
-        return False, 'Outlook launch is only available when running the app locally on your Mac — not from the hosted site.'
 
     def esc(s):
         return str(s or '').replace('\\', '\\\\').replace('"', '\\"')
