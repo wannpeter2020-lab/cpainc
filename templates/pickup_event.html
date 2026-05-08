@@ -113,47 +113,100 @@
 </div>
 
 {# Action buttons #}
-<div class="d-flex flex-wrap gap-2 mb-3">
-  <a href="{{ url_for('pickup_weekly_new', cid=config['id']) }}" class="btn btn-primary btn-sm">
-    <i class="bi bi-plus-circle me-1"></i>Add Weekly Entry
-  </a>
-  <a href="{{ url_for('pickup_rooming_upload', cid=config['id']) }}" class="btn btn-outline-primary btn-sm">
-    <i class="bi bi-upload me-1"></i>Upload Rooming List
-  </a>
-  <a href="{{ url_for('pickup_housing_form', cid=config['id']) }}" class="btn btn-outline-success btn-sm">
-    <i class="bi bi-file-earmark-excel me-1"></i>Housing Form
-  </a>
-  <a href="{{ url_for('pickup_email_housing', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-envelope-check me-1"></i>Email Hotel Housing History Form
-  </a>
-  <a href="{{ url_for('pickup_upload_contract', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-file-earmark-text me-1"></i>
-    {% if config['contract_data'] %}Contract ✓{% else %}Upload Contract{% endif %}
-  </a>
-  {% if config['contract_data'] %}
-  <a href="{{ url_for('pickup_contract_download', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-download me-1"></i>Download Contract
-  </a>
-  {% endif %}
-  {% if past_cutoff %}
-  <a href="{{ url_for('pickup_final_history', cid=config['id']) }}" class="btn btn-outline-{% if has_final_history %}success{% else %}warning{% endif %} btn-sm">
-    <i class="bi bi-flag-fill me-1"></i>{% if has_final_history %}Edit Final History{% else %}Enter Final History{% endif %}
-  </a>
-  {% endif %}
-  <a href="{{ url_for('pickup_email_hotel', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-envelope me-1"></i>Email Hotel
-  </a>
-  <a href="{{ url_for('pickup_email_client', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-envelope-heart me-1"></i>Email Client
-  </a>
-  <a href="{{ url_for('pickup_export_row', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
-    <i class="bi bi-clipboard me-1"></i>Export Row
-  </a>
-  {% if has_final_history %}
-  <a href="{{ url_for('pickup_email_post_report_outlook', cid=config['id']) }}" class="btn btn-success btn-sm">
-    <i class="bi bi-file-earmark-bar-graph me-1"></i>Post Report
-  </a>
-  {% endif %}
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+
+  {# Left: workflow buttons #}
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('pickup_weekly_new', cid=config['id']) }}" class="btn btn-primary btn-sm">
+      <i class="bi bi-plus-circle me-1"></i>Add Weekly Entry
+    </a>
+    <a href="{{ url_for('pickup_rooming_upload', cid=config['id']) }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-upload me-1"></i>Upload Rooming List
+    </a>
+    {% if past_cutoff %}
+    <a href="{{ url_for('pickup_final_history', cid=config['id']) }}" class="btn btn-outline-{% if has_final_history %}success{% else %}warning{% endif %} btn-sm">
+      <i class="bi bi-flag-fill me-1"></i>{% if has_final_history %}Edit Final History{% else %}Enter Final History{% endif %}
+    </a>
+    {% endif %}
+    <a href="{{ url_for('pickup_export_row', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-clipboard me-1"></i>Export Row
+    </a>
+    {% if has_hhr %}
+    <a href="{{ url_for('pickup_housing_form', cid=config['id']) }}" class="btn btn-outline-success btn-sm">
+      <i class="bi bi-file-earmark-excel me-1"></i>Download HHR
+    </a>
+    {% endif %}
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#contractModal">
+      <i class="bi bi-file-earmark-arrow-up me-1"></i>Upload Contract
+    </button>
+    {% if config['contract_data'] %}
+    <a href="{{ url_for('pickup_contract_download', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-download me-1"></i>Download Contract
+    </a>
+    {% endif %}
+  </div>
+
+  {# Right: email buttons (UPS Blue) #}
+  <div class="d-flex flex-wrap gap-2">
+    <a href="{{ url_for('pickup_email_hotel', cid=config['id']) }}"
+       class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
+      <i class="bi bi-envelope me-1"></i>Email Hotel
+    </a>
+    <a href="{{ url_for('pickup_email_client', cid=config['id']) }}"
+       class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
+      <i class="bi bi-envelope-heart me-1"></i>Email Client
+    </a>
+    <a href="{{ url_for('pickup_email_housing', cid=config['id']) }}"
+       class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
+      <i class="bi bi-envelope-check me-1"></i>Email Hotel HHR
+    </a>
+    {% if has_final_history %}
+    <a href="{{ url_for('pickup_email_post_report_outlook', cid=config['id']) }}"
+       class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
+      <i class="bi bi-file-earmark-bar-graph me-1"></i>Email Client HHR Summary
+    </a>
+    {% endif %}
+  </div>
+
+</div>
+
+{# Contract upload modal #}
+<div class="modal fade" id="contractModal" tabindex="-1" aria-labelledby="contractModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('pickup_upload_contract', cid=config['id']) }}"
+            enctype="multipart/form-data">
+        <div class="modal-header">
+          <h5 class="modal-title" id="contractModalLabel">
+            <i class="bi bi-file-earmark-arrow-up me-2"></i>Upload Contract
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">Upload a PDF or Word contract — the app will extract the room block, rate, and cutoff date for your review.</p>
+          <div id="drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3"
+               style="cursor:pointer; border-style:dashed!important">
+            <i class="bi bi-cloud-upload fs-2 text-muted"></i>
+            <p class="mb-1 mt-2">Drag &amp; drop your contract here</p>
+            <p class="text-muted small mb-2">or</p>
+            <input type="file" id="contract_file" name="contract_file"
+                   accept=".pdf,.doc,.docx" class="d-none">
+            <button type="button" class="btn btn-outline-secondary btn-sm"
+                    onclick="document.getElementById('contract_file').click()">
+              Browse Files
+            </button>
+            <p id="file-chosen" class="text-success small mt-2 mb-0" style="display:none"></p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-upload me-1"></i>Upload &amp; Parse
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 {# Weekly history — spreadsheet grid #}
@@ -440,6 +493,41 @@
 
 {% block scripts %}
 <script>
-// fromjson filter is handled server-side
+// Contract upload modal — drag & drop + file chooser
+(function () {
+  const zone   = document.getElementById('drop-zone');
+  const input  = document.getElementById('contract_file');
+  const chosen = document.getElementById('file-chosen');
+
+  if (!zone) return;
+
+  function showFile(name) {
+    chosen.textContent = '✓ ' + name;
+    chosen.style.display = 'block';
+  }
+
+  input.addEventListener('change', function () {
+    if (input.files[0]) showFile(input.files[0].name);
+  });
+
+  zone.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    zone.classList.add('bg-light');
+  });
+  zone.addEventListener('dragleave', function () {
+    zone.classList.remove('bg-light');
+  });
+  zone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    zone.classList.remove('bg-light');
+    const files = e.dataTransfer.files;
+    if (files.length) {
+      const dt = new DataTransfer();
+      dt.items.add(files[0]);
+      input.files = dt.files;
+      showFile(files[0].name);
+    }
+  });
+})();
 </script>
 {% endblock %}

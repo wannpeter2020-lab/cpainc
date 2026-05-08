@@ -4189,13 +4189,19 @@ def pickup_event(cid):
                 past_cutoff = True
         except Exception:
             pass
+    hhr_row = db.execute(
+        'SELECT id FROM housing_history_files WHERE booking_id=? ORDER BY id DESC LIMIT 1',
+        (config['booking_id'],)
+    ).fetchone() if config['booking_id'] else None
+    has_hhr = bool(hhr_row)
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, rooming=rooming,
                            contact_log=contact_log, block=block, all_dates=all_dates,
                            day_map=day_map, contracted_total=contracted_total,
                            attrition_pct=attrition_pct, attrition_rooms=attrition_rooms,
                            past_cutoff=past_cutoff, has_final_history=has_final_history,
-                           today=_date.today().isoformat())
+                           has_hhr=has_hhr, today=_date.today().isoformat())
 
 
 @app.route('/pickup/<int:cid>/upload-contract', methods=['GET', 'POST'])
