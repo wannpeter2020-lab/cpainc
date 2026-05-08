@@ -4881,7 +4881,12 @@ end tell
 @app.route('/pickup/<int:cid>/email/housing')
 def pickup_email_housing(cid):
     """Generate the Housing History Form, save to temp file, and open in Outlook with attachment."""
+    import platform
     from datetime import datetime as dt
+
+    if platform.system() != 'Darwin':
+        flash('Outlook launch only works when running the app locally on your Mac. Open the app at localhost:5051 to use this feature.', 'warning')
+        return redirect(url_for('pickup_event', cid=cid))
 
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
@@ -4945,7 +4950,13 @@ def pickup_email_housing(cid):
 @app.route('/pickup/<int:cid>/email/hotel')
 def pickup_email_hotel(cid):
     """Open a hotel pickup-status email directly in Outlook."""
+    import platform
     from pickup_utils import build_hotel_email
+
+    if platform.system() != 'Darwin':
+        flash('Outlook launch only works when running the app locally on your Mac. Open the app at localhost:5051 to use this feature.', 'warning')
+        return redirect(url_for('pickup_event', cid=cid))
+
     db = get_db()
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
