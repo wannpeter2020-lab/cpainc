@@ -45,7 +45,13 @@
         <th>Days Left</th>
         <th>Last Report</th>
         <th>Email Sent</th>
-        <th>Responded</th>
+        <th style="white-space:nowrap">
+          Responded
+          <button class="btn btn-link btn-sm p-0 ms-1 text-muted"
+                  title="Reset all responded marks"
+                  style="font-size:1rem;vertical-align:middle;line-height:1;"
+                  onclick="resetAllResponded()">⊗</button>
+        </th>
         <th class="text-end">% of Block</th>
         <th class="text-end">% of Attrition</th>
         <th>OTA Rate</th>
@@ -350,6 +356,18 @@ document.querySelectorAll('th.sortable').forEach(function(th) {
     rows.forEach(function(r) { tbody.appendChild(r); });
   });
 });
+
+// ── Reset all responded marks ──────────────────────────────────────────────
+function resetAllResponded() {
+  const filled = document.querySelectorAll('[id^="respond-cell-"] .bi-check-circle-fill');
+  if (!filled.length) return;
+  if (!confirm('Reset all ' + filled.length + ' responded mark' + (filled.length === 1 ? '' : 's') + '?')) return;
+  filled.forEach(function(icon) {
+    const cell = icon.closest('[id^="respond-cell-"]');
+    const cid  = parseInt(cell.id.replace('respond-cell-', ''), 10);
+    quickRespond(cid, 'undo');
+  });
+}
 
 // ── Quick respond ──────────────────────────────────────────────────────────
 function quickRespond(cid, action) {
