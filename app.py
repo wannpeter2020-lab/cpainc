@@ -5006,7 +5006,11 @@ def _get_post_report_data(cid):
     }
 
     config_dict = dict(config)
-    config_dict['hhr_filename'] = (hhr_row['filename'] if hhr_row else None) or 'housing_history.xlsx'
+    # Name the attachment after the event
+    import re as _re
+    _event = (config['event_name'] or config['organization'] or 'Housing History Report').strip()
+    _safe  = _re.sub(r'[\\/*?:"<>|]', '', _event)   # strip chars illegal in filenames
+    config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
 
     # Strip commission rows before client delivery
     raw_bytes = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
