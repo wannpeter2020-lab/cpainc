@@ -5040,7 +5040,7 @@ def pickup_email_post_report(cid):
 
 @app.route('/pickup/<int:cid>/email/post-report/launch-outlook')
 def pickup_email_post_report_outlook(cid):
-    import subprocess, tempfile
+    import subprocess, tempfile, platform
     config_dict, stats, fh = _get_post_report_data(cid)
     if config_dict is None:
         flash('Event not found.', 'error')
@@ -5054,65 +5054,102 @@ def pickup_email_post_report_outlook(cid):
     subject   = email.get('subject', '')
     to_addr   = email.get('to', '')
 
-    def esc(s):
-        return s.replace('\\', '\\\\').replace('"', '\\"')
+    from pickup_utils import _build_cc_recipients
+    cc_recipients = _build_cc_recipients(config_dict)
+
+    file_data = config_dict.get('_hhr_file_data')
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
         t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
                                         encoding=encoding if mode == 'w' else None)
         t.write(content); t.close(); return t.name
 
-    tmp_html = write_tmp(html_body, '.html')
-    clip_jxa = (
-        "ObjC.import('AppKit'); ObjC.import('Foundation');\n"
-        f"var nsStr = $.NSString.alloc.initWithContentsOfFileEncodingError('{tmp_html}', $.NSUTF8StringEncoding, null);\n"
-        "var html = ObjC.unwrap(nsStr);\n"
-        "var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;\n"
-        "pb.setStringForType($.NSString.alloc.initWithUTF8String(html), $.NSPasteboardTypeHTML);"
-    )
-
-    attach_line = ''
-    file_data = config_dict.get('_hhr_file_data')
-    if file_data:
-        tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
-        tmp_att.write(file_data); tmp_att.close()
-        attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{tmp_att.name}"}}'
-
-    to_line = (
-        f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}'
-        if to_addr else ''
-    )
-
-    from pickup_utils import _build_cc_recipients
-    cc_recipients = _build_cc_recipients(config_dict)
-    cc_lines = '\n    '.join(
-        f'make new cc recipient at theMsg with properties {{email address:{{name:"{esc(r["name"])}", address:"{esc(r["email"])}"}}}}'
-        for r in cc_recipients
-    )
-
-    outlook_script = (
-        'tell application "Microsoft Outlook"\n'
-        f'    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}"}}\n'
-        + (f'    {to_line}\n' if to_line else '')
-        + (f'    {cc_lines}\n' if cc_lines else '')
-        + (f'    {attach_line}\n' if attach_line else '')
-        + '    open theMsg\n'
-        + '    activate\n'
-        + 'end tell\n'
-        + 'delay 2\n'
-        + 'tell application "System Events"\n'
-        + '    keystroke "v" using {command down}\n'
-        + 'end tell\n'
-    )
-
     try:
-        clip_path    = write_tmp(clip_jxa, '.js')
-        outlook_path = write_tmp(outlook_script, '.applescript')
-        subprocess.run(['osascript', '-l', 'JavaScript', clip_path], check=True)
-        subprocess.Popen(['osascript', outlook_path])
+        if platform.system() == 'Windows':
+            # ── Windows: PowerShell + Outlook COM ─────────────────────────────
+            tmp_html = write_tmp(html_body, '.html')
+
+            att_path = ''
+            if file_data:
+                tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
+                tmp_att.write(file_data); tmp_att.close()
+                att_path = tmp_att.name.replace('\\', '\\\\')
+
+            cc_str = '; '.join(r['email'] for r in cc_recipients if r.get('email'))
+
+            ps_lines = [
+                '$html = Get-Content -Path \'' + tmp_html.replace("'", "''") + '\' -Raw -Encoding UTF8',
+                '$ol = New-Object -ComObject Outlook.Application',
+                '$mail = $ol.CreateItem(0)',
+                f'$mail.Subject = \'{subject.replace(chr(39), chr(39)*2)}\'',
+                '$mail.HTMLBody = $html',
+            ]
+            if to_addr:
+                ps_lines.append(f'$mail.To = \'{to_addr.replace(chr(39), chr(39)*2)}\'')
+            if cc_str:
+                ps_lines.append(f'$mail.CC = \'{cc_str.replace(chr(39), chr(39)*2)}\'')
+            if att_path:
+                ps_lines.append(f'$mail.Attachments.Add(\'{att_path}\') | Out-Null')
+            ps_lines.append('$mail.Display()')
+
+            ps_script = '\r\n'.join(ps_lines)
+            ps_path   = write_tmp(ps_script, '.ps1')
+            subprocess.Popen(['powershell.exe', '-ExecutionPolicy', 'Bypass',
+                               '-WindowStyle', 'Hidden', '-File', ps_path])
+
+        else:
+            # ── macOS: AppleScript + System Events auto-paste ─────────────────
+            def esc(s):
+                return s.replace('\\', '\\\\').replace('"', '\\"')
+
+            tmp_html = write_tmp(html_body, '.html')
+            clip_jxa = (
+                "ObjC.import('AppKit'); ObjC.import('Foundation');\n"
+                f"var nsStr = $.NSString.alloc.initWithContentsOfFileEncodingError('{tmp_html}', $.NSUTF8StringEncoding, null);\n"
+                "var html = ObjC.unwrap(nsStr);\n"
+                "var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;\n"
+                "pb.setStringForType($.NSString.alloc.initWithUTF8String(html), $.NSPasteboardTypeHTML);"
+            )
+
+            attach_line = ''
+            if file_data:
+                tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
+                tmp_att.write(file_data); tmp_att.close()
+                attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{tmp_att.name}"}}'
+
+            to_line = (
+                f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}'
+                if to_addr else ''
+            )
+            cc_lines = '\n    '.join(
+                f'make new cc recipient at theMsg with properties {{email address:{{name:"{esc(r["name"])}", address:"{esc(r["email"])}"}}}}'
+                for r in cc_recipients
+            )
+
+            outlook_script = (
+                'tell application "Microsoft Outlook"\n'
+                f'    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}"}}\n'
+                + (f'    {to_line}\n' if to_line else '')
+                + (f'    {cc_lines}\n' if cc_lines else '')
+                + (f'    {attach_line}\n' if attach_line else '')
+                + '    open theMsg\n'
+                + '    activate\n'
+                + 'end tell\n'
+                + 'delay 2\n'
+                + 'tell application "System Events"\n'
+                + '    keystroke "v" using {command down}\n'
+                + 'end tell\n'
+            )
+
+            clip_path    = write_tmp(clip_jxa, '.js')
+            outlook_path = write_tmp(outlook_script, '.applescript')
+            subprocess.run(['osascript', '-l', 'JavaScript', clip_path], check=True)
+            subprocess.Popen(['osascript', outlook_path])
+
     except Exception as exc:
         flash(f'Could not launch Outlook: {exc}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
+
     flash('Post Report email opened in Outlook.', 'success')
     return redirect(url_for('pickup_event', cid=cid))
 
