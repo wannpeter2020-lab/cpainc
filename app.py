@@ -5057,12 +5057,22 @@ def pickup_email_post_report_outlook(cid):
     from pickup_utils import _build_cc_recipients
     cc_recipients = _build_cc_recipients(config_dict)
 
-    file_data = config_dict.get('_hhr_file_data')
+    file_data    = config_dict.get('_hhr_file_data')
+    hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
         t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
                                         encoding=encoding if mode == 'w' else None)
         t.write(content); t.close(); return t.name
+
+    def write_named_att(data, filename):
+        """Write attachment bytes to a temp dir using the proper display filename."""
+        import os as _os
+        d = tempfile.mkdtemp()
+        p = _os.path.join(d, filename)
+        with open(p, 'wb') as f:
+            f.write(data)
+        return p
 
     try:
         if platform.system() == 'Windows':
@@ -5071,9 +5081,7 @@ def pickup_email_post_report_outlook(cid):
 
             att_path = ''
             if file_data:
-                tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
-                tmp_att.write(file_data); tmp_att.close()
-                att_path = tmp_att.name.replace('\\', '\\\\')
+                att_path = write_named_att(file_data, hhr_filename).replace('\\', '\\\\')
 
             cc_str = '; '.join(r['email'] for r in cc_recipients if r.get('email'))
 
@@ -5113,9 +5121,8 @@ def pickup_email_post_report_outlook(cid):
 
             attach_line = ''
             if file_data:
-                tmp_att = tempfile.NamedTemporaryFile(mode='wb', suffix='.xlsx', delete=False)
-                tmp_att.write(file_data); tmp_att.close()
-                attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{tmp_att.name}"}}'
+                att_path = write_named_att(file_data, hhr_filename)
+                attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{att_path}"}}'
 
             to_line = (
                 f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}'
