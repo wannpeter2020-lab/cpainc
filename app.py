@@ -3974,15 +3974,25 @@ def pickup_import_xlsx_confirm():
         attrition_pct    = g.get('attrition_pct')
         pickups          = g.get('pickups', [])
 
+        # Contacts
+        hc_name   = g.get('contact_name', '') or ''
+        hc_phone  = g.get('contact_phone', '') or ''
+        hc_email  = g.get('contact_email', '') or ''
+        gc_name   = g.get('gc_name', '') or ''
+        gc_email  = g.get('gc_email', '') or ''
+
         # Derive cutoff_date from last date in contracted_block
         cutoff_date = None
         if contracted_block:
             cutoff_date = max(contracted_block.keys())
 
-        # Build hotel_contacts JSON
+        # Build hotel_contacts JSON (includes phone)
         hc = []
-        if g.get('contact_name') or g.get('contact_email'):
-            hc = [{'name': g.get('contact_name', ''), 'email': g.get('contact_email', '')}]
+        if hc_name or hc_email:
+            entry = {'name': hc_name, 'email': hc_email}
+            if hc_phone:
+                entry['phone'] = hc_phone
+            hc = [entry]
 
         # Check existing
         existing_row = None
@@ -3995,21 +4005,28 @@ def pickup_import_xlsx_confirm():
             cid = existing_row['id']
             db.execute('''UPDATE pickup_config SET
                 contracted_block=?, contracted_rate=?, attrition_pct=?, cutoff_date=?,
-                hotel_contacts=?
+                hotel_contact=?, hotel_contact_email=?, hotel_contacts=?,
+                group_contact=?, group_contact_email=?
                 WHERE id=?''',
                 (_json.dumps(contracted_block), contracted_rate, attrition_pct,
-                 cutoff_date, _json.dumps(hc), cid))
+                 cutoff_date,
+                 hc_name or None, hc_email or None, _json.dumps(hc),
+                 gc_name or None, gc_email or None,
+                 cid))
             updated += 1
         else:
             db.execute('''INSERT INTO pickup_config
                 (booking_id, organization, event_name, hotel, contracted_block, contracted_rate,
-                 attrition_pct, cutoff_date, hotel_contacts, cc_emails, status,
-                 force_current, force_past)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                 attrition_pct, cutoff_date, hotel_contact, hotel_contact_email, hotel_contacts,
+                 group_contact, group_contact_email, cc_emails, status, force_current, force_past)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (bid, g.get('organization', 'NCSL'), g.get('event_name', ''),
                  g.get('hotel', ''),
                  _json.dumps(contracted_block), contracted_rate, attrition_pct,
-                 cutoff_date, _json.dumps(hc), '[]', 'active', 0, 0))
+                 cutoff_date,
+                 hc_name or None, hc_email or None, _json.dumps(hc),
+                 gc_name or None, gc_email or None,
+                 '[]', 'active', 0, 0))
             cid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
             created += 1
 

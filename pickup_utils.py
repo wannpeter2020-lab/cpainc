@@ -2166,7 +2166,7 @@ def _parse_one_grid(ws, sheet_name, start_col):
         return None
 
     # ── Scan label rows ───────────────────────────────────────────────────────
-    org_row = hotel_row = event_row = contact_row = email_row = None
+    org_row = hotel_row = event_row = contact_row = email_row = phone_row = None
     booking_row = dates_row = block_row = cutoff_row = None
     first_pickup_row = None
 
@@ -2180,6 +2180,8 @@ def _parse_one_grid(ws, sheet_name, start_col):
             event_row = row
         elif 'contact' in lbl and 'number' not in lbl and 'email' not in lbl and contact_row is None:
             contact_row = row
+        elif 'number' in lbl and 'booking' not in lbl and phone_row is None:
+            phone_row = row
         elif 'email' in lbl and email_row is None:
             email_row = row
         elif 'booking' in lbl and booking_row is None:
@@ -2201,12 +2203,16 @@ def _parse_one_grid(ws, sheet_name, start_col):
         return None
 
     # ── Header fields ─────────────────────────────────────────────────────────
-    organization  = _sv(_cell(org_row, 1))  if org_row  else 'NCSL'
-    hotel_name    = _sv(_cell(hotel_row, 1)) if hotel_row else ''
-    event_name    = _sv(_cell(event_row, 1)) if event_row else ''
-    contact_name  = _sv(_cell(contact_row, 1)) if contact_row else ''
-    contact_email = _sv(_cell(email_row, 1))   if email_row  else ''
-    booking_id    = _sv(_cell(booking_row, 1)) if booking_row else ''
+    organization   = _sv(_cell(org_row, 1))    if org_row      else 'NCSL'
+    hotel_name     = _sv(_cell(hotel_row, 1))  if hotel_row    else ''
+    event_name     = _sv(_cell(event_row, 1))  if event_row    else ''
+    contact_name   = _sv(_cell(contact_row, 1)) if contact_row else ''
+    contact_phone  = _sv(_cell(phone_row, 1))  if phone_row    else ''
+    contact_email  = _sv(_cell(email_row, 1))  if email_row    else ''
+    booking_id     = _sv(_cell(booking_row, 1)) if booking_row else ''
+    # Customer/group contact — always at col_offset 9 (label at 8) from grid start
+    gc_name  = _sv(_cell(contact_row, 9)) if contact_row else ''
+    gc_email = _sv(_cell(email_row, 9))   if email_row   else ''
 
     # ── Event dates (row 9 equivalent, cols C+ = col_offset 2+) ──────────────
     event_dates = {}   # col_offset → 'YYYY-MM-DD'
@@ -2302,15 +2308,18 @@ def _parse_one_grid(ws, sheet_name, start_col):
             row += 1
 
     return {
-        'sheet_name':      sheet_name,
-        'organization':    organization or 'NCSL',
-        'hotel':           hotel_name,
-        'event_name':      event_name,
-        'contact_name':    contact_name,
-        'contact_email':   contact_email,
-        'booking_id':      booking_id,
+        'sheet_name':       sheet_name,
+        'organization':     organization or 'NCSL',
+        'hotel':            hotel_name,
+        'event_name':       event_name,
+        'contact_name':     contact_name,
+        'contact_phone':    contact_phone,
+        'contact_email':    contact_email,
+        'gc_name':          gc_name,
+        'gc_email':         gc_email,
+        'booking_id':       booking_id,
         'contracted_block': contracted_block,
-        'contracted_rate': contracted_rate,
-        'attrition_pct':   attrition_pct,
-        'pickups':         pickups,
+        'contracted_rate':  contracted_rate,
+        'attrition_pct':    attrition_pct,
+        'pickups':          pickups,
     }
