@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Post Report Email — {{ config['event_name'] }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-envelope-heart me-2"></i>Post Event Report Email</h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back
+  </a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Email Preview</span>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('pickup_hhr_download', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-download me-1"></i>Download HHR
+      </a>
+      <a href="{{ url_for('pickup_email_post_report_outlook', cid=config['id']) }}"
+         class="btn btn-sm btn-primary">
+        <i class="bi bi-box-arrow-up-right me-1"></i>Open in Outlook
+      </a>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="mb-2 small">
+      <strong>To:</strong> {{ email.to or '(no client email on file)' }}<br>
+      <strong>Subject:</strong> {{ email.subject }}<br>
+      <strong>Attachment:</strong> {{ config['hhr_filename'] }}
+    </div>
+    <div class="alert alert-info small py-2 mb-3">
+      <i class="bi bi-info-circle me-1"></i>
+      Click <strong>Open in Outlook</strong> — it will launch a new message with the subject, recipient, and HHR file attached.
+      Paste the body with <strong>⌘V</strong> after Outlook opens (HTML format is pre-copied to your clipboard).
+    </div>
+    <div class="border rounded p-3 bg-white">
+      {{ email.html_body | safe }}
+    </div>
+  </div>
+</div>
+
+<!-- Stats card -->
+<div class="card mb-3" style="max-width:500px">
+  <div class="card-header">Parsed Stats</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <tr><td class="text-muted">Organization</td><td class="fw-semibold">{{ stats.organization }}</td></tr>
+      <tr><td class="text-muted">Hotel</td><td>{{ stats.hotel }}</td></tr>
+      <tr><td class="text-muted">Event</td><td>{{ stats.event_name }}</td></tr>
+      <tr><td class="text-muted">Contracted Block</td><td>{{ stats.contracted_total | int if stats.contracted_total else '—' }} rooms</td></tr>
+      <tr><td class="text-muted">Final Total Pickup</td><td class="fw-semibold">{{ stats.final_total_pickup | int if stats.final_total_pickup else '—' }} rooms</td></tr>
+      <tr><td class="text-muted">% of Block</td>
+          <td class="fw-semibold {% if stats.pct_of_block and stats.pct_of_block >= 100 %}text-success{% else %}text-warning{% endif %}">
+            {{ '%.1f' | format(stats.pct_of_block) }}%
+          </td></tr>
+      <tr><td class="text-muted">Rate</td><td>${{ '%.2f' | format(stats.contracted_rate) if stats.contracted_rate else '—' }}</td></tr>
+      {% if stats.room_revenue %}
+      <tr><td class="text-muted">Room Revenue</td><td>${{ '{:,.2f}'.format(stats.room_revenue) }}</td></tr>
+      {% endif %}
+      {% if stats.fb_revenue %}
+      <tr><td class="text-muted">F&amp;B Revenue</td><td>${{ '{:,.2f}'.format(stats.fb_revenue) }}</td></tr>
+      {% endif %}
+      {% if stats.audit_pickup %}
+      <tr><td class="text-muted">Audit Pickup</td><td>{{ stats.audit_pickup | int }} rooms</td></tr>
+      {% endif %}
+      <tr><td class="text-muted">Report Approved By</td><td class="small">{{ stats.hotel_approver or '—' }}<br>{{ stats.hotel_approver_email or '' }}</td></tr>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

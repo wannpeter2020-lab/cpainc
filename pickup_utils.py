@@ -2335,3 +2335,174 @@ def _parse_one_grid(ws, sheet_name, start_col):
         'attrition_pct':    attrition_pct,
         'pickups':          pickups,
     }
+
+
+def parse_hhr_excel(file_bytes):
+    """
+    Parse a Cvent Client Post Event Housing History Report (.xlsx).
+    Returns a dict of summary stats.
+    """
+    import io as _io
+    import openpyxl
+
+    wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True)
+    ws = wb.active
+
+    def _sv(v):
+        return str(v).strip() if v is not None else ''
+
+    def _num(v):
+        try:
+            return float(v) if v is not None and str(v).strip() != '' else None
+        except (ValueError, TypeError):
+            return None
+
+    def _to_date(v):
+        if v is None:
+            return None
+        if hasattr(v, 'strftime'):
+            return v.strftime('%Y-%m-%d')
+        from datetime import date as _date, timedelta as _td
+        if isinstance(v, (int, float)) and 1000 < v < 200000:
+            try:
+                return (_date(1899, 12, 30) + _td(days=int(v))).strftime('%Y-%m-%d')
+            except Exception:
+                pass
+        s = _sv(v)
+        for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%B %d, %Y'):
+            try:
+                from datetime import datetime as _dt
+                return _dt.strptime(s, fmt).strftime('%Y-%m-%d')
+            except Exception:
+                pass
+        return None
+
+    stats = {}
+    date_cols = {}   # col_index → 'YYYY-MM-DD'
+    contracted_block = {}
+    final_pickup_by_night = {}
+
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        lbl = _sv(row[0].value).lower().rstrip(':').strip() if row[0].value else ''
+        col0 = _sv(row[0].value)
+        col2 = row[2].value if len(row) > 2 else None
+
+        if 'organization' in lbl and not stats.get('organization'):
+            stats['organization'] = _sv(col2)
+        elif 'hotel' in lbl and 'location' not in lbl and not stats.get('hotel'):
+            stats['hotel'] = _sv(col2)
+        elif 'name' in lbl and 'date' in lbl and not stats.get('event_name'):
+            stats['event_name'] = _sv(col2)
+
+        # Date header row — find which columns have dates
+        elif 'date' == lbl and not date_cols:
+            for i, cell in enumerate(row):
+                if i < 2:
+                    continue
+                d = _to_date(cell.value)
+                if d:
+                    date_cols[i] = d
+                elif date_cols:
+                    break
+
+        # Contracted block row
+        elif 'contracted block' in lbl and not contracted_block:
+            for i, d in date_cols.items():
+                if i < len(row):
+                    v = _num(row[i].value)
+                    if v and v > 0:
+                        contracted_block[d] = int(v)
+            # Total in col 12 (index 12)
+            if len(row) > 12:
+                stats['contracted_total'] = _num(row[12].value)
+            if len(row) > 13:
+                stats['contracted_rate'] = _num(row[13].value)
+
+        # Final total pickup
+        elif 'final total pickup' in lbl:
+            for i, d in date_cols.items():
+                if i < len(row):
+                    v = _num(row[i].value)
+                    if v and v > 0:
+                        final_pickup_by_night[d] = int(v)
+            if len(row) > 12:
+                stats['final_total_pickup'] = _num(row[12].value)
+
+        # Total pickup inside block
+        elif 'total pickup inside block' in lbl:
+            if len(row) > 12:
+                stats['pickup_inside_block'] = _num(row[12].value)
+
+        # Audit pickup
+        elif 'total audit pickup' in lbl:
+            if len(row) > 12:
+                stats['audit_pickup'] = _num(row[12].value)
+
+        # No shows / Cancellations
+        elif 'no show' in lbl:
+            if len(row) > 12:
+                stats['no_shows'] = _num(row[12].value)
+        elif 'cancellation' in lbl:
+            if len(row) > 12:
+                stats['cancellations'] = _num(row[12].value)
+
+        # Revenue lines — labels may appear in any column, scan the whole row
+        row_text = ' '.join(_sv(c.value).lower() for c in row)
+        if 'total actualized pickup revenue' in row_text and not stats.get('room_revenue'):
+            for i, cell in enumerate(row):
+                if 'total actualized pickup revenue' in _sv(cell.value).lower():
+                    # value is 2 columns to the right
+                    for j in (i+2, i+1, i+3):
+                        if j < len(row):
+                            v = _num(row[j].value)
+                            if v and v > 0:
+                                stats['room_revenue'] = v
+                                break
+                    break
+        if ('total food' in row_text or ('food' in row_text and 'beverage' in row_text)) and not stats.get('fb_revenue'):
+            for i, cell in enumerate(row):
+                if 'total food' in _sv(cell.value).lower() or ('food' in _sv(cell.value).lower() and 'beverage' in _sv(cell.value).lower()):
+                    for j in (i+2, i+1, i+3):
+                        if j < len(row):
+                            v = _num(row[j].value)
+                            if v and v > 0:
+                                stats['fb_revenue'] = v
+                                break
+                    break
+
+        # Earned comps
+        elif 'total comp amount' in lbl or ('earned comp' in lbl and 'total' in lbl):
+            if len(row) > 12:
+                stats['earned_comps_value'] = _num(row[12].value)
+        elif 'total rns eligible for earned comp' in lbl:
+            if len(row) > 12:
+                stats['earned_comps_rns'] = _num(row[12].value)
+
+        # Hotel accounting sign-off
+        elif 'history report approved' in lbl:
+            for i, cell in enumerate(row):
+                v = _sv(cell.value)
+                if v.lower().startswith('matthew') or (i > 0 and _sv(row[i-1].value).lower() == 'name'):
+                    pass
+            # Scan for Email field
+            for i, cell in enumerate(row):
+                if _sv(cell.value).lower() == 'email' and i+1 < len(row):
+                    stats['hotel_approver_email'] = _sv(row[i+1].value)
+                if _sv(cell.value).lower() == 'name' and i+1 < len(row):
+                    stats['hotel_approver'] = _sv(row[i+1].value)
+                d = _to_date(cell.value)
+                if d and not stats.get('report_date'):
+                    stats['report_date'] = d
+
+    stats['contracted_block']     = contracted_block
+    stats['final_pickup_by_night'] = final_pickup_by_night
+
+    # Derived stats
+    ct = stats.get('contracted_total') or sum(contracted_block.values()) or None
+    fp = stats.get('final_total_pickup')
+    if ct and fp:
+        stats['pct_of_block'] = round(fp / ct * 100, 1)
+    if ct and fp and stats.get('contracted_rate'):
+        stats['room_revenue_calc'] = round(fp * stats['contracted_rate'], 2)
+
+    return stats

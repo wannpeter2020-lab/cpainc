@@ -146,6 +146,21 @@
   <a href="{{ url_for('pickup_export_row', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
     <i class="bi bi-clipboard me-1"></i>Export Row
   </a>
+  <!-- HHR upload + Post Report -->
+  {% if config['hhr_filename'] %}
+  <a href="{{ url_for('pickup_email_post_report', cid=config['id']) }}" class="btn btn-success btn-sm">
+    <i class="bi bi-file-earmark-bar-graph me-1"></i>Post Report
+    <span class="badge bg-white text-success ms-1" style="font-size:.7rem">HHR ✓</span>
+  </a>
+  {% else %}
+  <form method="post" action="{{ url_for('pickup_upload_hhr', cid=config['id']) }}"
+        enctype="multipart/form-data" class="d-inline">
+    <label class="btn btn-outline-success btn-sm mb-0" title="Upload Cvent Housing History Report to enable Post Report email">
+      <i class="bi bi-upload me-1"></i>Upload HHR
+      <input type="file" name="hhr_file" class="d-none" accept=".xlsx,.xls" onchange="this.closest('form').submit()">
+    </label>
+  </form>
+  {% endif %}
 </div>
 
 {# Weekly history — spreadsheet grid #}
