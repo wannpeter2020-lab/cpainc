@@ -2544,10 +2544,10 @@ def strip_hhr_commission_rows(file_bytes):
     wb = load_workbook(_io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
 
-    # ── First pass: collect values we need ────────────────────────────────────
-    inside_revenue = 0.0
-    audit_revenue  = 0.0
-    revenue_row    = None
+    # ── First pass: collect values we need + find AUDIT DETAIL row ───────────
+    inside_revenue   = 0.0
+    audit_revenue    = 0.0
+    audit_detail_row = None   # first row of the AUDIT DETAIL section
 
     for row in ws.iter_rows():
         rnum  = row[0].row
@@ -2555,15 +2555,23 @@ def strip_hhr_commission_rows(file_bytes):
         o_lbl = o_val.lower()
         q_val = ws.cell(row=rnum, column=VALUE_COL).value
 
+        # Detect AUDIT DETAIL header (appears in column D / col 4)
+        d_val = str(ws.cell(row=rnum, column=4).value or '').strip().lower()
+        if d_val == 'audit detail' and audit_detail_row is None:
+            audit_detail_row = rnum
+
         if o_lbl == 'total actualized pickup revenue (inside block)':
-            revenue_row    = rnum
             inside_revenue = float(q_val or 0)
         elif o_lbl == 'total commissionable audit pickup revenue':
             audit_revenue  = float(q_val or 0)
 
     gross_revenue = inside_revenue + audit_revenue
 
-    # ── Second pass: apply changes ─────────────────────────────────────────────
+    # ── Delete AUDIT DETAIL section (all rows from that header to end) ────────
+    if audit_detail_row:
+        ws.delete_rows(audit_detail_row, ws.max_row - audit_detail_row + 1)
+
+    # ── Second pass: apply commission changes ──────────────────────────────────
     for row in ws.iter_rows():
         rnum   = row[0].row
         o_cell = ws.cell(row=rnum, column=LABEL_COL)
