@@ -5106,8 +5106,9 @@ def pickup_email_post_report_outlook(cid):
         subprocess.Popen(['osascript', outlook_path])
     except Exception as exc:
         flash(f'Could not launch Outlook: {exc}', 'error')
-        return redirect(url_for('pickup_email_post_report', cid=cid))
-    return render_template('pickup_outlook_paste.html', config=config_dict)
+        return redirect(url_for('pickup_event', cid=cid))
+    flash('Outlook opened — paste the body with ⌘V after the message loads.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
 
 
 def _build_post_report_email(config, stats):
