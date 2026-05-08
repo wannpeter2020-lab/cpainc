@@ -3096,6 +3096,15 @@ def ensure_auth_tables():
             account_name TEXT    NOT NULL,
             UNIQUE(user_id, account_name)
         );
+        CREATE TABLE IF NOT EXISTS UserMicrosoftTokens (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL UNIQUE REFERENCES Users(id) ON DELETE CASCADE,
+            access_token  TEXT    NOT NULL,
+            refresh_token TEXT    NOT NULL,
+            expires_at    REAL    NOT NULL,
+            ms_user_email TEXT,
+            connected_at  TEXT    DEFAULT (datetime('now'))
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -4878,6 +4887,82 @@ end tell
             pass
 
 
+def _create_outlook_draft(user_id, subject, to_addr, cc_list, body_html,
+                           attachment_bytes=None, attachment_filename=None):
+    """Create a draft in the user's Outlook Drafts folder via Microsoft Graph API.
+    Returns (draft_id, None) on success or (None, error_str) on failure.
+    """
+    import time, base64, requests as _req
+    from config import MS_CLIENT_ID, MS_TENANT_ID, MS_CLIENT_SECRET
+
+    db = get_db()
+    row = db.execute(
+        'SELECT access_token, refresh_token, expires_at FROM UserMicrosoftTokens WHERE user_id = ?',
+        (user_id,)
+    ).fetchone()
+    if not row:
+        return None, 'No Microsoft account connected. Visit My Account to connect.'
+
+    access_token  = row['access_token']
+    refresh_token = row['refresh_token']
+    expires_at    = row['expires_at']
+
+    # Refresh token if expired
+    if time.time() >= expires_at:
+        r = _req.post(
+            f'https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token',
+            data={
+                'grant_type':    'refresh_token',
+                'client_id':     MS_CLIENT_ID,
+                'client_secret': MS_CLIENT_SECRET,
+                'refresh_token': refresh_token,
+                'scope':         'Mail.ReadWrite User.Read offline_access',
+            }
+        )
+        if r.status_code != 200:
+            db.execute('DELETE FROM UserMicrosoftTokens WHERE user_id = ?', (user_id,))
+            db.commit()
+            return None, 'Microsoft token expired. Please reconnect via My Account.'
+        tok           = r.json()
+        access_token  = tok['access_token']
+        refresh_token = tok.get('refresh_token', refresh_token)
+        expires_at    = time.time() + tok.get('expires_in', 3600) - 60
+        db.execute(
+            'UPDATE UserMicrosoftTokens SET access_token=?, refresh_token=?, expires_at=? WHERE user_id=?',
+            (access_token, refresh_token, expires_at, user_id)
+        )
+        db.commit()
+
+    headers = {'Authorization': f'Bearer {access_token}', 'Content-Type': 'application/json'}
+
+    message = {
+        'subject': subject,
+        'body': {'contentType': 'HTML', 'content': body_html},
+        'toRecipients':  [{'emailAddress': {'address': to_addr}}] if to_addr else [],
+        'ccRecipients':  [{'emailAddress': {'address': a}} for a in (cc_list or []) if a],
+    }
+
+    resp = _req.post('https://graph.microsoft.com/v1.0/me/messages', headers=headers, json=message)
+    if resp.status_code not in (200, 201):
+        return None, f'Graph API error {resp.status_code}: {resp.text[:300]}'
+
+    draft_id = resp.json().get('id')
+
+    if attachment_bytes and attachment_filename and draft_id:
+        attach_payload = {
+            '@odata.type':  '#microsoft.graph.fileAttachment',
+            'name':         attachment_filename,
+            'contentBytes': base64.b64encode(attachment_bytes).decode('ascii'),
+            'contentType':  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }
+        _req.post(
+            f'https://graph.microsoft.com/v1.0/me/messages/{draft_id}/attachments',
+            headers=headers, json=attach_payload
+        )
+
+    return draft_id, None
+
+
 @app.route('/pickup/<int:cid>/email/housing')
 def pickup_email_housing(cid):
     """Generate the Housing History Form, save to temp file, and open in Outlook with attachment."""
@@ -4921,6 +5006,8 @@ def pickup_email_housing(cid):
     )
     body_html  = body_text.replace('\n\n', '<br><br>').replace('\n', '<br>')
 
+    user = get_current_user()
+
     # ── Local Mac: auto-open Outlook with form attached ────────────────────
     if platform.system() == 'Darwin':
         wb, _ = _build_housing_form_wb(config, pipeline)
@@ -4935,10 +5022,38 @@ def pickup_email_housing(cid):
             flash(f'Could not open Outlook: {err}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
 
-    # ── Web (Railway): show preview page with download + mailto ───────────
+    # ── Web: try Graph API if user has connected Microsoft account ─────────
+    ms_row = db.execute(
+        'SELECT user_id FROM UserMicrosoftTokens WHERE user_id = ?', (user['id'],)
+    ).fetchone() if user else None
+
+    if ms_row:
+        from datetime import date as _date
+        wb, _ = _build_housing_form_wb(config, pipeline)
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        safe_name = event_name.replace('/', '-').replace(' ', '_')[:50]
+        draft_id, err = _create_outlook_draft(
+            user_id=user['id'], subject=subject, to_addr=hotel_email, cc_list=[],
+            body_html=body_html, attachment_bytes=buf.getvalue(),
+            attachment_filename=f'Housing_History_{safe_name}.xlsx',
+        )
+        if draft_id:
+            db.execute(
+                "INSERT INTO pickup_contact_log (config_id, contact_date, contact_type, notes) VALUES (?,?,?,?)",
+                (cid, _date.today().isoformat(), 'email_sent',
+                 f'Outlook draft created via Graph API — To: {hotel_email} (with attachment)')
+            )
+            db.commit()
+            flash('Draft created in your Outlook Drafts folder with the form attached. Open Outlook to review and send.', 'success')
+            return redirect(url_for('pickup_event', cid=cid))
+        else:
+            flash(f'Could not create Outlook draft: {err}', 'error')
+
+    # ── Fallback: preview page ─────────────────────────────────────────────
     email = {'to': hotel_email, 'cc': '', 'subject': subject, 'body': body_text}
     return render_template('pickup_email_preview.html', config=config, email=email,
-                           email_type='hotel', show_housing_download=True)
+                           email_type='hotel', show_housing_download=True,
+                           ms_connected=bool(ms_row))
 
 
 @app.route('/pickup/<int:cid>/email/hotel')
@@ -4953,13 +5068,14 @@ def pickup_email_hotel(cid):
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
 
-    email   = build_hotel_email(config)
-    cc_list = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+    email       = build_hotel_email(config)
+    hotel_email = config['hotel_contact_email'] or ''
+    cc_list     = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+    body_html   = email.get('body', '').replace('\n', '<br>')
+    user        = get_current_user()
 
     # ── Local Mac: auto-open Outlook ───────────────────────────────────────
     if platform.system() == 'Darwin':
-        hotel_email = config['hotel_contact_email'] or ''
-        body_html   = email.get('body', '').replace('\n', '<br>')
         ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
                                    cc_list, body_html, 'hotel')
         if ok:
@@ -4968,9 +5084,32 @@ def pickup_email_hotel(cid):
             flash(f'Could not open Outlook: {err}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
 
-    # ── Web (Railway): show preview page ──────────────────────────────────
+    # ── Web: try Graph API if user has connected Microsoft account ─────────
+    ms_row = db.execute(
+        'SELECT user_id FROM UserMicrosoftTokens WHERE user_id = ?', (user['id'],)
+    ).fetchone() if user else None
+
+    if ms_row:
+        from datetime import date as _date
+        draft_id, err = _create_outlook_draft(
+            user_id=user['id'], subject=email.get('subject', ''),
+            to_addr=hotel_email, cc_list=cc_list, body_html=body_html,
+        )
+        if draft_id:
+            db.execute(
+                "INSERT INTO pickup_contact_log (config_id, contact_date, contact_type, notes) VALUES (?,?,?,?)",
+                (cid, _date.today().isoformat(), 'email_sent',
+                 f'Outlook draft created via Graph API — To: {hotel_email}')
+            )
+            db.commit()
+            flash('Draft created in your Outlook Drafts folder. Open Outlook to review and send.', 'success')
+            return redirect(url_for('pickup_event', cid=cid))
+        else:
+            flash(f'Could not create Outlook draft: {err}', 'error')
+
+    # ── Fallback: preview page ─────────────────────────────────────────────
     return render_template('pickup_email_preview.html', config=config, email=email,
-                           email_type='hotel')
+                           email_type='hotel', ms_connected=bool(ms_row))
 
 
 @app.route('/pickup/<int:cid>/email/client')
@@ -6304,6 +6443,128 @@ def outlook_calendar():
         flash(f'Could not load calendar: {e}', 'error')
         events = []
     return render_template('outlook_calendar.html', events=events)
+
+
+# ── Per-user Microsoft OAuth ──────────────────────────────────────────────────
+
+def _ms_redirect_uri():
+    return request.host_url.rstrip('/') + '/auth/microsoft/callback'
+
+
+@app.route('/auth/microsoft')
+def auth_microsoft():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    import urllib.parse, secrets as _secrets
+    from config import MS_CLIENT_ID, MS_TENANT_ID
+    state = _secrets.token_urlsafe(16)
+    session['ms_oauth_state'] = state
+    params = {
+        'client_id':     MS_CLIENT_ID,
+        'response_type': 'code',
+        'redirect_uri':  _ms_redirect_uri(),
+        'scope':         'Mail.ReadWrite User.Read offline_access',
+        'response_mode': 'query',
+        'state':         state,
+        'login_hint':    user['email'],
+    }
+    url = (f'https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/authorize?'
+           + urllib.parse.urlencode(params))
+    return redirect(url)
+
+
+@app.route('/auth/microsoft/callback')
+def auth_microsoft_callback():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+
+    error = request.args.get('error_description') or request.args.get('error')
+    if error:
+        flash(f'Microsoft login failed: {error}', 'error')
+        return redirect(url_for('profile'))
+
+    if request.args.get('state') != session.pop('ms_oauth_state', None):
+        flash('Invalid state — please try again.', 'error')
+        return redirect(url_for('profile'))
+
+    code = request.args.get('code')
+    if not code:
+        flash('No authorisation code received from Microsoft.', 'error')
+        return redirect(url_for('profile'))
+
+    import time, requests as _req
+    from config import MS_CLIENT_ID, MS_TENANT_ID, MS_CLIENT_SECRET
+
+    resp = _req.post(
+        f'https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token',
+        data={
+            'grant_type':    'authorization_code',
+            'client_id':     MS_CLIENT_ID,
+            'client_secret': MS_CLIENT_SECRET,
+            'code':          code,
+            'redirect_uri':  _ms_redirect_uri(),
+            'scope':         'Mail.ReadWrite User.Read offline_access',
+        }
+    )
+    if resp.status_code != 200:
+        flash(f'Token exchange failed: {resp.text[:200]}', 'error')
+        return redirect(url_for('profile'))
+
+    tok           = resp.json()
+    access_token  = tok['access_token']
+    refresh_token = tok.get('refresh_token', '')
+    expires_at    = time.time() + tok.get('expires_in', 3600) - 60
+
+    me = _req.get('https://graph.microsoft.com/v1.0/me',
+                  headers={'Authorization': f'Bearer {access_token}'},
+                  params={'$select': 'mail,userPrincipalName'})
+    ms_email = ''
+    if me.status_code == 200:
+        d = me.json()
+        ms_email = d.get('mail') or d.get('userPrincipalName', '')
+
+    db = get_db()
+    db.execute('''
+        INSERT INTO UserMicrosoftTokens (user_id, access_token, refresh_token, expires_at, ms_user_email)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            access_token  = excluded.access_token,
+            refresh_token = excluded.refresh_token,
+            expires_at    = excluded.expires_at,
+            ms_user_email = excluded.ms_user_email,
+            connected_at  = datetime('now')
+    ''', (user['id'], access_token, refresh_token, expires_at, ms_email))
+    db.commit()
+
+    flash(f'Microsoft account connected ({ms_email}).', 'success')
+    return redirect(url_for('profile'))
+
+
+@app.route('/auth/microsoft/disconnect', methods=['POST'])
+def auth_microsoft_disconnect():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    db = get_db()
+    db.execute('DELETE FROM UserMicrosoftTokens WHERE user_id = ?', (user['id'],))
+    db.commit()
+    flash('Microsoft account disconnected.', 'success')
+    return redirect(url_for('profile'))
+
+
+@app.route('/profile')
+def profile():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('login'))
+    db = get_db()
+    ms_row = db.execute(
+        'SELECT ms_user_email, connected_at FROM UserMicrosoftTokens WHERE user_id = ?',
+        (user['id'],)
+    ).fetchone()
+    return render_template('profile.html', user=user, ms_token=ms_row)
 
 
 if __name__ == '__main__':
