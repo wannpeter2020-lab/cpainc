@@ -2586,11 +2586,14 @@ def strip_hhr_commission_rows(file_bytes):
     if audit_detail_row:
         ws.delete_rows(audit_detail_row, ws.max_row - audit_detail_row + 1)
 
-    # ── Clear entire row 1 except col C (the report title) ────────────────────
+    # ── Clear entire row 1 except col C (the report title), then merge C1:K1 ──
     _unmerge_row(ws, 1)
     for col in range(1, max_col + 1):
         if col != 3:
             _safe_clear(ws, 1, col)
+    ws.merge_cells('C1:K1')
+    from openpyxl.styles import Alignment
+    ws['C1'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
     # ── Clear cols P (16), R (18), S (19) for every row ──────────────────────
     # Clear col Q (17) for every row EXCEPT the "Total Actualized Revenue" row
