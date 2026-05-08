@@ -1009,7 +1009,7 @@ def import_voucher():
         We regex-scan every line of the extracted text for this pattern.
         """
         all_text = ''
-        with pdfplumber.open(_io.BytesIO(raw_bytes)) as pdf:
+        with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
             for page in pdf.pages:
                 all_text += (page.extract_text() or '') + '\n'
 
@@ -4279,7 +4279,7 @@ def pickup_contract_download(cid):
     if not row or not row['contract_data']:
         flash('No contract on file.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    buf = _io.BytesIO(row['contract_data'])
+    buf = io.BytesIO(row['contract_data'])
     return send_file(buf, as_attachment=True,
                      download_name=row['contract_filename'] or f'contract_{cid}.pdf')
 
@@ -4368,7 +4368,7 @@ def pickup_housing_form(cid):
 
     wb, event_name = _build_housing_form_wb(config, pipeline)
 
-    buf = _io.BytesIO()
+    buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     safe_name = event_name.replace('/', '-').replace(' ', '_')[:50]
