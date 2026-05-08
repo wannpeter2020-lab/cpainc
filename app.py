@@ -4936,7 +4936,13 @@ def pickup_hhr_download(cid):
     if not hhr or not hhr['file_data']:
         flash('No Housing History Report on file.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    return send_file(_io.BytesIO(bytes(hhr['file_data'])),
+    file_bytes = bytes(hhr['file_data'])
+    try:
+        from pickup_utils import strip_hhr_commission_rows
+        file_bytes = strip_hhr_commission_rows(file_bytes)
+    except Exception:
+        pass
+    return send_file(_io.BytesIO(file_bytes),
                      download_name=hhr['filename'] or 'housing_history.xlsx',
                      as_attachment=True)
 
@@ -5001,7 +5007,16 @@ def _get_post_report_data(cid):
 
     config_dict = dict(config)
     config_dict['hhr_filename'] = (hhr_row['filename'] if hhr_row else None) or 'housing_history.xlsx'
-    config_dict['_hhr_file_data'] = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
+
+    # Strip commission rows before client delivery
+    raw_bytes = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
+    if raw_bytes:
+        try:
+            from pickup_utils import strip_hhr_commission_rows
+            raw_bytes = strip_hhr_commission_rows(raw_bytes)
+        except Exception:
+            pass  # fall back to unstripped file if anything goes wrong
+    config_dict['_hhr_file_data'] = raw_bytes
 
     return config_dict, stats, fh
 
