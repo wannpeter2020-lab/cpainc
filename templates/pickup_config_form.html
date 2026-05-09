@@ -27,7 +27,7 @@
       <div class="col-md-6">
         <label class="form-label fw-semibold">Event Name</label>
         <input type="text" name="event_name" id="event_name" class="form-control"
-               value="{{ pipeline_event or (config['event_name'] if config else '') }}">
+               value="{{ pipeline_event or ((config['event_name'] or '') if config else '') }}">
         {% if pipeline_event %}
         <div class="form-text text-success"><i class="bi bi-check-circle me-1"></i>From pipeline</div>
         {% endif %}
@@ -35,14 +35,14 @@
       <div class="col-md-6">
         <label class="form-label fw-semibold">Booking ID</label>
         <input type="text" name="booking_id" id="bookingId" class="form-control"
-               value="{{ config['booking_id'] if config else '' }}"
+               value="{{ (config['booking_id'] or '') if config else '' }}"
                placeholder="e.g. 239561">
         <div class="form-text" id="bookingIdNote"></div>
       </div>
       <div class="col-md-6">
         <label class="form-label fw-semibold">Spreadsheet Tab Name</label>
         <input type="text" name="tab_name" class="form-control"
-               value="{{ config['tab_name'] if config else '' }}">
+               value="{{ (config['tab_name'] or '') if config else '' }}">
       </div>
     </div>
   </div>
@@ -55,7 +55,7 @@
       <div class="col-md-6">
         <label class="form-label fw-semibold">Hotel Name</label>
         <input type="text" name="hotel" id="hotel" class="form-control"
-               value="{{ config['hotel'] if config else '' }}">
+               value="{{ (config['hotel'] or '') if config else '' }}">
       </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Contracted Rate ($/night)</label>
@@ -76,7 +76,7 @@
       <div class="col-md-3">
         <label class="form-label fw-semibold">Hotel Booking Link</label>
         <input type="text" name="hotel_booking_link" class="form-control"
-               value="{{ config['hotel_booking_link'] if config else '' }}"
+               value="{{ (config['hotel_booking_link'] or '') if config else '' }}"
                placeholder="https://… (optional)">
       </div>
       <div class="col-md-6">
@@ -96,13 +96,13 @@
       <div class="col-md-6">
         <label class="form-label fw-semibold">Hotel Contact Name</label>
         <input type="text" name="hotel_contact" id="hotel_contact" class="form-control"
-               value="{{ config['hotel_contact'] if config else '' }}"
+               value="{{ (config['hotel_contact'] or '') if config else '' }}"
                autocomplete="off" placeholder="Contact name">
       </div>
       <div class="col-md-6">
         <label class="form-label fw-semibold">Hotel Contact Email</label>
-        <input type="email" name="hotel_contact_email" id="hotel_contact_email" class="form-control"
-               value="{{ config['hotel_contact_email'] if config else '' }}"
+        <input type="text" name="hotel_contact_email" id="hotel_contact_email" class="form-control"
+               value="{{ (config['hotel_contact_email'] or '') if config else '' }}"
                placeholder="email@hotel.com">
       </div>
     </div>
@@ -116,13 +116,13 @@
       <div class="col-md-6">
         <label class="form-label fw-semibold">Group Contact Name</label>
         <input type="text" name="group_contact" id="group_contact" class="form-control"
-               value="{{ config['group_contact'] if config else '' }}"
+               value="{{ (config['group_contact'] or '') if config else '' }}"
                autocomplete="off" placeholder="Contact name">
       </div>
       <div class="col-md-6">
         <label class="form-label fw-semibold">Group Contact Email</label>
-        <input type="email" name="group_contact_email" id="group_contact_email" class="form-control"
-               value="{{ config['group_contact_email'] if config else '' }}"
+        <input type="text" name="group_contact_email" id="group_contact_email" class="form-control"
+               value="{{ (config['group_contact_email'] or '') if config else '' }}"
                placeholder="email@client.com">
       </div>
     </div>
@@ -149,7 +149,7 @@
                  value="{{ cc_name }}" placeholder="Name (optional)">
         </div>
         <div class="col-md-6">
-          <input type="email" name="cc_email[]" class="form-control"
+          <input type="text" name="cc_email[]" class="form-control"
                  value="{{ cc_email }}" placeholder="email@example.com">
         </div>
         <div class="col-auto">
@@ -171,7 +171,7 @@
       <div class="col-md-4">
         <label class="form-label fw-semibold">Cutoff Date</label>
         <input type="date" name="cutoff_date" class="form-control"
-               value="{{ config['cutoff_date'] if config else '' }}">
+               value="{{ (config['cutoff_date'] or '') if config else '' }}">
       </div>
       <div class="col-md-4">
         <label class="form-label fw-semibold">Attrition %</label>
@@ -227,7 +227,7 @@
 <div class="card mb-3">
   <div class="card-header">Notes</div>
   <div class="card-body">
-    <textarea name="notes" class="form-control" rows="3">{{ config['notes'] if config else '' }}</textarea>
+    <textarea name="notes" class="form-control" rows="3">{{ (config['notes'] or '') if config else '' }}</textarea>
   </div>
 </div>
 
@@ -339,7 +339,7 @@ document.getElementById('addCcBtn').addEventListener('click', function() {
   row.className = 'row g-2 mb-2 align-items-center cc-row';
   row.innerHTML =
     '<div class="col-md-5"><input type="text" name="cc_name[]" class="form-control" placeholder="Name (optional)"></div>' +
-    '<div class="col-md-6"><input type="email" name="cc_email[]" class="form-control" placeholder="email@example.com"></div>' +
+    '<div class="col-md-6"><input type="text" name="cc_email[]" class="form-control" placeholder="email@example.com"></div>' +
     '<div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger remove-cc" title="Remove"><i class="bi bi-trash"></i></button></div>';
   document.getElementById('ccList').appendChild(row);
   row.querySelector('input[name="cc_name[]"]').focus();
