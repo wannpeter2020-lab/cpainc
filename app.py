@@ -3997,9 +3997,16 @@ def pickup_dashboard():
             'event_end':   all_dates[-1] if all_dates else (c['bk_end'] or None),
         })
 
+    sort_mode = request.args.get('sort', 'date')
+    if sort_mode == 'customer':
+        _cur_sort  = lambda r: ((r['config']['organization'] or r['config']['bk_org'] or '').lower(),
+                                r.get('event_start') or '')
+        current_rows.sort(key=_cur_sort)
+    else:
+        _sort_key = lambda r: r.get('event_start') or ''
+        current_rows.sort(key=_sort_key)
     _sort_key = lambda r: r.get('event_start') or ''
     past_rows.sort(key=_sort_key)
-    current_rows.sort(key=_sort_key)
     future_rows.sort(key=_sort_key)
     archived_rows.sort(key=_sort_key)
 
@@ -4069,7 +4076,7 @@ def pickup_dashboard():
                            current_groups=current_groups, current_group_order=current_group_order,
                            future_groups=future_groups,   future_group_order=future_group_order,
                            past_groups=past_groups,       past_group_order=past_group_order,
-                           today=today_str)
+                           today=today_str, sort_mode=sort_mode)
 
 
 # ── Import pickup data from Excel (NCSL-style master spreadsheet) ─────────────
@@ -5228,6 +5235,556 @@ def pickup_event_report_xlsx(primary_cid):
     safe_name = _re_fn.sub(r'[^a-zA-Z0-9_]+', '_', event_name)
     return send_file(buf, as_attachment=True,
                      download_name=f"{safe_name}_Pace_Report.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/pickup/customer-report-xlsx')
+def pickup_customer_report_xlsx():
+    """Generate multi-tab XLSX: Tab 1 = summary sorted by customer, Tab N = per-event pace report."""
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from datetime import date as _d
+    import io, re as _re
+
+    db    = get_db()
+    today = _d.today()
+    future_cutoff = today + timedelta(days=120)
+
+    configs = db.execute("""
+        SELECT c.*,
+               p.StartDate AS bk_start, p.EndDate AS bk_end,
+               p.EventName AS bk_event, p.AccountName AS bk_org,
+               p.Customer  AS bk_hotel
+        FROM pickup_config c
+        LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
+        WHERE c.status='active'
+    """).fetchall()
+
+    current_events = []
+    for c in configs:
+        block      = json.loads(c['contracted_block'] or '{}')
+        all_dates  = sorted(block.keys())
+        contracted_total = sum(block.values())
+
+        # Determine start date for section classification
+        start_date = None
+        if all_dates:
+            try:
+                start_date = _d.fromisoformat(all_dates[0])
+            except Exception:
+                pass
+        if start_date is None and c['bk_start']:
+            try:
+                start_date = _d.fromisoformat(str(c['bk_start'])[:10])
+            except Exception:
+                pass
+
+        # Classify section (mirrors pickup_dashboard logic)
+        has_final = db.execute(
+            "SELECT COUNT(*) FROM pickup_weekly WHERE config_id=? AND LOWER(label) LIKE '%final%'",
+            (c['id'],)
+        ).fetchone()[0] > 0
+        force_past = bool(c['force_past'])
+        if has_final or force_past:
+            continue
+        if c['force_current']:
+            pass  # include
+        elif start_date is not None and start_date < today:
+            continue
+        elif start_date is not None and start_date > future_cutoff:
+            continue
+
+        # Pull current weekly entries (no historical/final labels)
+        weekly_rows = db.execute("""
+            SELECT report_date, total_rooms, pct_of_block, pct_of_attrition, pickup_by_night
+            FROM pickup_weekly
+            WHERE config_id=?
+              AND (label IS NULL
+                   OR (label NOT LIKE 'ASAS %'
+                       AND label NOT LIKE 'Historical%'
+                       AND LOWER(label) NOT LIKE '%final%'))
+            ORDER BY report_date DESC
+        """, (c['id'],)).fetchall()
+
+        org        = c['organization'] or c['bk_org'] or ''
+        event_name = c['event_name']  or c['bk_event'] or org
+        end_date   = None
+        if all_dates:
+            try:
+                end_date = _d.fromisoformat(all_dates[-1])
+            except Exception:
+                pass
+
+        current_events.append({
+            'config':           c,
+            'block':            block,
+            'event_dates':      all_dates,
+            'contracted_total': contracted_total,
+            'org':              org,
+            'event_name':       event_name,
+            'hotel':            c['hotel'] or c['bk_hotel'] or '',
+            'start_date':       start_date,
+            'end_date':         end_date,
+            'weekly':           [dict(w) for w in weekly_rows],
+        })
+
+    # Sort by organisation then event start
+    current_events.sort(key=lambda r: (r['org'].lower(), str(r['start_date'] or '')))
+
+    # ── Colour / style constants ─────────────────────────────────────────────
+    navy       = "1A3A5C"
+    mid_navy   = "2D5986"
+    setup_fg   = "BFBFBF"   # rows 9–12 gray
+    green_fg   = "92D050"   # final / remaining rows
+    org_hdr_fg = "D9E1F2"   # org separator in summary
+
+    def _fill(hex6):      return PatternFill("solid", fgColor=hex6)
+    def _font(bold=False, size=11, color="000000", italic=False):
+        return Font(bold=bold, size=size, color=color, italic=italic)
+
+    hair  = Side(style='hair')
+    thin  = Side(style='thin')
+    def _border(**kw): return Border(**kw)
+
+    wb = Workbook()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 1 — SUMMARY
+    # ════════════════════════════════════════════════════════════════════════
+    ws1       = wb.active
+    ws1.title = "Summary"
+
+    SUMM_COLS = 13
+    last_ltr  = get_column_letter(SUMM_COLS)
+
+    # Row 1 – title banner
+    ws1.merge_cells(f"A1:{last_ltr}1")
+    ws1["A1"].value     = f"PICK-UP SUMMARY REPORT — {today.year}"
+    ws1["A1"].font      = Font(bold=True, size=18, color="FFFFFF")
+    ws1["A1"].fill      = _fill(navy)
+    ws1["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 30
+
+    # Row 2 – sub-header
+    ws1.merge_cells(f"A2:{last_ltr}2")
+    ws1["A2"].value     = (f"Generated: {today.strftime('%B %d, %Y')}   |   "
+                           f"Current events sorted by customer")
+    ws1["A2"].font      = Font(italic=True, size=10, color="555555")
+    ws1["A2"].alignment = Alignment(horizontal="left", vertical="center")
+    ws1.row_dimensions[2].height = 16
+
+    # Row 3 – column headers
+    hdrs = ["Organization", "Event Name", "Hotel", "Start", "End",
+            "Block", "Pickup", "WoW Chg", "% Block", "% Attrition",
+            "Cutoff", "Days Left", "Status"]
+    for ci, h in enumerate(hdrs, 1):
+        cell            = ws1.cell(3, ci, h)
+        cell.font       = Font(bold=True, color="FFFFFF", size=11)
+        cell.fill       = _fill(mid_navy)
+        cell.alignment  = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[3].height = 18
+
+    # Column widths for summary
+    for ci, w in enumerate([30,30,22,11,11,10,10,10,9,12,12,9,10], 1):
+        ws1.column_dimensions[get_column_letter(ci)].width = w
+
+    # Data rows
+    row_idx  = 4
+    prev_org = None
+    alt_fills = [_fill("F2F7FF"), _fill("FFFFFF")]
+    green_txt  = Font(bold=True, size=11, color="006400")
+    yellow_txt = Font(bold=True, size=11, color="7D6608")
+    red_txt    = Font(bold=True, size=11, color="CC0000")
+
+    for ev in current_events:
+        # Org separator row when organisation changes
+        if ev['org'] != prev_org:
+            ws1.merge_cells(f"A{row_idx}:{last_ltr}{row_idx}")
+            cell            = ws1.cell(row_idx, 1, ev['org'] or '—')
+            cell.font       = Font(bold=True, size=11, color=navy)
+            cell.fill       = _fill(org_hdr_fg)
+            cell.alignment  = Alignment(horizontal="left", vertical="center")
+            ws1.row_dimensions[row_idx].height = 16
+            row_idx += 1
+            prev_org = ev['org']
+
+        weekly = ev['weekly']
+        last_w = weekly[0] if weekly else None
+        last_total     = last_w['total_rooms']     if last_w else 0
+        last_pct_block = last_w['pct_of_block']    if last_w else None
+        last_pct_attr  = last_w['pct_of_attrition'] if last_w else None
+        wow = None
+        if len(weekly) >= 2 and last_w:
+            wow = (last_w['total_rooms'] or 0) - (weekly[1]['total_rooms'] or 0)
+        days_left = None
+        if ev['config']['cutoff_date']:
+            try:
+                days_left = (_d.fromisoformat(ev['config']['cutoff_date']) - today).days
+            except Exception:
+                pass
+
+        status = ('No data' if last_pct_block is None
+                  else 'On Pace' if last_pct_block >= 80
+                  else 'Watch'   if last_pct_block >= 60
+                  else 'At Risk')
+
+        rf = alt_fills[row_idx % 2]
+        base_font = _font(size=11)
+
+        def _s(col, val):
+            c = ws1.cell(row_idx, col, val)
+            c.font = base_font; c.fill = rf
+            return c
+
+        _s(1, ev['org'])
+        _s(2, ev['event_name'])
+        _s(3, ev['hotel'])
+        d4 = _s(4, ev['start_date'])
+        d4.number_format = "mm-dd-yy"
+        d5 = _s(5, ev['end_date'])
+        d5.number_format = "mm-dd-yy"
+        _s(6, ev['contracted_total']).number_format = "#,##0"
+        _s(7, last_total).number_format = "#,##0"
+        if wow is not None:
+            _s(8, wow).number_format = "+#,##0;-#,##0;0"
+        else:
+            _s(8, None)
+
+        # % Block — colour-coded
+        pct_cell = ws1.cell(row_idx, 9,
+                             (last_pct_block / 100) if last_pct_block is not None else None)
+        pct_cell.fill          = rf
+        pct_cell.number_format = "0%"
+        if last_pct_block is not None:
+            pct_cell.font = (green_txt  if last_pct_block >= 80
+                             else yellow_txt if last_pct_block >= 60
+                             else red_txt)
+
+        # % Attrition
+        a_cell = ws1.cell(row_idx, 10,
+                          (last_pct_attr / 100) if last_pct_attr is not None else None)
+        a_cell.fill = rf
+        a_cell.number_format = "0%"
+        a_cell.font = base_font
+
+        # Cutoff date
+        cutoff_cell = ws1.cell(row_idx, 11)
+        cutoff_cell.fill = rf
+        if ev['config']['cutoff_date']:
+            try:
+                cutoff_cell.value = _d.fromisoformat(ev['config']['cutoff_date'])
+                cutoff_cell.number_format = "mm-dd-yy"
+            except Exception:
+                cutoff_cell.value = ev['config']['cutoff_date']
+        cutoff_cell.font = base_font
+
+        dl_cell = ws1.cell(row_idx, 12, days_left)
+        dl_cell.fill = rf
+        dl_cell.font = (Font(bold=True, size=11, color="CC0000")
+                        if days_left is not None and days_left < 0
+                        else Font(bold=True, size=11, color="B8860B")
+                        if days_left is not None and days_left <= 14
+                        else base_font)
+
+        st_cell = ws1.cell(row_idx, 13, status)
+        st_cell.fill = rf
+        st_cell.font = (green_txt  if status == 'On Pace'
+                        else yellow_txt if status == 'Watch'
+                        else red_txt    if status == 'At Risk'
+                        else base_font)
+
+        ws1.row_dimensions[row_idx].height = 15
+        row_idx += 1
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TABS 2+ — PER-EVENT PICK-UP UPDATE (matches example format)
+    # ════════════════════════════════════════════════════════════════════════
+    setup_fill = _fill(setup_fg)
+    green_fill = _fill(green_fg)
+    used_names = {"Summary"}
+    day_abbrevs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+    for ev in current_events:
+        # ── Tab name ────────────────────────────────────────────────────────
+        raw = (ev['event_name'] or ev['org'] or 'Event')
+        tab = _re.sub(r'[:\\/?*\[\]]', '', raw).strip()[:31]
+        orig_tab = tab
+        i = 2
+        while tab in used_names:
+            tab = orig_tab[:28] + f' {i}'; i += 1
+        used_names.add(tab)
+
+        ws = wb.create_sheet(title=tab)
+        c  = ev['config']
+        event_dates      = ev['event_dates']
+        block            = ev['block']
+        contracted_total = ev['contracted_total']
+        n_nights         = len(event_dates)
+
+        # ── No dates: stub ───────────────────────────────────────────────────
+        if n_nights == 0:
+            ws["A1"].value = "PICK-UP UPDATE"
+            ws["A1"].font  = Font(bold=True, size=18)
+            ws["A2"].value = "ORGANIZATION:"
+            ws["A2"].font  = Font(bold=True, size=11)
+            ws["B2"].value = ev['org']
+            ws["A3"].value = "(Contracted block dates not yet defined)"
+            ws["A3"].font  = Font(italic=True, size=10, color="888888")
+            continue
+
+        # ── Column index helpers ─────────────────────────────────────────────
+        S_COL          = 2                            # first night col (B)
+        E_COL          = S_COL + n_nights - 1         # last night col
+        TOT_COL        = E_COL + 1                    # Total
+        CHG_COL        = TOT_COL + 1                  # Change
+        PCT_BLK_COL    = CHG_COL + 1                  # % Block
+        PCT_ATR_COL    = PCT_BLK_COL + 1              # % Attrition
+        LAST_COL       = PCT_ATR_COL
+        s_ltr          = get_column_letter(S_COL)
+        e_ltr          = get_column_letter(E_COL)
+        tot_ltr        = get_column_letter(TOT_COL)
+        chg_ltr        = get_column_letter(CHG_COL)
+        pct_blk_ltr    = get_column_letter(PCT_BLK_COL)
+        pct_atr_ltr    = get_column_letter(PCT_ATR_COL)
+        last_ltr_ev    = get_column_letter(LAST_COL)
+
+        # ── Column widths ────────────────────────────────────────────────────
+        ws.column_dimensions['A'].width = 24.5
+        for ci in range(S_COL, LAST_COL + 1):
+            ws.column_dimensions[get_column_letter(ci)].width = (
+                10 if ci == PCT_ATR_COL else 9)
+
+        # ── Row 1: Title ─────────────────────────────────────────────────────
+        ws.merge_cells(f"A1:{last_ltr_ev}1")
+        ws["A1"].value     = "PICK-UP UPDATE"
+        ws["A1"].font      = Font(bold=True, size=18)
+        ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 28
+
+        # ── Helper: label in A, merged value in B–last ──────────────────────
+        def _hdr(row, label, val):
+            ws.cell(row, 1, label).font      = Font(bold=True, size=11)
+            ws.cell(row, 1).alignment        = Alignment(horizontal="right", vertical="center")
+            ws.merge_cells(f"B{row}:{last_ltr_ev}{row}")
+            ws.cell(row, 2, val).font        = Font(size=11)
+            ws.cell(row, 2).alignment        = Alignment(horizontal="left", wrap_text=True)
+
+        _hdr(2, "ORGANIZATION:", ev['org'])
+        _hdr(3, "HOTEL & LOCATION:", ev['hotel'])
+
+        # Event name + date range
+        if event_dates:
+            try:
+                ds = _d.fromisoformat(event_dates[0]).strftime('%B %d')
+                de = _d.fromisoformat(event_dates[-1]).strftime('%B %d, %Y')
+                ev_date_str = f"{ds} – {de}"
+            except Exception:
+                ev_date_str = f"{event_dates[0]} – {event_dates[-1]}"
+        else:
+            ev_date_str = ""
+        _hdr(4, "NAME & DATE OF EVENT:", f"{ev['event_name']}   |   {ev_date_str}")
+
+        # Row 5: Group contact
+        ws.cell(5, 1, "GROUP CONTACT").font      = Font(bold=True, size=11)
+        ws.cell(5, 1).alignment                  = Alignment(horizontal="right")
+        ws.cell(5, 2, c['group_contact'] or '').font = Font(size=11)
+        if c['group_contact_email']:
+            ec = ws.cell(5, min(4, LAST_COL), c['group_contact_email'])
+            ec.font = Font(size=10, color="0070C0")
+
+        _hdr(6, "HOTEL CONTACT:", c['hotel_contact'] or '')
+        _hdr(7, "CONTACT'S NUMBER:", c['hotel_contact_email'] or '')
+        ws.cell(8, 1, "Booking").font      = Font(bold=True, size=11)
+        ws.cell(8, 1).alignment            = Alignment(horizontal="right")
+        ws.cell(8, 2, c['booking_id']).font = Font(size=11)
+
+        # ── Row 9: Cut-off date + attrition (gray) ───────────────────────────
+        ws.row_dimensions[9].height = 45
+
+        def _setup(row):
+            for ci in range(1, LAST_COL + 1):
+                ws.cell(row, ci).fill = setup_fill
+
+        _setup(9)
+        ws.cell(9, 1, "Cut-off Date:").font      = Font(bold=True, size=11)
+        ws.cell(9, 1).alignment                  = Alignment(horizontal="right", vertical="center")
+        merge_end = min(S_COL + 2, E_COL)
+        ws.merge_cells(start_row=9, start_column=S_COL, end_row=9, end_column=merge_end)
+        if c['cutoff_date']:
+            try:
+                ws.cell(9, S_COL).value = _d.fromisoformat(c['cutoff_date'])
+                ws.cell(9, S_COL).number_format = "[$-409]mmmm d, yyyy"
+            except Exception:
+                ws.cell(9, S_COL).value = c['cutoff_date']
+        ws.cell(9, S_COL).font      = Font(size=11)
+        ws.cell(9, S_COL).alignment = Alignment(horizontal="left", vertical="center")
+
+        attrition_pct   = c['attrition_pct'] or 0
+        attrition_rooms = round(contracted_total * attrition_pct) if contracted_total and attrition_pct else 0
+
+        ws.cell(9, TOT_COL, "Attrition:").font      = Font(bold=True, size=11)
+        ws.cell(9, CHG_COL).value                   = attrition_pct or None
+        ws.cell(9, CHG_COL).number_format            = "0%"
+        ws.cell(9, CHG_COL).font                     = Font(size=11)
+        ws.cell(9, PCT_BLK_COL).value               = attrition_rooms or None
+        ws.cell(9, PCT_BLK_COL).number_format        = "#,##0"
+        ws.cell(9, PCT_BLK_COL).font                 = Font(size=11)
+        if c['contracted_rate']:
+            ws.cell(9, PCT_ATR_COL).value            = c['contracted_rate']
+            ws.cell(9, PCT_ATR_COL).number_format    = '"$"#,##0.00'
+            ws.cell(9, PCT_ATR_COL).font             = Font(size=11)
+
+        # ── Row 10: Dates (gray) ─────────────────────────────────────────────
+        _setup(10)
+        ws.cell(10, 1, "Dates:").font      = Font(bold=True, size=11)
+        ws.cell(10, 1).alignment           = Alignment(horizontal="right")
+        for ni, ed in enumerate(event_dates):
+            ci = S_COL + ni
+            try:
+                ws.cell(10, ci).value = _d.fromisoformat(ed)
+                ws.cell(10, ci).number_format = "mm-dd-yy"
+            except Exception:
+                ws.cell(10, ci).value = ed
+            ws.cell(10, ci).alignment = Alignment(horizontal="center")
+            ws.cell(10, ci).font      = Font(size=11)
+        ws.cell(10, TOT_COL, "Total").font      = Font(bold=True, size=11)
+        ws.cell(10, TOT_COL).alignment          = Alignment(horizontal="center")
+
+        # ── Row 11: Day of week (gray) ───────────────────────────────────────
+        _setup(11)
+        ws.cell(11, 1, "Day:").font    = Font(bold=True, size=11)
+        ws.cell(11, 1).alignment       = Alignment(horizontal="right")
+        for ni, ed in enumerate(event_dates):
+            ci = S_COL + ni
+            try:
+                ws.cell(11, ci).value = day_abbrevs[_d.fromisoformat(ed).weekday()]
+            except Exception:
+                pass
+            ws.cell(11, ci).alignment = Alignment(horizontal="center")
+            ws.cell(11, ci).font      = Font(size=11)
+
+        # ── Row 12: Block (gray) ─────────────────────────────────────────────
+        _setup(12)
+        ws.row_dimensions[12].height = 18
+        ws.cell(12, 1, "Block:").font      = Font(bold=True, size=11)
+        ws.cell(12, 1).alignment           = Alignment(horizontal="right")
+        for ni, ed in enumerate(event_dates):
+            ci = S_COL + ni
+            ws.cell(12, ci).value         = block.get(ed, 0) or None
+            ws.cell(12, ci).number_format = "#,##0_);[Red](#,##0)"
+            ws.cell(12, ci).alignment     = Alignment(horizontal="center")
+            ws.cell(12, ci).font          = Font(size=11)
+        ws.cell(12, TOT_COL).value         = f"=SUM({s_ltr}12:{e_ltr}12)"
+        ws.cell(12, TOT_COL).number_format = "#,##0_);[Red](#,##0)"
+        ws.cell(12, TOT_COL).font          = Font(bold=True, size=11)
+        ws.cell(12, TOT_COL).alignment     = Alignment(horizontal="center")
+        for lbl, ci in [("Change", CHG_COL), ("% Block", PCT_BLK_COL), ("% Attrition", PCT_ATR_COL)]:
+            ws.cell(12, ci, lbl).font      = Font(bold=True, size=11)
+            ws.cell(12, ci).alignment      = Alignment(horizontal="center")
+
+        # ── Row 13: Pending History (green) ──────────────────────────────────
+        ws.row_dimensions[13].height = 18
+        ws.cell(13, 1, "Pending History").font      = Font(bold=True, size=11)
+        ws.cell(13, 1).fill                         = green_fill
+        ws.cell(13, 1).alignment                    = Alignment(horizontal="left")
+        for ci in range(S_COL, LAST_COL + 1):
+            ws.cell(13, ci).fill = green_fill
+
+        # ── Rows 14+: Weekly pickup entries (most recent first) ───────────────
+        weekly     = ev['weekly']
+        n_data     = len(weekly)
+
+        for wi, w in enumerate(weekly):
+            rn = 14 + wi
+            ws.row_dimensions[rn].height = 15
+
+            # Date label
+            try:
+                ws.cell(rn, 1).value = _d.fromisoformat(w['report_date'])
+                ws.cell(rn, 1).number_format = "mm-dd-yy"
+            except Exception:
+                ws.cell(rn, 1).value = w['report_date']
+            ws.cell(rn, 1).font      = Font(size=11)
+            ws.cell(rn, 1).alignment = Alignment(horizontal="left")
+
+            # Per-night pickup
+            pbn = {}
+            try:
+                pbn = json.loads(w['pickup_by_night'] or '{}')
+            except Exception:
+                pass
+            for ni, ed in enumerate(event_dates):
+                ci    = S_COL + ni
+                rooms = pbn.get(ed)
+                ws.cell(rn, ci).value         = rooms if rooms else None
+                ws.cell(rn, ci).number_format = "#,##0_);[Red](#,##0)"
+                ws.cell(rn, ci).alignment     = Alignment(horizontal="center")
+                ws.cell(rn, ci).font          = Font(size=11)
+
+            # Total (SUM formula)
+            ws.cell(rn, TOT_COL).value         = f"=SUM({s_ltr}{rn}:{e_ltr}{rn})"
+            ws.cell(rn, TOT_COL).number_format = "#,##0_);[Red](#,##0)"
+            ws.cell(rn, TOT_COL).font          = Font(bold=True, size=11)
+            ws.cell(rn, TOT_COL).alignment     = Alignment(horizontal="center")
+
+            # Change vs next (older) row
+            if wi < n_data - 1:
+                ws.cell(rn, CHG_COL).value = f"={tot_ltr}{rn}-{tot_ltr}{rn+1}"
+            else:
+                ws.cell(rn, CHG_COL).value = f"={tot_ltr}{rn}"
+            ws.cell(rn, CHG_COL).number_format = "#,##0_);[Red](#,##0)"
+            ws.cell(rn, CHG_COL).font          = Font(size=11)
+            ws.cell(rn, CHG_COL).alignment     = Alignment(horizontal="center")
+
+            # % of contracted block
+            ws.cell(rn, PCT_BLK_COL).value         = f"={tot_ltr}{rn}/{tot_ltr}$12"
+            ws.cell(rn, PCT_BLK_COL).number_format = "0%"
+            ws.cell(rn, PCT_BLK_COL).font          = Font(size=11)
+            ws.cell(rn, PCT_BLK_COL).alignment     = Alignment(horizontal="center")
+
+            # % of attrition requirement
+            if attrition_rooms:
+                ws.cell(rn, PCT_ATR_COL).value         = f"={tot_ltr}{rn}/{pct_blk_ltr}$9"
+                ws.cell(rn, PCT_ATR_COL).number_format = "0%"
+                ws.cell(rn, PCT_ATR_COL).font          = Font(size=11)
+                ws.cell(rn, PCT_ATR_COL).alignment     = Alignment(horizontal="center")
+
+        # ── Last row: Remaining (green) ───────────────────────────────────────
+        rem_row = 14 + n_data
+        ws.row_dimensions[rem_row].height = 18
+        ws.cell(rem_row, 1, "Remaining").font      = Font(bold=True, size=11)
+        ws.cell(rem_row, 1).fill                   = green_fill
+        ws.cell(rem_row, 1).alignment              = Alignment(horizontal="left")
+
+        latest_data_row = 14  # most recent weekly entry
+        for ni, ed in enumerate(event_dates):
+            ci      = S_COL + ni
+            col_ltr = get_column_letter(ci)
+            if n_data > 0:
+                ws.cell(rem_row, ci).value = f"={col_ltr}12-{col_ltr}{latest_data_row}"
+            else:
+                ws.cell(rem_row, ci).value = f"={col_ltr}12"
+            ws.cell(rem_row, ci).number_format = "#,##0_);[Red](#,##0)"
+            ws.cell(rem_row, ci).alignment     = Alignment(horizontal="center")
+            ws.cell(rem_row, ci).font          = Font(size=11)
+            ws.cell(rem_row, ci).fill          = green_fill
+
+        # Remaining total
+        ws.cell(rem_row, TOT_COL).value = (
+            f"={tot_ltr}12-{tot_ltr}{latest_data_row}" if n_data > 0
+            else f"={tot_ltr}12")
+        ws.cell(rem_row, TOT_COL).number_format = "#,##0_);[Red](#,##0)"
+        ws.cell(rem_row, TOT_COL).font          = Font(bold=True, size=11)
+        ws.cell(rem_row, TOT_COL).alignment     = Alignment(horizontal="center")
+        ws.cell(rem_row, TOT_COL).fill          = green_fill
+
+    # ── Return file ───────────────────────────────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fn = f"Pickup_Customer_Report_{today.strftime('%Y%m%d')}.xlsx"
+    return send_file(buf, as_attachment=True, download_name=fn,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 

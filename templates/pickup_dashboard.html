@@ -265,14 +265,33 @@
 
 {# ── Current Events ── #}
 <div class="card mb-3">
-  <div class="card-header d-flex justify-content-between align-items-center">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span><i class="bi bi-activity me-2"></i>Current Events
       <span class="badge bg-primary ms-1">{{ current_rows|length }}</span>
     </span>
-    <button class="btn btn-sm btn-outline-secondary" type="button"
-            data-bs-toggle="collapse" data-bs-target="#collapseCurrent">
-      <i class="bi bi-chevron-up"></i>
-    </button>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      {# Sort toggle #}
+      <div class="btn-group btn-group-sm" role="group" aria-label="Sort current events">
+        <a href="{{ url_for('pickup_dashboard') }}"
+           class="btn {% if sort_mode != 'customer' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+          <i class="bi bi-calendar-date me-1"></i>By Date
+        </a>
+        <a href="{{ url_for('pickup_dashboard', sort='customer') }}"
+           class="btn {% if sort_mode == 'customer' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+          <i class="bi bi-people me-1"></i>By Customer
+        </a>
+      </div>
+      {# Customer Report download — prominent when in customer sort mode #}
+      <a href="{{ url_for('pickup_customer_report_xlsx') }}"
+         class="btn btn-sm {% if sort_mode == 'customer' %}btn-success{% else %}btn-outline-success{% endif %}"
+         title="Download Excel report: summary + per-event pace tabs sorted by customer">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>Customer Report
+      </a>
+      <button class="btn btn-sm btn-outline-secondary" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseCurrent">
+        <i class="bi bi-chevron-up"></i>
+      </button>
+    </div>
   </div>
   <div id="collapseCurrent" class="collapse show">
     {{ event_table(current_rows, current_groups, current_group_order, table_id='tbl-current', section='current') }}
