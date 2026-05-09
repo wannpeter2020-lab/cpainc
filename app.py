@@ -3234,6 +3234,10 @@ def login():
     return render_template('login.html', error=error, next=request.args.get('next', ''))
 
 
+@app.route('/help')
+def help_page():
+    return render_template('help.html')
+
 @app.route('/logout')
 def logout():
     session.clear()
