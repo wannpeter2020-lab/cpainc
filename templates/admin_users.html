@@ -124,9 +124,9 @@
         </div>
         <div id="acct-list" style="max-height:380px;overflow-y:auto;">
           {% for acct in available_accounts %}
-          <div class="form-check acct-item border-bottom py-1 px-2" data-name="{{ acct|lower }}">
-            <input class="form-check-input acct-checkbox" type="checkbox" value="{{ acct }}" id="acct-{{ loop.index }}">
-            <label class="form-check-label" for="acct-{{ loop.index }}">{{ acct }}</label>
+          <div class="acct-item border-bottom py-1 px-3 d-flex align-items-center gap-2" data-name="{{ acct|lower }}">
+            <input class="form-check-input acct-checkbox flex-shrink-0" type="checkbox" value="{{ acct }}" id="acct-{{ loop.index }}" style="margin:0;">
+            <label class="form-check-label mb-0" for="acct-{{ loop.index }}" style="cursor:pointer;">{{ acct }}</label>
           </div>
           {% endfor %}
         </div>

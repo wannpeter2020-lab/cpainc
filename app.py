@@ -390,10 +390,15 @@ def index():
 
 @app.route('/booking/<int:booking_id>')
 def booking_detail(booking_id):
+    user = get_current_user()
     db = get_db()
     booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
     if not booking:
         flash('Booking not found.', 'error')
+        return redirect(url_for('index'))
+    acct_filter = get_user_account_filter(user)
+    if acct_filter is not None and booking['AccountName'] not in acct_filter:
+        flash('You do not have access to this booking.', 'error')
         return redirect(url_for('index'))
     pickups = db.execute('SELECT *, rowid FROM Pickup WHERE BookingID = ? ORDER BY rowid', (booking_id,)).fetchall()
     checks  = db.execute('SELECT * FROM ChkRegNote WHERE BookingID = ? ORDER BY DateOnCheck DESC', (booking_id,)).fetchall()
@@ -3252,7 +3257,7 @@ def admin_users():
     available_accounts = [r[0] for r in db.execute(
         "SELECT DISTINCT AccountName FROM ReportPipeline "
         "WHERE AccountName IS NOT NULL "
-        "AND LOWER(BookingAssociate) IN ('kristin house', 'morgan basham') "
+        "AND LOWER(BookingAssociate) = 'kristin house' "
         "ORDER BY AccountName"
     ).fetchall()]
     acc_rows = db.execute('SELECT user_id, account_name FROM UserAccountAccess').fetchall()
@@ -3884,11 +3889,27 @@ def pickup_auto_match():
 @app.route('/pickup')
 def pickup_dashboard():
     from datetime import date, timedelta
+    user = get_current_user()
     db = get_db()
     today = date.today()
     today_str = today.isoformat()
     future_cutoff = today + timedelta(days=120)
-    configs = db.execute("""
+
+    # Account-level filter for non-admins
+    acct_filter = get_user_account_filter(user)
+    if acct_filter is None:
+        # admin — no restriction
+        acct_where = ''
+        acct_params = []
+    elif acct_filter:
+        ph = ','.join('?' * len(acct_filter))
+        acct_where = f' AND (p.AccountName IN ({ph}) OR c.organization IN ({ph}))'
+        acct_params = acct_filter + acct_filter
+    else:
+        acct_where = ' AND 1=0'
+        acct_params = []
+
+    configs = db.execute(f"""
         SELECT c.*,
                p.StartDate  AS bk_start,
                p.EndDate    AS bk_end,
@@ -3899,15 +3920,15 @@ def pickup_dashboard():
                p.TotalRoomNights AS bk_total_rn
         FROM pickup_config c
         LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
-        WHERE c.status='active' ORDER BY c.cutoff_date
-    """).fetchall()
-    archived_configs = db.execute("""
+        WHERE c.status='active'{acct_where} ORDER BY c.cutoff_date
+    """, acct_params).fetchall()
+    archived_configs = db.execute(f"""
         SELECT c.*,
                p.StartDate AS bk_start, p.EndDate AS bk_end
         FROM pickup_config c
         LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
-        WHERE c.status='archived' ORDER BY c.cutoff_date
-    """).fetchall()
+        WHERE c.status='archived'{acct_where} ORDER BY c.cutoff_date
+    """, acct_params).fetchall()
     past_rows, current_rows, future_rows, archived_rows = [], [], [], []
 
     for c in configs:
@@ -5238,20 +5259,29 @@ def pickup_event_report_xlsx(primary_cid):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-def _get_current_pickup_events(db):
-    """Shared helper: return current-section events sorted by org → event_start."""
+def _get_current_pickup_events(db, account_filter=None):
+    """Shared helper: return current-section events sorted by org → event_start.
+    account_filter: None = admin (no filter), [] = no access, [list] = allowed accounts."""
     from datetime import date as _d, timedelta
     today = _d.today()
     future_cutoff = today + timedelta(days=120)
-    configs = db.execute("""
+    if account_filter is None:
+        af_where, af_params = '', []
+    elif account_filter:
+        ph = ','.join('?' * len(account_filter))
+        af_where = f' AND (p.AccountName IN ({ph}) OR c.organization IN ({ph}))'
+        af_params = account_filter + account_filter
+    else:
+        af_where, af_params = ' AND 1=0', []
+    configs = db.execute(f"""
         SELECT c.*,
                p.StartDate AS bk_start, p.EndDate AS bk_end,
                p.EventName AS bk_event, p.AccountName AS bk_org,
                p.Customer  AS bk_hotel
         FROM pickup_config c
         LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
-        WHERE c.status='active'
-    """).fetchall()
+        WHERE c.status='active'{af_where}
+    """, af_params).fetchall()
     current_events = []
     for c in configs:
         block            = json.loads(c['contracted_block'] or '{}')
@@ -5325,8 +5355,9 @@ def _get_current_pickup_events(db):
 @app.route('/pickup/customer-report', methods=['GET'])
 def pickup_customer_report_select():
     """Selection page — choose which customers/events to include in the report."""
+    user = get_current_user()
     db = get_db()
-    current_events = _get_current_pickup_events(db)
+    current_events = _get_current_pickup_events(db, account_filter=get_user_account_filter(user))
 
     # Group by organisation for the UI
     from collections import OrderedDict
@@ -5348,11 +5379,12 @@ def pickup_customer_report_xlsx():
     from datetime import date as _d
     import io, re as _re
 
+    user  = get_current_user()
     db    = get_db()
     today = _d.today()
 
-    # Load all current events via shared helper
-    all_events = _get_current_pickup_events(db)
+    # Load all current events via shared helper (filtered by account access)
+    all_events = _get_current_pickup_events(db, account_filter=get_user_account_filter(user))
 
     # If POSTed from the selection page, filter to chosen config IDs only
     if request.method == 'POST':
@@ -7452,13 +7484,25 @@ RFP_STATUS_MAP = {s[0]: (s[1], s[2]) for s in RFP_STATUSES}
 
 @app.route('/rfp')
 def rfp_dashboard():
+    user = get_current_user()
     db = get_db()
     show_archived = request.args.get('archived') == '1'
-    rfps = db.execute(
-        'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
-        'FROM rfp r WHERE r.archived=? ORDER BY r.created_at DESC',
-        (1 if show_archived else 0,)
-    ).fetchall()
+    acct_filter = get_user_account_filter(user)
+    base = (1 if show_archived else 0,)
+    if acct_filter is None:
+        rfps = db.execute(
+            'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
+            'FROM rfp r WHERE r.archived=? ORDER BY r.created_at DESC', base
+        ).fetchall()
+    elif acct_filter:
+        ph = ','.join('?' * len(acct_filter))
+        rfps = db.execute(
+            f'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
+            f'FROM rfp r WHERE r.archived=? AND r.client_org IN ({ph}) ORDER BY r.created_at DESC',
+            base + tuple(acct_filter)
+        ).fetchall()
+    else:
+        rfps = []
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,
                            show_archived=show_archived, all_statuses=RFP_STATUSES)
 
@@ -7508,10 +7552,15 @@ def rfp_new():
 
 @app.route('/rfp/<int:rid>')
 def rfp_detail(rid):
+    user = get_current_user()
     db = get_db()
     rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
     if not rfp:
         flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    acct_filter = get_user_account_filter(user)
+    if acct_filter is not None and rfp['client_org'] not in acct_filter:
+        flash('You do not have access to this RFP.', 'error')
         return redirect(url_for('rfp_dashboard'))
     _hotel_order = {'selected':0,'shortlisted':1,'proposal_received':2,'pending':3,'eliminated':4,'declined':5}
     hotels = db.execute('SELECT * FROM rfp_hotel WHERE rfp_id=?', (rid,)).fetchall()
@@ -7523,10 +7572,15 @@ def rfp_detail(rid):
 
 @app.route('/rfp/<int:rid>/edit', methods=['GET', 'POST'])
 def rfp_edit(rid):
+    user = get_current_user()
     db = get_db()
     rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
     if not rfp:
         flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    acct_filter = get_user_account_filter(user)
+    if acct_filter is not None and rfp['client_org'] not in acct_filter:
+        flash('You do not have access to this RFP.', 'error')
         return redirect(url_for('rfp_dashboard'))
     if request.method == 'POST':
         f = request.form
