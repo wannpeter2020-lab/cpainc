@@ -3427,6 +3427,111 @@ def admin_import_pickup_data():
             f'<a href="/pickup">Go to Pickup Tracking</a>')
 
 
+@app.route('/admin/fix-asa-cssa-sssa-dates')
+def admin_fix_asa_dates():
+    """One-time fix: shift contracted_block dates and correct booking_ids for ASA-CSSA-SSSA 2027/2028 records."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+
+    db = get_db()
+    results = []
+
+    # Correct booking_id mapping by hotel name substring (case-insensitive)
+    HOTEL_FIXES_2027 = [
+        ('hilton columbus',           '185599', 'Hilton Columbus Downtown'),
+        ('hyatt regency columbus',    '185603', 'Hyatt Regency Columbus'),
+        ('drury',                     '185601', 'Drury Inn & Suites Convention Centre'),
+        ('hampton inn',               '185524', 'Hampton Inn & Suites Columbus-Downtown'),
+        ('ac hotel columbus',         '185521', 'AC Hotel Columbus Downtown'),
+        ('ac columbus',               '185521', 'AC Hotel Columbus Downtown'),
+        ('red roof',                  '185879', 'Red Roof PLUS+ Columbus Downtown'),
+    ]
+    HOTEL_FIXES_2028 = [
+        ('omni',                      '193163', 'Omni Fort Lauderdale'),
+        ('hilton marina',             '193346', 'Hilton Fort Lauderdale Marina'),
+        ('hilton fort lauderdale',    '193346', 'Hilton Fort Lauderdale Marina'),
+        ('renaissance',               '75067',  'Renaissance Fort Lauderdale'),
+        ('embassy suites',            '193345', 'Embassy Suites by Hilton Fort Lauderdale'),
+        ('marriott harbor',           '192896', 'Fort Lauderdale Marriott Harbor Beach'),
+        ('hyatt place',               '193347', 'Hyatt Place Fort Lauderdale Airport'),
+    ]
+
+    def shift_block_year(block_json, old_year, new_year):
+        """Replace old_year with new_year in all date keys of a contracted_block JSON string."""
+        try:
+            block = json.loads(block_json or '{}')
+        except Exception:
+            block = {}
+        new_block = {}
+        for k, v in block.items():
+            new_k = k.replace(str(old_year) + '-', str(new_year) + '-', 1)
+            new_block[new_k] = v
+        return json.dumps(new_block)
+
+    def fix_group(year_label, old_year, new_year, hotel_fixes, event_new_name, org_name):
+        rows = db.execute(
+            "SELECT id, hotel, contracted_block, booking_id FROM pickup_config "
+            "WHERE LOWER(event_name) LIKE ? AND status != 'archived'",
+            (f'%asa%cssa%sssa%{year_label}%',)
+        ).fetchall()
+        for row in rows:
+            hotel_lower = (row['hotel'] or '').lower()
+            new_bid = None
+            new_hotel_name = row['hotel']
+            for key, bid, clean_name in hotel_fixes:
+                if key in hotel_lower:
+                    new_bid = bid
+                    new_hotel_name = clean_name
+                    break
+            new_block = shift_block_year(row['contracted_block'], old_year, new_year)
+            db.execute(
+                '''UPDATE pickup_config
+                   SET booking_id=COALESCE(?,booking_id),
+                       hotel=?,
+                       event_name=?,
+                       organization=?,
+                       contracted_block=?,
+                       status='active'
+                   WHERE id=?''',
+                (new_bid, new_hotel_name, event_new_name, org_name, new_block, row['id'])
+            )
+            results.append(f"ID {row['id']}: {row['hotel']} → {new_hotel_name} | "
+                           f"booking_id={new_bid or row['booking_id']} | "
+                           f"block shifted {old_year}→{new_year}")
+
+    fix_group('2027', 2022, 2027, HOTEL_FIXES_2027,
+              '2027 ASA-CSSA-SSSA Annual Meeting',
+              'Alliance of Crop, Soil and Environmental Science Societies')
+    fix_group('2028', 2023, 2028, HOTEL_FIXES_2028,
+              '2028 ASA-CSSA-SSSA Annual Meeting',
+              'Alliance of Crop, Soil and Environmental Science Societies')
+
+    # Also fix any remaining record with 2022 block dates under any ASA CSSA SSSA event
+    leftover = db.execute(
+        "SELECT id, hotel, contracted_block, event_name FROM pickup_config "
+        "WHERE LOWER(event_name) LIKE '%asa%cssa%sssa%2022%'"
+    ).fetchall()
+    for row in leftover:
+        new_block = shift_block_year(row['contracted_block'], 2022, 2027)
+        db.execute(
+            "UPDATE pickup_config SET contracted_block=?, event_name=?, status='active' WHERE id=?",
+            (new_block, '2027 ASA-CSSA-SSSA Annual Meeting', row['id'])
+        )
+        results.append(f"ID {row['id']}: leftover 2022 event fixed → 2027 block | hotel={row['hotel']}")
+
+    db.commit()
+
+    html = '<h3>ASA-CSSA-SSSA Date Fix — Results</h3>'
+    if results:
+        html += '<ul>' + ''.join(f'<li>{r}</li>' for r in results) + '</ul>'
+        html += f'<p><strong>{len(results)} record(s) updated.</strong></p>'
+    else:
+        html += '<p>No matching records found — nothing to fix (or already fixed).</p>'
+    html += '<p><a href="/pickup">Go to Pickup Tracking</a></p>'
+    return html
+
+
 def _create_pickup_config_from_booking(db, bid, account, event, hotel,
                                        start_str, end_str, peak_rooms, room_rate):
     """Create a pickup_config entry for a booking if one doesn't already exist.
