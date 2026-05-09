@@ -210,6 +210,7 @@
 </div>
 
 {# Historical Pace Comparison card — multi-year weekly pace table #}
+{% if not is_multi_hotel %}
 {% if pace_comparison %}
 <div class="card mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">
@@ -276,6 +277,14 @@
       </tbody>
     </table>
   </div>
+</div>
+{% endif %}
+{% elif pace_comparison %}
+<div class="alert alert-info mb-3">
+  <i class="bi bi-bar-chart me-2"></i>
+  Historical pace comparison is available on the
+  <a href="{{ url_for('pickup_event_report', primary_cid=primary_cid_for_report) }}">Combined Event Report</a>,
+  which shows all hotels together.
 </div>
 {% endif %}
 

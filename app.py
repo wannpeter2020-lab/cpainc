@@ -4443,6 +4443,21 @@ def pickup_event(cid):
     ).fetchone() if config['booking_id'] else None
     has_hhr = bool(hhr_row)
 
+    # Check if this is part of a multi-hotel event
+    sibling_count = db.execute(
+        "SELECT COUNT(*) FROM pickup_config WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active'",
+        ((config['event_name'] or ''),)
+    ).fetchone()[0]
+    is_multi_hotel = sibling_count > 1
+    # Find primary_cid for the event report link
+    if is_multi_hotel:
+        primary_cid_for_report = db.execute(
+            "SELECT MIN(id) FROM pickup_config WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active'",
+            ((config['event_name'] or ''),)
+        ).fetchone()[0]
+    else:
+        primary_cid_for_report = None
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -4451,7 +4466,9 @@ def pickup_event(cid):
                            day_map=day_map, contracted_total=contracted_total,
                            attrition_pct=attrition_pct, attrition_rooms=attrition_rooms,
                            past_cutoff=past_cutoff, has_final_history=has_final_history,
-                           has_hhr=has_hhr, today=_date.today().isoformat())
+                           has_hhr=has_hhr, today=_date.today().isoformat(),
+                           is_multi_hotel=is_multi_hotel,
+                           primary_cid_for_report=primary_cid_for_report)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -4663,6 +4680,487 @@ def pickup_event_report(primary_cid):
                            cutoff_earliest=cutoff_earliest,
                            cutoff_latest=cutoff_latest,
                            primary_cid=primary_cid)
+
+
+@app.route('/pickup/event-report/<int:primary_cid>/download-xlsx')
+def pickup_event_report_xlsx(primary_cid):
+    """Download a combined XLSX pace report for all hotels sharing the same event_name."""
+    import io
+    import re as _re_fn
+    from datetime import date as _date_xlsx
+    from collections import defaultdict
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    db = get_db()
+    primary = db.execute("SELECT * FROM pickup_config WHERE id=?", (primary_cid,)).fetchone()
+    if not primary:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    event_name = (primary['event_name'] or '').strip()
+    if not event_name:
+        return redirect(url_for('pickup_event', cid=primary_cid))
+
+    organization = primary['organization'] or primary['event_name'] or ''
+
+    # Find all active configs with the same event_name
+    all_configs = db.execute(
+        "SELECT * FROM pickup_config WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active' ORDER BY id",
+        (event_name,)
+    ).fetchall()
+
+    ASAS_EVENT_STARTS = {
+        2021: '2021-07-11',
+        2022: '2022-06-23',
+        2023: '2023-07-15',
+        2024: '2024-07-17',
+        2025: '2025-06-30',
+        2026: '2026-07-17',
+    }
+
+    def weeks_out(event_start_str, report_date_str):
+        try:
+            es = _date_xlsx.fromisoformat(event_start_str)
+            rd = _date_xlsx.fromisoformat(report_date_str)
+            return (es - rd).days // 7
+        except Exception:
+            return None
+
+    # ── Per-hotel data ─────────────────────────────────────────────────────────
+    hotel_data = []
+    combined_block = 0
+    all_event_date_set = set()
+
+    for c in all_configs:
+        block = json.loads(c['contracted_block'] or '{}')
+        contracted_total = sum(block.values())
+        combined_block += contracted_total
+        all_event_date_set.update(block.keys())
+
+        weekly_rows = db.execute(
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'))
+               ORDER BY report_date""",
+            (c['id'],)
+        ).fetchall()
+
+        hotel_data.append({
+            'config': c,
+            'hotel_name': c['hotel'] or c['event_name'] or '—',
+            'contracted_block': block,
+            'contracted_total': contracted_total,
+            'contracted_rate': c['contracted_rate'] or 0,
+            'attrition_pct': c['attrition_pct'],
+            'weekly': [dict(w) for w in weekly_rows],
+        })
+
+    event_dates = sorted(all_event_date_set)
+    n_nights = len(event_dates)
+    n_hotels = len(all_configs)
+
+    # ── Historical rows across all configs ────────────────────────────────────
+    import re as _re2
+    hist_rows_all = []
+    for c in all_configs:
+        rows = db.execute(
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               ORDER BY report_date""",
+            (c['id'],)
+        ).fetchall()
+        hist_rows_all.extend(rows)
+
+    hist_by_year = {}
+    for w in hist_rows_all:
+        lbl = w['label'] or ''
+        m = _re2.search(r'(\d{4})', lbl)
+        if not m:
+            continue
+        yr = int(m.group(1))
+        es = ASAS_EVENT_STARTS.get(yr)
+        if not es:
+            continue
+        wo = weeks_out(es, w['report_date'])
+        if wo is None or wo < 0:
+            continue
+        pbn = json.loads(w['pickup_by_night'] or '{}')
+        total = pbn.get('historical_total', w['total_rooms'] or 0)
+        if yr not in hist_by_year:
+            hist_by_year[yr] = {}
+        if wo not in hist_by_year[yr] or total > hist_by_year[yr][wo]:
+            hist_by_year[yr][wo] = total
+
+    # ── Build per-date aggregate (Tab 2 data) ─────────────────────────────────
+    all_report_date_set = set()
+    for hd in hotel_data:
+        for w in hd['weekly']:
+            all_report_date_set.add(w['report_date'])
+    all_report_dates = sorted(all_report_date_set)
+
+    # aggregate_by_date: report_date -> sum of total_rooms (for 2026 hist)
+    aggregate_by_date = defaultdict(int)
+    total_by_night = {}       # report_date -> {event_date: int}
+    total_rooms_agg = {}      # report_date -> int
+    hotel_pbn = {}            # cid -> report_date -> {event_date: int}
+
+    for hd in hotel_data:
+        cid = hd['config']['id']
+        hotel_pbn[cid] = {}
+        for w in hd['weekly']:
+            rd = w['report_date']
+            pbn = json.loads(w['pickup_by_night'] or '{}')
+            hotel_pbn[cid][rd] = pbn
+            aggregate_by_date[rd] += (w['total_rooms'] or 0)
+            if rd not in total_by_night:
+                total_by_night[rd] = defaultdict(int)
+            for ed, rooms in pbn.items():
+                if isinstance(rooms, (int, float)):
+                    total_by_night[rd][ed] += int(rooms)
+
+    for rd in all_report_dates:
+        total_rooms_agg[rd] = aggregate_by_date[rd]
+
+    # Add 2026 current to hist_by_year
+    current_event_start_2026 = ASAS_EVENT_STARTS.get(2026)
+    if current_event_start_2026 and aggregate_by_date:
+        hist_by_year[2026] = {}
+        for rd, total in aggregate_by_date.items():
+            wo = weeks_out(current_event_start_2026, rd)
+            if wo is None or wo < 0:
+                continue
+            if wo not in hist_by_year[2026] or total > hist_by_year[2026][wo]:
+                hist_by_year[2026][wo] = total
+
+    all_weeks_hist = sorted(
+        set(wo for yr_data in hist_by_year.values() for wo in yr_data.keys()),
+        reverse=True
+    )
+    years_available = sorted(hist_by_year.keys(), reverse=True)
+
+    # ── Cutoff info ───────────────────────────────────────────────────────────
+    cutoffs = [c['cutoff_date'] for c in all_configs if c['cutoff_date']]
+    cutoff_earliest = min(cutoffs) if cutoffs else None
+
+    # ── Build workbook ────────────────────────────────────────────────────────
+    wb = Workbook()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 1 — Historical Comparison
+    # ════════════════════════════════════════════════════════════════════════
+    ws1 = wb.active
+    ws1.title = "Historical Comparison"
+
+    header_fill = PatternFill("solid", fgColor="1A3A5C")
+    header_font = Font(color="FFFFFF", bold=True)
+    center_align = Alignment(horizontal="center")
+    alt_fill = PatternFill("solid", fgColor="EAF0FB")
+
+    # A1: event name
+    ws1['A1'] = event_name
+    ws1['A1'].font = Font(bold=True, size=14)
+    ws1.merge_cells('A1:G1')
+
+    # A2: organization
+    ws1['A2'] = organization
+    ws1['A2'].font = Font(italic=True, size=10)
+
+    # A3: subtitle
+    ws1['A3'] = "All Hotels Combined — Historical Pickup by Weeks Out"
+    ws1['A3'].font = Font(size=10)
+
+    # A4: blank
+    ws1['A4'] = ""
+
+    # Row 5: headers
+    ws1.cell(5, 1).value = "Weeks Out"
+    ws1.cell(5, 1).font = header_font
+    ws1.cell(5, 1).fill = header_fill
+    ws1.cell(5, 1).alignment = center_align
+
+    for ci, yr in enumerate(years_available, start=2):
+        lbl = f"{yr} (All Hotels)" if yr == 2026 else str(yr)
+        cell = ws1.cell(5, ci)
+        cell.value = lbl
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+
+    # Data rows
+    for ri, wo in enumerate(all_weeks_hist):
+        row_num = 6 + ri
+        is_even = (ri % 2 == 0)
+        row_fill = alt_fill if is_even else None
+
+        wk_cell = ws1.cell(row_num, 1)
+        wk_cell.value = f"{wo} wks"
+        wk_cell.alignment = center_align
+        if row_fill:
+            wk_cell.fill = row_fill
+
+        for ci, yr in enumerate(years_available, start=2):
+            val = hist_by_year.get(yr, {}).get(wo)
+            cell = ws1.cell(row_num, ci)
+            cell.value = val if val is not None else "—"
+            if val is not None:
+                cell.number_format = "#,##0"
+            cell.alignment = center_align
+            if yr == 2026:
+                cell.font = Font(bold=True)
+            if row_fill:
+                cell.fill = row_fill
+
+    # Column widths Tab 1
+    ws1.column_dimensions['A'].width = 12
+    for ci in range(2, 2 + len(years_available)):
+        ws1.column_dimensions[get_column_letter(ci)].width = 16
+
+    # ════════════════════════════════════════════════════════════════════════
+    # TAB 2 — Pace 2026
+    # ════════════════════════════════════════════════════════════════════════
+    ws2 = wb.create_sheet("Pace 2026")
+
+    start_col = 5   # col E
+    end_col = start_col + n_nights - 1
+    total_col = end_col + 1
+    pct_col = total_col + 1
+    last_col_idx = pct_col + 1
+
+    end_col_letter = get_column_letter(end_col)
+    total_col_letter = get_column_letter(total_col)
+    pct_col_letter = get_column_letter(pct_col)
+
+    # ── Header block (rows 2-5) ───────────────────────────────────────────
+    # Row 2: event name
+    ws2.merge_cells(start_row=2, start_column=4, end_row=2, end_column=total_col)
+    ws2.cell(2, 4).value = event_name
+    ws2.cell(2, 4).font = Font(bold=True, size=18)
+    ws2.cell(2, 4).alignment = Alignment(horizontal="center")
+
+    # Row 3: date range
+    if event_dates:
+        try:
+            d0 = _date_xlsx.fromisoformat(event_dates[0])
+            d1 = _date_xlsx.fromisoformat(event_dates[-1])
+            date_range_str = f"{d0.strftime('%B')} {d0.day}–{d1.day}, {d1.year}"
+        except Exception:
+            date_range_str = f"{event_dates[0]} to {event_dates[-1]}"
+    else:
+        date_range_str = ""
+    ws2.merge_cells(start_row=3, start_column=4, end_row=3, end_column=total_col)
+    ws2.cell(3, 4).value = date_range_str
+    ws2.cell(3, 4).font = Font(bold=True, size=18)
+    ws2.cell(3, 4).alignment = Alignment(horizontal="center")
+
+    # Row 4: "Pace Report"
+    ws2.merge_cells(start_row=4, start_column=4, end_row=4, end_column=total_col)
+    ws2.cell(4, 4).value = "Pace Report"
+    ws2.cell(4, 4).font = Font(bold=True, size=18)
+    ws2.cell(4, 4).alignment = Alignment(horizontal="center")
+
+    # Row 5: labels
+    ws2.cell(5, 4).value = "Total Contracted Block"
+    ws2.cell(5, 4).font = Font(italic=True, size=11)
+    ws2.cell(5, 4).alignment = Alignment(horizontal="center")
+
+    if cutoff_earliest:
+        cutoff_cell = ws2.cell(5, last_col_idx)
+        cutoff_cell.value = f"Cut off date: {cutoff_earliest}"
+        cutoff_cell.font = Font(bold=True, size=10, color="FFFF0000")
+
+    # ── Date header row (row 6) ───────────────────────────────────────────
+    ws2.cell(6, 4).value = "Date:"
+    ws2.cell(6, 4).font = Font(bold=True, size=11)
+
+    for ni, ed in enumerate(event_dates):
+        col_idx = start_col + ni
+        try:
+            d = _date_xlsx.fromisoformat(ed)
+            ws2.cell(6, col_idx).value = d
+            ws2.cell(6, col_idx).number_format = "d-mmm"
+        except Exception:
+            ws2.cell(6, col_idx).value = ed
+        ws2.cell(6, col_idx).alignment = Alignment(horizontal="center")
+        ws2.cell(6, col_idx).font = Font(size=11)
+
+    ws2.cell(6, total_col).value = "Total"
+    ws2.cell(6, total_col).font = Font(bold=True, size=11)
+    ws2.cell(6, total_col).alignment = Alignment(horizontal="center")
+
+    # ── Day-of-week row (row 7) ───────────────────────────────────────────
+    ws2.cell(7, 4).value = "Day:"
+    ws2.cell(7, 4).font = Font(bold=True, size=11)
+
+    day_abbrevs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    for ni, ed in enumerate(event_dates):
+        col_idx = start_col + ni
+        try:
+            d = _date_xlsx.fromisoformat(ed)
+            ws2.cell(7, col_idx).value = day_abbrevs[d.weekday()]
+        except Exception:
+            ws2.cell(7, col_idx).value = ""
+        ws2.cell(7, col_idx).alignment = Alignment(horizontal="center")
+        ws2.cell(7, col_idx).font = Font(size=11)
+
+    # ── Contracted block rows (rows 8 to 7+n_hotels) ─────────────────────
+    for hi, hd in enumerate(hotel_data):
+        r = 8 + hi
+        c_cfg = hd['config']
+        ws2.cell(r, 1).value = c_cfg['booking_id']
+        ws2.cell(r, 2).value = event_name
+        ws2.cell(r, 3).value = organization
+        ws2.cell(r, 4).value = f"{hd['hotel_name']} (${hd['contracted_rate']:.0f})"
+        ws2.cell(r, 4).font = Font(size=11)
+
+        for ni, ed in enumerate(event_dates):
+            col_idx = start_col + ni
+            rooms = hd['contracted_block'].get(ed, 0)
+            ws2.cell(r, col_idx).value = rooms if rooms else None
+            ws2.cell(r, col_idx).alignment = Alignment(horizontal="center")
+            ws2.cell(r, col_idx).font = Font(size=11)
+
+        ws2.cell(r, total_col).value = hd['contracted_total']
+        ws2.cell(r, total_col).font = Font(bold=True, size=11)
+        ws2.cell(r, total_col).alignment = Alignment(horizontal="center")
+
+        # Attrition column
+        atr = c_cfg['attrition_pct']
+        if atr:
+            atr_rooms = round(hd['contracted_total'] * atr)
+            ws2.cell(r, pct_col).value = f"Attrition {round(atr*100):.0f}% = {atr_rooms}"
+        else:
+            ws2.cell(r, pct_col).value = "Attrition Waived"
+        ws2.cell(r, pct_col).font = Font(size=11)
+
+    # ── Total block row (row 8+n_hotels) ─────────────────────────────────
+    total_block_row = 8 + n_hotels
+    ws2.cell(total_block_row, 4).value = "Total Block"
+    ws2.cell(total_block_row, 4).font = Font(bold=True, size=11, color="FFFF0000")
+    ws2.cell(total_block_row, 4).alignment = Alignment(horizontal="center")
+
+    for ni, ed in enumerate(event_dates):
+        col_idx = start_col + ni
+        night_total = sum(hd['contracted_block'].get(ed, 0) for hd in hotel_data)
+        ws2.cell(total_block_row, col_idx).value = night_total if night_total else None
+        ws2.cell(total_block_row, col_idx).font = Font(bold=True, size=11, color="FFFF0000")
+        ws2.cell(total_block_row, col_idx).alignment = Alignment(horizontal="center")
+
+    ws2.cell(total_block_row, total_col).value = combined_block
+    ws2.cell(total_block_row, total_col).font = Font(bold=True, size=11, color="FFFF0000")
+    ws2.cell(total_block_row, total_col).alignment = Alignment(horizontal="center")
+
+    # ── Spacer row ────────────────────────────────────────────────────────
+    spacer_row = total_block_row + 1  # = 9 + n_hotels
+
+    # ── Weekly snapshot blocks ────────────────────────────────────────────
+    body_start = spacer_row + 1  # = 10 + n_hotels
+    yellow_fill = PatternFill("solid", fgColor="FFFFFF00")
+
+    for i, report_date in enumerate(all_report_dates):
+        block_row = body_start + (i * 8)
+        is_latest = (report_date == all_report_dates[-1])
+
+        # Row 0 of block: header
+        ws2.cell(block_row, 3).value = "Actual Pick Up"
+        ws2.cell(block_row, 3).font = Font(bold=True, size=11, color="FFFF0000")
+
+        try:
+            ws2.cell(block_row, 4).value = _date_xlsx.fromisoformat(report_date)
+            ws2.cell(block_row, 4).number_format = "d-mmm-yy"
+        except Exception:
+            ws2.cell(block_row, 4).value = report_date
+        ws2.cell(block_row, 4).font = Font(size=10)
+        if is_latest:
+            ws2.cell(block_row, 4).fill = yellow_fill
+
+        ws2.merge_cells(start_row=block_row, start_column=4, end_row=block_row, end_column=total_col)
+
+        wo = weeks_out('2026-07-17', report_date)
+        wo_label = f"{wo} weeks" if wo is not None else ""
+        ws2.cell(block_row, last_col_idx).value = wo_label
+        ws2.cell(block_row, last_col_idx).font = Font(italic=True, size=11, color="FFFF0000")
+        if is_latest:
+            ws2.cell(block_row, last_col_idx).fill = yellow_fill
+
+        # Row 1 of block: Total row
+        tr = block_row + 1
+        ws2.cell(tr, 4).value = "Total"
+        ws2.cell(tr, 4).font = Font(bold=True, italic=True, size=10)
+        ws2.cell(tr, 4).alignment = Alignment(horizontal="center")
+
+        for ni, ed in enumerate(event_dates):
+            night_total = total_by_night.get(report_date, {}).get(ed, 0)
+            col_idx = start_col + ni
+            ws2.cell(tr, col_idx).value = night_total if night_total else None
+            ws2.cell(tr, col_idx).number_format = "0"
+            ws2.cell(tr, col_idx).font = Font(bold=True, size=11)
+            ws2.cell(tr, col_idx).alignment = Alignment(horizontal="center")
+
+        ws2.cell(tr, total_col).value = total_rooms_agg.get(report_date, 0) or None
+        ws2.cell(tr, total_col).number_format = "0"
+        ws2.cell(tr, total_col).font = Font(bold=True, size=11)
+
+        pct_val = total_rooms_agg.get(report_date, 0) / combined_block if combined_block else None
+        ws2.cell(tr, pct_col).value = pct_val
+        ws2.cell(tr, pct_col).number_format = "0%"
+        ws2.cell(tr, pct_col).font = Font(bold=True, size=11)
+
+        # Rows 2-7 of block: per-hotel rows
+        for hi, hd in enumerate(hotel_data):
+            hr = block_row + 2 + hi
+            cid = hd['config']['id']
+            ws2.cell(hr, 4).value = hd['hotel_name']
+            ws2.cell(hr, 4).font = Font(bold=True, italic=True, size=10)
+            ws2.cell(hr, 4).alignment = Alignment(horizontal="center")
+
+            hotel_pbn_rd = hotel_pbn.get(cid, {}).get(report_date, {})
+            for ni, ed in enumerate(event_dates):
+                rooms = hotel_pbn_rd.get(ed, None)
+                col_idx = start_col + ni
+                ws2.cell(hr, col_idx).value = rooms if rooms else None
+                ws2.cell(hr, col_idx).number_format = "0"
+                ws2.cell(hr, col_idx).alignment = Alignment(horizontal="center")
+                ws2.cell(hr, col_idx).font = Font(size=11)
+
+            # Use stored total_rooms for the hotel
+            w_entry = next((w for w in hd['weekly'] if w['report_date'] == report_date), None)
+            hotel_total = (w_entry['total_rooms'] or 0) if w_entry else 0
+
+            ws2.cell(hr, total_col).value = hotel_total if hotel_total else None
+            ws2.cell(hr, total_col).number_format = "0"
+            ws2.cell(hr, total_col).font = Font(bold=True, size=11)
+
+            h_pct = hotel_total / hd['contracted_total'] if hd['contracted_total'] else None
+            ws2.cell(hr, pct_col).value = h_pct
+            ws2.cell(hr, pct_col).number_format = "0%"
+            ws2.cell(hr, pct_col).font = Font(bold=True, size=11)
+
+    # ── Column widths Tab 2 ───────────────────────────────────────────────
+    ws2.column_dimensions['A'].width = 12
+    ws2.column_dimensions['B'].width = 20
+    ws2.column_dimensions['C'].width = 20
+    ws2.column_dimensions['D'].width = 26
+    for ni in range(n_nights):
+        ws2.column_dimensions[get_column_letter(start_col + ni)].width = 9
+    ws2.column_dimensions[total_col_letter].width = 8
+    ws2.column_dimensions[pct_col_letter].width = 10
+    ws2.column_dimensions[get_column_letter(last_col_idx)].width = 10
+
+    # ── Row heights Tab 2 ─────────────────────────────────────────────────
+    for rn in range(2, 5):
+        ws2.row_dimensions[rn].height = 23.75
+    for rn in range(5, ws2.max_row + 1):
+        ws2.row_dimensions[rn].height = 14.25
+
+    # ── Return file ───────────────────────────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe_name = _re_fn.sub(r'[^a-zA-Z0-9_]+', '_', event_name)
+    return send_file(buf, as_attachment=True,
+                     download_name=f"{safe_name}_Pace_Report.xlsx",
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @app.route('/pickup/<int:cid>/upload-contract', methods=['GET', 'POST'])
