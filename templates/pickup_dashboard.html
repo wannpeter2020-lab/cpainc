@@ -25,8 +25,142 @@
   </div>
 </div>
 
-{# ── Macro: render a table of rows ── #}
-{% macro event_table(rows, show_history=false, table_id='evt-table', section='') %}
+{# ── Helper macro: render a single hotel row ── #}
+{% macro hotel_row(r, show_history=false, section='', indent=false) %}
+<tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}">
+  <td class="font-monospace small" {% if indent %}style="padding-left:2rem;"{% endif %}>
+    {% if r.config['booking_id'] %}
+      <a href="{{ url_for('booking_detail', booking_id=r.config['booking_id']) }}"
+         class="text-decoration-none" title="Open booking in pipeline">
+        {{ r.config['booking_id'] }}
+      </a>
+    {% else %}—{% endif %}
+  </td>
+  <td>
+    {% set eff_event = r.config['event_name'] or r.config['bk_event'] %}
+    {% set eff_org = r.config['organization'] or r.config['bk_org'] %}
+    <div class="fw-semibold">{{ eff_event or eff_org }}</div>
+    {% if eff_event %}
+    <div class="text-muted small">{{ eff_org }}</div>
+    {% endif %}
+  </td>
+  <td>{{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}</td>
+  <td>{{ r.event_start | us_date }}</td>
+  <td>{{ r.event_end | us_date }}</td>
+  <td>{{ r.config['cutoff_date'] | us_date }}</td>
+  <td>
+    {% if r.days_to_cutoff is not none %}
+      {% if r.days_to_cutoff < 0 %}
+        <span class="text-danger">{{ r.days_to_cutoff }} d</span>
+      {% elif r.days_to_cutoff <= 14 %}
+        <span class="text-warning fw-semibold">{{ r.days_to_cutoff }} d</span>
+      {% else %}
+        {{ r.days_to_cutoff }} d
+      {% endif %}
+    {% else %}—{% endif %}
+  </td>
+  <td>{{ r.last_date | us_date }}</td>
+  <td>
+    {% if r.last_contact %}
+      <span class="text-dark small">{{ r.last_contact[0] | us_date }}</span>
+    {% else %}
+      <span class="text-muted small">—</span>
+    {% endif %}
+  </td>
+  <td style="white-space:nowrap" id="respond-cell-{{ r.config['id'] }}">
+    {% if r.has_response %}
+      <span class="text-success fw-semibold me-1" title="Hotel responded">
+        <i class="bi bi-check-circle-fill"></i>
+        <span class="small ms-1 responded-date">{{ r.responded_date | us_date if r.responded_date else '' }}</span>
+      </span>
+      <button class="btn btn-sm btn-link p-0 text-muted" title="Undo — remove responded mark"
+              style="font-size:.75rem; vertical-align:middle;"
+              onclick="quickRespond({{ r.config['id'] }}, 'undo')">
+        <i class="bi bi-x-circle"></i>
+      </button>
+    {% else %}
+      <button class="btn btn-sm btn-link p-0 text-muted" title="Mark hotel as responded"
+              onclick="quickRespond({{ r.config['id'] }}, 'mark')">
+        <i class="bi bi-check-circle" style="font-size:1.2rem;"></i>
+      </button>
+    {% endif %}
+  </td>
+  <td class="text-end">
+    {% if r.last_pct_block is not none %}{{ r.last_pct_block }}%{% else %}—{% endif %}
+  </td>
+  <td class="text-end">
+    {% if r.last_pct_attr is not none %}{{ "%.1f"|format(r.last_pct_attr) }}%{% else %}—{% endif %}
+  </td>
+  <td>
+    {% if r.config['ota_url'] %}
+      <a href="{{ r.config['ota_url'] }}" target="_blank" class="text-decoration-none me-1" title="Check current OTA rate">
+        <i class="bi bi-box-arrow-up-right text-info small"></i>
+      </a>
+    {% endif %}
+    {% if r.last_ota %}
+      ${{ "%.2f"|format(r.last_ota) }}
+      {% if r.config['contracted_rate'] %}
+        {% set diff = r.last_ota - r.config['contracted_rate'] %}
+        {% if diff > 0 %}
+          <span class="text-danger small">(+${{ "%.0f"|format(diff) }})</span>
+        {% elif diff < 0 %}
+          <span class="text-success small">(-${{ "%.0f"|format(diff|abs) }})</span>
+        {% endif %}
+      {% endif %}
+    {% else %}—{% endif %}
+  </td>
+  <td>
+    <span class="badge bg-{{ r.badge }}">{{ r.badge_label }}</span>
+  </td>
+  {% if show_history %}
+  <td>
+    {% if r.has_final_history %}
+      <span class="badge bg-success">&#x2705; Complete</span>
+    {% elif r.force_past %}
+      <span class="badge bg-secondary">Manually moved</span>
+    {% else %}
+      <span class="badge bg-warning text-dark">&#x26A0;&#xFE0F; Pending</span>
+    {% endif %}
+  </td>
+  {% endif %}
+  <td style="position:sticky;right:0;background:white;z-index:1;white-space:nowrap;" class="d-flex gap-1 flex-wrap align-items-center">
+    <a href="{{ url_for('pickup_event', cid=r.config['id']) }}" class="btn btn-sm btn-primary">
+      <i class="bi bi-calendar-check me-1"></i>Pickup History
+    </a>
+    <a href="{{ url_for('pickup_edit_event', cid=r.config['id']) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+    {% if not r.has_final_history and not show_history %}
+    <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
+      <button class="btn btn-sm btn-outline-dark" title="Move to Past Events">
+        <i class="bi bi-archive me-1"></i>Move to Past
+      </button>
+    </form>
+    {% endif %}
+    {% if show_history and r.force_past and not r.has_final_history %}
+    <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
+      <button class="btn btn-sm btn-outline-secondary" title="Move back to Current Events">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Undo
+      </button>
+    </form>
+    {% endif %}
+    {% if section == 'future' %}
+    <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
+      <button class="btn btn-sm btn-outline-secondary" title="Move to Current Events">
+        <i class="bi bi-arrow-left-circle me-1"></i>Move to Current
+      </button>
+    </form>
+    {% elif section == 'current' and r.force_current %}
+    <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
+      <button class="btn btn-sm btn-outline-secondary" title="Return to Future Events">
+        <i class="bi bi-arrow-right-circle me-1"></i>Back to Future
+      </button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% endmacro %}
+
+{# ── Macro: render a table of rows with grouping support ── #}
+{% macro event_table(rows, groups, group_order, show_history=false, table_id='evt-table', section='') %}
 {% if rows %}
 <div class="table-responsive">
   <table class="table table-hover mb-0 align-middle sortable-table" id="{{ table_id }}">
@@ -61,137 +195,65 @@
       </tr>
     </thead>
     <tbody>
+      {# Track which event_name keys have been rendered as groups #}
+      {% set rendered_keys = namespace(keys=[]) %}
+
       {% for r in rows %}
-      <tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}">
-        <td class="font-monospace small">
-          {% if r.config['booking_id'] %}
-            <a href="{{ url_for('booking_detail', booking_id=r.config['booking_id']) }}"
-               class="text-decoration-none" title="Open booking in pipeline">
-              {{ r.config['booking_id'] }}
-            </a>
-          {% else %}—{% endif %}
-        </td>
-        <td>
-          {% set eff_event = r.config['event_name'] or r.config['bk_event'] %}
-          {% set eff_org = r.config['organization'] or r.config['bk_org'] %}
-          <div class="fw-semibold">{{ eff_event or eff_org }}</div>
-          {% if eff_event %}
-          <div class="text-muted small">{{ eff_org }}</div>
-          {% endif %}
-        </td>
-        <td>{{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}</td>
-        <td>{{ r.event_start | us_date }}</td>
-        <td>{{ r.event_end | us_date }}</td>
-        <td>{{ r.config['cutoff_date'] | us_date }}</td>
-        <td>
-          {% if r.days_to_cutoff is not none %}
-            {% if r.days_to_cutoff < 0 %}
-              <span class="text-danger">{{ r.days_to_cutoff }} d</span>
-            {% elif r.days_to_cutoff <= 14 %}
-              <span class="text-warning fw-semibold">{{ r.days_to_cutoff }} d</span>
-            {% else %}
-              {{ r.days_to_cutoff }} d
-            {% endif %}
-          {% else %}—{% endif %}
-        </td>
-        <td>{{ r.last_date | us_date }}</td>
-        <td>
-          {% if r.last_contact %}
-            <span class="text-dark small">{{ r.last_contact[0] | us_date }}</span>
-          {% else %}
-            <span class="text-muted small">—</span>
-          {% endif %}
-        </td>
-        <td style="white-space:nowrap" id="respond-cell-{{ r.config['id'] }}">
-          {% if r.has_response %}
-            <span class="text-success fw-semibold me-1" title="Hotel responded">
-              <i class="bi bi-check-circle-fill"></i>
-              <span class="small ms-1 responded-date">{{ r.responded_date | us_date if r.responded_date else '' }}</span>
-            </span>
-            <button class="btn btn-sm btn-link p-0 text-muted" title="Undo — remove responded mark"
-                    style="font-size:.75rem; vertical-align:middle;"
-                    onclick="quickRespond({{ r.config['id'] }}, 'undo')">
-              <i class="bi bi-x-circle"></i>
-            </button>
-          {% else %}
-            <button class="btn btn-sm btn-link p-0 text-muted" title="Mark hotel as responded"
-                    onclick="quickRespond({{ r.config['id'] }}, 'mark')">
-              <i class="bi bi-check-circle" style="font-size:1.2rem;"></i>
-            </button>
-          {% endif %}
-        </td>
-        <td class="text-end">
-          {% if r.last_pct_block is not none %}{{ r.last_pct_block }}%{% else %}—{% endif %}
-        </td>
-        <td class="text-end">
-          {% if r.last_pct_attr is not none %}{{ "%.1f"|format(r.last_pct_attr) }}%{% else %}—{% endif %}
-        </td>
-        <td>
-          {% if r.config['ota_url'] %}
-            <a href="{{ r.config['ota_url'] }}" target="_blank" class="text-decoration-none me-1" title="Check current OTA rate">
-              <i class="bi bi-box-arrow-up-right text-info small"></i>
-            </a>
-          {% endif %}
-          {% if r.last_ota %}
-            ${{ "%.2f"|format(r.last_ota) }}
-            {% if r.config['contracted_rate'] %}
-              {% set diff = r.last_ota - r.config['contracted_rate'] %}
-              {% if diff > 0 %}
-                <span class="text-danger small">(+${{ "%.0f"|format(diff) }})</span>
-              {% elif diff < 0 %}
-                <span class="text-success small">(-${{ "%.0f"|format(diff|abs) }})</span>
-              {% endif %}
-            {% endif %}
-          {% else %}—{% endif %}
-        </td>
-        <td>
-          <span class="badge bg-{{ r.badge }}">{{ r.badge_label }}</span>
-        </td>
-        {% if show_history %}
-        <td>
-          {% if r.has_final_history %}
-            <span class="badge bg-success">&#x2705; Complete</span>
-          {% elif r.force_past %}
-            <span class="badge bg-secondary">Manually moved</span>
-          {% else %}
-            <span class="badge bg-warning text-dark">&#x26A0;&#xFE0F; Pending</span>
-          {% endif %}
-        </td>
+        {% set ekey = (r.config['event_name'] or '')|trim|lower %}
+        {% if ekey in group_order and ekey not in rendered_keys.keys %}
+          {# ── Render group header + collapsible hotel rows ── #}
+          {% set rendered_keys.keys = rendered_keys.keys + [ekey] %}
+          {% set grp = groups[ekey] %}
+          {# Group header row #}
+          <tr class="table-primary" style="cursor:pointer"
+              data-bs-toggle="collapse" data-bs-target="#group-{{ grp.safe_id }}-{{ table_id }}">
+            <td colspan="2">
+              <i class="bi bi-chevron-down me-1 group-chevron" id="chev-{{ grp.safe_id }}-{{ table_id }}"></i>
+              <strong>{{ grp.event_name }}</strong>
+              <span class="text-muted small ms-2">{{ grp.organization }}</span>
+            </td>
+            <td><span class="badge bg-info text-dark">{{ grp.hotels|length }} hotels</span></td>
+            <td>{{ grp.event_start | us_date }}</td>
+            <td>{{ grp.event_end | us_date }}</td>
+            <td>{{ grp.cutoff_date | us_date }}</td>
+            <td>—</td>
+            <td>{{ grp.last_date | us_date }}</td>
+            <td colspan="2" class="text-muted small">—</td>
+            <td class="text-end fw-semibold">
+              {% if grp.combined_pct is not none %}{{ grp.combined_pct }}%{% else %}—{% endif %}
+            </td>
+            <td colspan="2">—</td>
+            <td>
+              <span class="badge bg-{{ grp.badge }}">{{ grp.badge_label }}</span>
+            </td>
+            {% if show_history %}<td></td>{% endif %}
+            <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;">
+              <a href="{{ url_for('pickup_event_report', primary_cid=grp.primary_cid) }}"
+                 class="btn btn-sm btn-outline-primary"
+                 onclick="event.stopPropagation()">
+                <i class="bi bi-bar-chart me-1"></i>Event Report
+              </a>
+            </td>
+          </tr>
+          {# Collapsible hotel rows #}
+          <tr class="p-0">
+            <td colspan="99" class="p-0">
+              <div class="collapse show" id="group-{{ grp.safe_id }}-{{ table_id }}">
+                <table class="table table-sm mb-0" style="background:#f0f4ff;">
+                  <tbody>
+                    {% for hr in grp.hotels %}
+                      {{ hotel_row(hr, show_history=show_history, section=section, indent=true) }}
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </td>
+          </tr>
+        {% elif ekey not in group_order %}
+          {# ── Single-hotel event: render normally ── #}
+          {{ hotel_row(r, show_history=show_history, section=section) }}
         {% endif %}
-        <td style="position:sticky;right:0;background:white;z-index:1;white-space:nowrap;" class="d-flex gap-1 flex-wrap align-items-center">
-          <a href="{{ url_for('pickup_event', cid=r.config['id']) }}" class="btn btn-sm btn-primary">
-            <i class="bi bi-calendar-check me-1"></i>Pickup History
-          </a>
-          <a href="{{ url_for('pickup_edit_event', cid=r.config['id']) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-          {% if not r.has_final_history and not show_history %}
-          <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
-            <button class="btn btn-sm btn-outline-dark" title="Move to Past Events">
-              <i class="bi bi-archive me-1"></i>Move to Past
-            </button>
-          </form>
-          {% endif %}
-          {% if show_history and r.force_past and not r.has_final_history %}
-          <form method="post" action="{{ url_for('pickup_promote_past', cid=r.config['id']) }}">
-            <button class="btn btn-sm btn-outline-secondary" title="Move back to Current Events">
-              <i class="bi bi-arrow-counterclockwise me-1"></i>Undo
-            </button>
-          </form>
-          {% endif %}
-          {% if section == 'future' %}
-          <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
-            <button class="btn btn-sm btn-outline-secondary" title="Move to Current Events">
-              <i class="bi bi-arrow-left-circle me-1"></i>Move to Current
-            </button>
-          </form>
-          {% elif section == 'current' and r.force_current %}
-          <form method="post" action="{{ url_for('pickup_toggle_current', cid=r.config['id']) }}">
-            <button class="btn btn-sm btn-outline-secondary" title="Return to Future Events">
-              <i class="bi bi-arrow-right-circle me-1"></i>Back to Future
-            </button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
+        {# If ekey is in group_order but already rendered, skip (it's inside the group) #}
       {% endfor %}
     </tbody>
   </table>
@@ -213,7 +275,7 @@
     </button>
   </div>
   <div id="collapseCurrent" class="collapse show">
-    {{ event_table(current_rows, table_id='tbl-current', section='current') }}
+    {{ event_table(current_rows, current_groups, current_group_order, table_id='tbl-current', section='current') }}
     {% if not current_rows %}
     <div class="card-body text-muted">No current events. <a href="{{ url_for('pickup_new_event') }}">Add your first event.</a></div>
     {% endif %}
@@ -232,7 +294,7 @@
     </button>
   </div>
   <div id="collapseFuture" class="collapse">
-    {{ event_table(future_rows, table_id='tbl-future', section='future') }}
+    {{ event_table(future_rows, future_groups, future_group_order, table_id='tbl-future', section='future') }}
   </div>
 </div>
 
@@ -248,7 +310,7 @@
     </button>
   </div>
   <div id="collapsePast" class="collapse">
-    {{ event_table(past_rows, show_history=true, table_id='tbl-past') }}
+    {{ event_table(past_rows, past_groups, past_group_order, show_history=true, table_id='tbl-past') }}
   </div>
 </div>
 
@@ -318,15 +380,38 @@
 
 {% block scripts %}
 <script>
-// ── Chevron toggle ─────────────────────────────────────────────────────────
+// ── Chevron toggle for section cards ──────────────────────────────────────────
 document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function(btn) {
+  // Skip group collapse toggles (they use tr elements, not buttons with data-bs-target pointing to card sections)
+  if (!btn.dataset.bsTarget) return;
   const target = document.querySelector(btn.dataset.bsTarget);
   if (!target) return;
+  // Only wire up section-level collapses (not group row toggles which are tr elements)
+  if (btn.tagName === 'BUTTON' && btn.classList.contains('btn-outline-secondary')) {
+    target.addEventListener('show.bs.collapse', function() {
+      const i = btn.querySelector('i');
+      if (i) i.className = 'bi bi-chevron-up';
+    });
+    target.addEventListener('hide.bs.collapse', function() {
+      const i = btn.querySelector('i');
+      if (i) i.className = 'bi bi-chevron-down';
+    });
+  }
+});
+
+// ── Group chevron toggle ───────────────────────────────────────────────────────
+document.querySelectorAll('tr[data-bs-toggle="collapse"]').forEach(function(tr) {
+  const targetSel = tr.dataset.bsTarget;
+  if (!targetSel) return;
+  const target = document.querySelector(targetSel);
+  if (!target) return;
+  // Find the chevron icon inside this tr
+  const chevron = tr.querySelector('.group-chevron');
   target.addEventListener('show.bs.collapse', function() {
-    btn.querySelector('i').className = 'bi bi-chevron-up';
+    if (chevron) chevron.className = 'bi bi-chevron-down me-1 group-chevron';
   });
   target.addEventListener('hide.bs.collapse', function() {
-    btn.querySelector('i').className = 'bi bi-chevron-down';
+    if (chevron) chevron.className = 'bi bi-chevron-right me-1 group-chevron';
   });
 });
 

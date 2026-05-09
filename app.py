@@ -4002,9 +4002,72 @@ def pickup_dashboard():
     future_rows.sort(key=_sort_key)
     archived_rows.sort(key=_sort_key)
 
+    # ── Build event groups (events with >1 hotel in the same section) ──────────
+    import re as _re_group
+    def _slugify(s):
+        return _re_group.sub(r'[^a-z0-9]+', '-', (s or '').lower()).strip('-')
+
+    def _build_groups(rows):
+        """Return (groups_dict, group_order) for events with >1 hotel in rows."""
+        from collections import defaultdict
+        bucket = defaultdict(list)
+        for r in rows:
+            key = (r['config']['event_name'] or '').strip().lower()
+            bucket[key].append(r)
+        groups = {}
+        group_order = []
+        for key, grp_rows in bucket.items():
+            if len(grp_rows) > 1:
+                combined_block = sum(r['contracted_total'] for r in grp_rows)
+                combined_total = sum(r['last_total'] for r in grp_rows)
+                if combined_block:
+                    combined_pct = round(combined_total / combined_block * 100, 1)
+                else:
+                    combined_pct = None
+                if combined_pct is None:
+                    grp_badge, grp_badge_label = 'secondary', 'No data'
+                elif combined_pct >= 80:
+                    grp_badge, grp_badge_label = 'success', 'On Pace'
+                elif combined_pct >= 60:
+                    grp_badge, grp_badge_label = 'warning', 'Watch'
+                else:
+                    grp_badge, grp_badge_label = 'danger', 'At Risk'
+                starts = [r['event_start'] for r in grp_rows if r['event_start']]
+                ends   = [r['event_end']   for r in grp_rows if r['event_end']]
+                dates  = [r['last_date']   for r in grp_rows if r['last_date']]
+                rep_config = grp_rows[0]['config']
+                display_name = (rep_config['event_name'] or '').strip() or key
+                # earliest cutoff across hotels
+                cutoffs = [r['config']['cutoff_date'] for r in grp_rows if r['config']['cutoff_date']]
+                groups[key] = {
+                    'event_name':     display_name,
+                    'organization':   rep_config['organization'] or rep_config['bk_org'] or '',
+                    'hotels':         grp_rows,
+                    'combined_block': combined_block,
+                    'combined_total': combined_total,
+                    'combined_pct':   combined_pct,
+                    'event_start':    min(starts) if starts else None,
+                    'event_end':      max(ends)   if ends   else None,
+                    'last_date':      max(dates)  if dates  else None,
+                    'cutoff_date':    min(cutoffs) if cutoffs else None,
+                    'badge':          grp_badge,
+                    'badge_label':    grp_badge_label,
+                    'safe_id':        _slugify(display_name),
+                    'primary_cid':    min(r['config']['id'] for r in grp_rows),
+                }
+                group_order.append(key)
+        return groups, group_order
+
+    current_groups, current_group_order = _build_groups(current_rows)
+    future_groups,  future_group_order  = _build_groups(future_rows)
+    past_groups,    past_group_order    = _build_groups(past_rows)
+
     return render_template('pickup_dashboard.html',
                            past_rows=past_rows, current_rows=current_rows,
                            future_rows=future_rows, archived_rows=archived_rows,
+                           current_groups=current_groups, current_group_order=current_group_order,
+                           future_groups=future_groups,   future_group_order=future_group_order,
+                           past_groups=past_groups,       past_group_order=past_group_order,
                            today=today_str)
 
 
@@ -4388,6 +4451,218 @@ def pickup_event(cid):
                            attrition_pct=attrition_pct, attrition_rooms=attrition_rooms,
                            past_cutoff=past_cutoff, has_final_history=has_final_history,
                            has_hhr=has_hhr, today=_date.today().isoformat())
+
+
+# ── Event Report: combined view across all hotels for an event ────────────────
+
+@app.route('/pickup/event-report/<int:primary_cid>')
+def pickup_event_report(primary_cid):
+    """Show combined pickup data for all hotels sharing the same event_name."""
+    from datetime import date as _date2, datetime as _dt2
+    db = get_db()
+
+    # Get the primary config to find the event_name
+    primary = db.execute("SELECT * FROM pickup_config WHERE id=?", (primary_cid,)).fetchone()
+    if not primary:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    event_name = (primary['event_name'] or '').strip()
+    if not event_name:
+        return redirect(url_for('pickup_event', cid=primary_cid))
+
+    # Find all configs with the same event_name (case-insensitive, active only)
+    all_configs = db.execute(
+        "SELECT * FROM pickup_config WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active' ORDER BY id",
+        (event_name,)
+    ).fetchall()
+
+    if len(all_configs) <= 1:
+        # Only one hotel — redirect to normal event page
+        return redirect(url_for('pickup_event', cid=primary_cid))
+
+    organization = primary['organization'] or primary['event_name'] or ''
+
+    # ── Per-hotel summaries ────────────────────────────────────────────────────
+    hotel_summaries = []
+    combined_block = 0
+    all_date_union = set()
+
+    for c in all_configs:
+        block = json.loads(c['contracted_block'] or '{}')
+        contracted_total = sum(block.values())
+        combined_block += contracted_total
+        all_date_union.update(block.keys())
+
+        # Latest non-historical weekly entry
+        last = db.execute(
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND NOT (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               ORDER BY report_date DESC LIMIT 1""",
+            (c['id'],)
+        ).fetchone()
+        last_total = last['total_rooms'] if last else 0
+        last_pct = last['pct_of_block'] if last else None
+        last_date = last['report_date'] if last else None
+
+        if last_pct is None:
+            h_badge, h_badge_label = 'secondary', 'No data'
+        elif last_pct >= 80:
+            h_badge, h_badge_label = 'success', 'On Pace'
+        elif last_pct >= 60:
+            h_badge, h_badge_label = 'warning', 'Watch'
+        else:
+            h_badge, h_badge_label = 'danger', 'At Risk'
+
+        hotel_summaries.append({
+            'cid':              c['id'],
+            'hotel_name':       c['hotel'] or c['event_name'] or '—',
+            'contracted_total': contracted_total,
+            'last_total':       last_total,
+            'last_pct':         last_pct,
+            'last_date':        last_date,
+            'badge':            h_badge,
+            'badge_label':      h_badge_label,
+            'cutoff_date':      c['cutoff_date'],
+        })
+
+    all_dates = sorted(all_date_union)
+
+    # ── Combined weekly timeline ───────────────────────────────────────────────
+    # Gather all non-historical weekly rows across all hotels
+    from collections import defaultdict
+    date_totals = defaultdict(int)   # report_date -> sum of total_rooms
+    date_hotels = defaultdict(set)   # report_date -> set of cids that reported
+
+    for c in all_configs:
+        rows_w = db.execute(
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND NOT (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               ORDER BY report_date""",
+            (c['id'],)
+        ).fetchall()
+        for w in rows_w:
+            pbn = json.loads(w['pickup_by_night'] or '{}')
+            total = sum(v for v in pbn.values() if isinstance(v, (int, float)))
+            date_totals[w['report_date']] += total
+            date_hotels[w['report_date']].add(c['id'])
+
+    # Build sorted weekly display with WoW change
+    sorted_dates = sorted(date_totals.keys())
+    combined_weekly = []
+    prev_total = None
+    for rd in sorted_dates:
+        total = date_totals[rd]
+        pct = round(total / combined_block * 100, 1) if combined_block else None
+        wow = (total - prev_total) if prev_total is not None else None
+        combined_weekly.append({
+            'report_date':   rd,
+            'total_rooms':   total,
+            'pct_of_block':  pct,
+            'wow_change':    wow,
+            'hotels_count':  len(date_hotels[rd]),
+        })
+        prev_total = total
+    combined_weekly.reverse()  # newest first
+
+    # ── Historical pace comparison (if any hotel has ASAS historical rows) ────
+    pace_comparison = None
+    ASAS_EVENT_STARTS = {
+        2021: '2021-07-11',
+        2022: '2022-06-23',
+        2023: '2023-07-15',
+        2024: '2024-07-17',
+        2025: '2025-06-30',
+        2026: '2026-07-17',
+    }
+
+    hist_rows_all = []
+    for c in all_configs:
+        hist_rows = db.execute(
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               ORDER BY report_date""",
+            (c['id'],)
+        ).fetchall()
+        hist_rows_all.extend(hist_rows)
+
+    if hist_rows_all:
+        import re as _re2
+        def _weeks_out2(event_start_str, report_date_str):
+            try:
+                es = _date2.fromisoformat(event_start_str)
+                rd = _date2.fromisoformat(report_date_str)
+                return (es - rd).days // 7
+            except Exception:
+                return None
+
+        hist_by_year = {}
+        for w in hist_rows_all:
+            lbl = w['label'] or ''
+            m = _re2.search(r'(\d{4})', lbl)
+            if not m:
+                continue
+            yr = int(m.group(1))
+            es = ASAS_EVENT_STARTS.get(yr)
+            if not es:
+                continue
+            wo = _weeks_out2(es, w['report_date'])
+            if wo is None or wo < 0:
+                continue
+            pbn = json.loads(w['pickup_by_night'] or '{}')
+            total = pbn.get('historical_total', w['total_rooms'] or 0)
+            if yr not in hist_by_year:
+                hist_by_year[yr] = {}
+            if wo not in hist_by_year[yr] or total > hist_by_year[yr][wo]:
+                hist_by_year[yr][wo] = total
+
+        # Add current year from combined_weekly (reversed to get chronological)
+        current_event_start = ASAS_EVENT_STARTS.get(2026)
+        if current_event_start and date_totals:
+            hist_by_year[2026] = {}
+            for rd, total in date_totals.items():
+                wo = _weeks_out2(current_event_start, rd)
+                if wo is None or wo < 0:
+                    continue
+                if wo not in hist_by_year[2026] or total > hist_by_year[2026][wo]:
+                    hist_by_year[2026][wo] = total
+
+        if hist_by_year:
+            all_weeks_hist = sorted(
+                set(wo for yr_data in hist_by_year.values() for wo in yr_data.keys()),
+                reverse=True
+            )
+            by_weeks_out = {}
+            for wo in all_weeks_hist:
+                by_weeks_out[wo] = {}
+                for yr, yr_data in hist_by_year.items():
+                    if wo in yr_data:
+                        by_weeks_out[wo][str(yr)] = yr_data[wo]
+            years_available = sorted(hist_by_year.keys(), reverse=True)
+            pace_comparison = {
+                'years':        years_available,
+                'event_starts': ASAS_EVENT_STARTS,
+                'by_weeks_out': by_weeks_out,
+                'all_weeks':    all_weeks_hist,
+            }
+
+    # ── Cutoff range ──────────────────────────────────────────────────────────
+    cutoffs = [c['cutoff_date'] for c in all_configs if c['cutoff_date']]
+    cutoff_earliest = min(cutoffs) if cutoffs else None
+    cutoff_latest   = max(cutoffs) if cutoffs else None
+
+    return render_template('pickup_event_report.html',
+                           event_name=event_name,
+                           organization=organization,
+                           configs=all_configs,
+                           combined_block=combined_block,
+                           combined_weekly=combined_weekly,
+                           hotel_summaries=hotel_summaries,
+                           pace_comparison=pace_comparison,
+                           all_dates=all_dates,
+                           cutoff_earliest=cutoff_earliest,
+                           cutoff_latest=cutoff_latest,
+                           primary_cid=primary_cid)
 
 
 @app.route('/pickup/<int:cid>/upload-contract', methods=['GET', 'POST'])

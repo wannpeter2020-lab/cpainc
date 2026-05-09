@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}{{ event_name }} — Event Report{% endblock %}
+{% block content %}
+
+{# ── Header card ── #}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-bar-chart me-2"></i>{{ event_name }} — Combined Event Report</span>
+    <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-light">
+      <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+    </a>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="section-label">Organization</div>
+        <div>{{ organization or '—' }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="section-label">Hotels Tracked</div>
+        <div class="fw-semibold">{{ configs|length }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="section-label">Combined Block</div>
+        <div class="fw-semibold">{{ '{:,}'.format(combined_block) }} rooms</div>
+      </div>
+      <div class="col-md-2">
+        <div class="section-label">Combined Pickup</div>
+        {% if combined_weekly %}
+          {% set latest = combined_weekly[0] %}
+          <div class="fw-semibold">{{ '{:,}'.format(latest.total_rooms) }} rooms</div>
+        {% else %}
+          <div class="text-muted">No data</div>
+        {% endif %}
+      </div>
+      <div class="col-md-2">
+        <div class="section-label">% of Block</div>
+        {% if combined_weekly and combined_weekly[0].pct_of_block is not none %}
+          {% set pct = combined_weekly[0].pct_of_block %}
+          {% if pct >= 80 %}
+            <div class="fw-semibold text-success">{{ pct }}%</div>
+          {% elif pct >= 60 %}
+            <div class="fw-semibold text-warning">{{ pct }}%</div>
+          {% else %}
+            <div class="fw-semibold text-danger">{{ pct }}%</div>
+          {% endif %}
+        {% else %}
+          <div class="text-muted">—</div>
+        {% endif %}
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Cutoff Date Range</div>
+        <div>
+          {% if cutoff_earliest %}
+            {{ cutoff_earliest | us_date }}
+            {% if cutoff_latest and cutoff_latest != cutoff_earliest %}
+              &ndash; {{ cutoff_latest | us_date }}
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Hotel Summary ── #}
+<div class="card mb-3">
+  <div class="card-header">
+    <i class="bi bi-building me-2"></i>Hotel Summary
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover table-sm mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Hotel</th>
+          <th class="text-end">Contracted Block</th>
+          <th class="text-end">Latest Pickup</th>
+          <th class="text-end">% of Block</th>
+          <th>Cutoff Date</th>
+          <th>Last Report</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in hotel_summaries %}
+        <tr>
+          <td class="fw-semibold">{{ h.hotel_name }}</td>
+          <td class="text-end">{{ '{:,}'.format(h.contracted_total) }}</td>
+          <td class="text-end">{{ '{:,}'.format(h.last_total) }}</td>
+          <td class="text-end">
+            {% if h.last_pct is not none %}
+              {% if h.last_pct >= 80 %}
+                <span class="text-success fw-semibold">{{ h.last_pct }}%</span>
+              {% elif h.last_pct >= 60 %}
+                <span class="text-warning fw-semibold">{{ h.last_pct }}%</span>
+              {% else %}
+                <span class="text-danger fw-semibold">{{ h.last_pct }}%</span>
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ h.cutoff_date | us_date }}</td>
+          <td>{{ h.last_date | us_date }}</td>
+          <td><span class="badge bg-{{ h.badge }}">{{ h.badge_label }}</span></td>
+          <td>
+            <a href="{{ url_for('pickup_event', cid=h.cid) }}" class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-calendar-check me-1"></i>History
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+        {# Totals row #}
+        <tr class="table-secondary fw-semibold">
+          <td>Total ({{ hotel_summaries|length }} hotels)</td>
+          <td class="text-end">{{ '{:,}'.format(combined_block) }}</td>
+          <td class="text-end">
+            {% if combined_weekly %}{{ '{:,}'.format(combined_weekly[0].total_rooms) }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end">
+            {% if combined_weekly and combined_weekly[0].pct_of_block is not none %}
+              {{ combined_weekly[0].pct_of_block }}%
+            {% else %}—{% endif %}
+          </td>
+          <td colspan="4"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ── Historical Pace Comparison ── #}
+{% if pace_comparison %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-graph-up me-2"></i>Historical Pace Comparison</span>
+    <small class="text-muted">Rooms picked up by weeks out from event start (combined across all hotels)</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.85rem">
+      <thead class="table-light">
+        <tr>
+          <th style="width:90px">Weeks Out</th>
+          {% for yr in pace_comparison.years %}
+          <th class="text-end {% if yr == 2026 %}fw-bold{% endif %}">
+            {{ yr }}{% if yr == 2026 %} <span class="badge bg-primary" style="font-size:.7rem">Current</span>{% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for wo in pace_comparison.all_weeks %}
+        {% set row_data = pace_comparison.by_weeks_out[wo] %}
+        <tr>
+          <td class="text-muted">{{ wo }} wk{% if wo != 1 %}s{% endif %}</td>
+          {% for yr in pace_comparison.years %}
+          {% set val = row_data.get(yr|string) %}
+          <td class="text-end {% if yr == 2026 %}fw-bold{% endif %}">
+            {% if val is not none %}
+              {{ '{:,}'.format(val) }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Combined Weekly Pace ── #}
+<div class="card mb-3">
+  <div class="card-header">
+    <i class="bi bi-calendar-week me-2"></i>Combined Weekly Pace
+    <small class="text-muted ms-2">(total rooms across all reporting hotels per date)</small>
+  </div>
+  {% if combined_weekly %}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.88rem">
+      <thead class="table-light">
+        <tr>
+          <th>Report Date</th>
+          <th class="text-end">Total Rooms</th>
+          <th class="text-end">WoW Change</th>
+          <th class="text-end">% of Combined Block</th>
+          <th class="text-end">Hotels Reporting</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for w in combined_weekly %}
+        <tr>
+          <td>{{ w.report_date | us_date }}</td>
+          <td class="text-end fw-semibold">{{ '{:,}'.format(w.total_rooms) }}</td>
+          <td class="text-end">
+            {% if w.wow_change is not none %}
+              {% if w.wow_change > 0 %}
+                <span class="text-success">+{{ w.wow_change }}</span>
+              {% elif w.wow_change < 0 %}
+                <span class="text-danger">{{ w.wow_change }}</span>
+              {% else %}
+                <span class="text-muted">0</span>
+              {% endif %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            {% if w.pct_of_block is not none %}
+              {% if w.pct_of_block >= 80 %}
+                <span class="text-success fw-semibold">{{ w.pct_of_block }}%</span>
+              {% elif w.pct_of_block >= 60 %}
+                <span class="text-warning fw-semibold">{{ w.pct_of_block }}%</span>
+              {% else %}
+                <span class="text-danger fw-semibold">{{ w.pct_of_block }}%</span>
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-end text-muted">{{ w.hotels_count }} / {{ configs|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card-body text-muted">No weekly pickup data entered yet.</div>
+  {% endif %}
+</div>
+
+{# ── Back button ── #}
+<div class="mb-4">
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back to Pickup Dashboard
+  </a>
+</div>
+
+{% endblock %}
