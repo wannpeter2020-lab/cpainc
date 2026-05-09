@@ -3971,9 +3971,10 @@ def pickup_dashboard():
             except Exception:
                 pass
         # also try bk_start if contracted_block has no dates
+        # bk_start may come as ISO datetime "2026-07-24T00:00:00.000Z" — strip time part
         if start_date is None and c['bk_start']:
             try:
-                start_date = date.fromisoformat(c['bk_start'])
+                start_date = date.fromisoformat(str(c['bk_start'])[:10])
             except Exception:
                 pass
         if has_final_history or force_past:
@@ -4494,10 +4495,10 @@ def pickup_event_report(primary_cid):
         combined_block += contracted_total
         all_date_union.update(block.keys())
 
-        # Latest non-historical weekly entry
+        # Latest non-historical weekly entry (label IS NULL counts as current)
         last = db.execute(
             """SELECT * FROM pickup_weekly WHERE config_id=?
-               AND NOT (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'))
                ORDER BY report_date DESC LIMIT 1""",
             (c['id'],)
         ).fetchone()
@@ -4537,13 +4538,12 @@ def pickup_event_report(primary_cid):
     for c in all_configs:
         rows_w = db.execute(
             """SELECT * FROM pickup_weekly WHERE config_id=?
-               AND NOT (label LIKE 'ASAS %' OR label LIKE 'Historical%')
+               AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'))
                ORDER BY report_date""",
             (c['id'],)
         ).fetchall()
         for w in rows_w:
-            pbn = json.loads(w['pickup_by_night'] or '{}')
-            total = sum(v for v in pbn.values() if isinstance(v, (int, float)))
+            total = w['total_rooms'] or 0
             date_totals[w['report_date']] += total
             date_hotels[w['report_date']].add(c['id'])
 
