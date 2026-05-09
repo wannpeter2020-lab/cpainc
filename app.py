@@ -5240,7 +5240,7 @@ def pickup_event_report_xlsx(primary_cid):
 
 def _get_current_pickup_events(db):
     """Shared helper: return current-section events sorted by org → event_start."""
-    from datetime import date as _d
+    from datetime import date as _d, timedelta
     today = _d.today()
     future_cutoff = today + timedelta(days=120)
     configs = db.execute("""
