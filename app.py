@@ -4970,8 +4970,13 @@ def pickup_event_report_xlsx(primary_cid):
         cutoff_cell.font = Font(bold=True, size=10, color="FFFF0000")
 
     # ── Date header row (row 6) ───────────────────────────────────────────
+    date_hdr_fill = PatternFill("solid", fgColor="1A3A5C")
+    date_hdr_font = Font(bold=True, size=11, color="FFFFFF")
+    day_hdr_fill  = PatternFill("solid", fgColor="2D5986")
+
     ws2.cell(6, 4).value = "Date:"
-    ws2.cell(6, 4).font = Font(bold=True, size=11)
+    ws2.cell(6, 4).font = Font(bold=True, size=11, color="FFFFFF")
+    ws2.cell(6, 4).fill = date_hdr_fill
 
     for ni, ed in enumerate(event_dates):
         col_idx = start_col + ni
@@ -4982,15 +4987,20 @@ def pickup_event_report_xlsx(primary_cid):
         except Exception:
             ws2.cell(6, col_idx).value = ed
         ws2.cell(6, col_idx).alignment = Alignment(horizontal="center")
-        ws2.cell(6, col_idx).font = Font(size=11)
+        ws2.cell(6, col_idx).font = date_hdr_font
+        ws2.cell(6, col_idx).fill = date_hdr_fill
+        ws2.cell(6, col_idx).border = Border(left=Side(style='thin', color='FFFFFF'),
+                                              right=Side(style='thin', color='FFFFFF'))
 
     ws2.cell(6, total_col).value = "Total"
-    ws2.cell(6, total_col).font = Font(bold=True, size=11)
+    ws2.cell(6, total_col).font = date_hdr_font
     ws2.cell(6, total_col).alignment = Alignment(horizontal="center")
+    ws2.cell(6, total_col).fill = date_hdr_fill
 
     # ── Day-of-week row (row 7) ───────────────────────────────────────────
     ws2.cell(7, 4).value = "Day:"
-    ws2.cell(7, 4).font = Font(bold=True, size=11)
+    ws2.cell(7, 4).font = Font(bold=True, size=11, color="FFFFFF")
+    ws2.cell(7, 4).fill = day_hdr_fill
 
     day_abbrevs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     for ni, ed in enumerate(event_dates):
@@ -5001,17 +5011,28 @@ def pickup_event_report_xlsx(primary_cid):
         except Exception:
             ws2.cell(7, col_idx).value = ""
         ws2.cell(7, col_idx).alignment = Alignment(horizontal="center")
-        ws2.cell(7, col_idx).font = Font(size=11)
+        ws2.cell(7, col_idx).font = Font(bold=True, size=11, color="FFFFFF")
+        ws2.cell(7, col_idx).fill = day_hdr_fill
+        ws2.cell(7, col_idx).border = Border(left=Side(style='thin', color='FFFFFF'),
+                                              right=Side(style='thin', color='FFFFFF'))
+    ws2.cell(7, total_col).fill = day_hdr_fill
 
     # ── Contracted block rows (rows 8 to 7+n_hotels) ─────────────────────
+    hotel_row_fill  = PatternFill("solid", fgColor="F8F9FA")
+    hotel_row_fill2 = PatternFill("solid", fgColor="FFFFFF")
+    thin = Side(style='thin')
+    med  = Side(style='medium')
+    def cell_border(top=None, bottom=None, left=None, right=None):
+        return Border(top=top, bottom=bottom, left=left, right=right)
+
     for hi, hd in enumerate(hotel_data):
         r = 8 + hi
         c_cfg = hd['config']
-        ws2.cell(r, 1).value = c_cfg['booking_id']
-        ws2.cell(r, 2).value = event_name
-        ws2.cell(r, 3).value = organization
+        # cols 1 (A) and 2 (B) intentionally left empty; org (col 3/C) also left empty
+        # hotel name goes in col 4 (D) — cols A-C deleted later
         ws2.cell(r, 4).value = f"{hd['hotel_name']} (${hd['contracted_rate']:.0f})"
         ws2.cell(r, 4).font = Font(size=11)
+        row_fill = hotel_row_fill if hi % 2 == 0 else hotel_row_fill2
 
         for ni, ed in enumerate(event_dates):
             col_idx = start_col + ni
@@ -5019,10 +5040,16 @@ def pickup_event_report_xlsx(primary_cid):
             ws2.cell(r, col_idx).value = rooms if rooms else None
             ws2.cell(r, col_idx).alignment = Alignment(horizontal="center")
             ws2.cell(r, col_idx).font = Font(size=11)
+            ws2.cell(r, col_idx).fill = row_fill
+            ws2.cell(r, col_idx).border = cell_border(top=Side(style='hair'), bottom=Side(style='hair'),
+                                                       left=Side(style='hair'), right=Side(style='hair'))
 
         ws2.cell(r, total_col).value = hd['contracted_total']
         ws2.cell(r, total_col).font = Font(bold=True, size=11)
         ws2.cell(r, total_col).alignment = Alignment(horizontal="center")
+        ws2.cell(r, total_col).fill = row_fill
+        ws2.cell(r, total_col).border = cell_border(left=Side(style='thin'), right=Side(style='thin'),
+                                                      top=Side(style='hair'), bottom=Side(style='hair'))
 
         # Attrition column
         atr = c_cfg['attrition_pct']
@@ -5031,63 +5058,89 @@ def pickup_event_report_xlsx(primary_cid):
             ws2.cell(r, pct_col).value = f"Attrition {round(atr*100):.0f}% = {atr_rooms}"
         else:
             ws2.cell(r, pct_col).value = "Attrition Waived"
-        ws2.cell(r, pct_col).font = Font(size=11)
+        ws2.cell(r, pct_col).font = Font(size=10)
+        ws2.cell(r, pct_col).fill = row_fill
 
     # ── Total block row (row 8+n_hotels) ─────────────────────────────────
     total_block_row = 8 + n_hotels
+    red_font_bold = Font(bold=True, size=11, color="FFFF0000")
+    total_blk_fill = PatternFill("solid", fgColor="FCE4EC")  # pale red
+    total_blk_border_mid = Border(top=Side(style='medium'), bottom=Side(style='medium'))
     ws2.cell(total_block_row, 4).value = "Total Block"
-    ws2.cell(total_block_row, 4).font = Font(bold=True, size=11, color="FFFF0000")
+    ws2.cell(total_block_row, 4).font = red_font_bold
     ws2.cell(total_block_row, 4).alignment = Alignment(horizontal="center")
+    ws2.cell(total_block_row, 4).fill = total_blk_fill
+    ws2.cell(total_block_row, 4).border = Border(top=Side(style='medium'), bottom=Side(style='medium'),
+                                                   left=Side(style='medium'))
 
     for ni, ed in enumerate(event_dates):
         col_idx = start_col + ni
         night_total = sum(hd['contracted_block'].get(ed, 0) for hd in hotel_data)
         ws2.cell(total_block_row, col_idx).value = night_total if night_total else None
-        ws2.cell(total_block_row, col_idx).font = Font(bold=True, size=11, color="FFFF0000")
+        ws2.cell(total_block_row, col_idx).font = red_font_bold
         ws2.cell(total_block_row, col_idx).alignment = Alignment(horizontal="center")
+        ws2.cell(total_block_row, col_idx).fill = total_blk_fill
+        ws2.cell(total_block_row, col_idx).border = total_blk_border_mid
 
     ws2.cell(total_block_row, total_col).value = combined_block
-    ws2.cell(total_block_row, total_col).font = Font(bold=True, size=11, color="FFFF0000")
+    ws2.cell(total_block_row, total_col).font = red_font_bold
     ws2.cell(total_block_row, total_col).alignment = Alignment(horizontal="center")
+    ws2.cell(total_block_row, total_col).fill = total_blk_fill
+    ws2.cell(total_block_row, total_col).border = Border(top=Side(style='medium'), bottom=Side(style='medium'),
+                                                          right=Side(style='medium'))
 
     # ── Spacer row ────────────────────────────────────────────────────────
     spacer_row = total_block_row + 1  # = 9 + n_hotels
 
     # ── Weekly snapshot blocks ────────────────────────────────────────────
     body_start = spacer_row + 1  # = 10 + n_hotels
-    yellow_fill = PatternFill("solid", fgColor="FFFFFF00")
+    yellow_fill  = PatternFill("solid", fgColor="FFFF00")
+    blk_hdr_fill = PatternFill("solid", fgColor="D9E1F2")   # slate-blue header
+    blk_tot_fill = PatternFill("solid", fgColor="E2EFDA")   # pale green total row
+    blk_h1_fill  = PatternFill("solid", fgColor="F2F7FF")   # hotel alt 1
+    blk_h2_fill  = PatternFill("solid", fgColor="FFFFFF")   # hotel alt 2
+    hair_b = Border(top=Side(style='hair'), bottom=Side(style='hair'),
+                    left=Side(style='hair'), right=Side(style='hair'))
+    edge_l = Border(top=Side(style='hair'), bottom=Side(style='hair'),
+                    left=Side(style='thin'), right=Side(style='hair'))
+    edge_r = Border(top=Side(style='hair'), bottom=Side(style='hair'),
+                    left=Side(style='hair'), right=Side(style='thin'))
 
     for i, report_date in enumerate(all_report_dates):
         block_row = body_start + (i * 8)
         is_latest = (report_date == all_report_dates[-1])
+        hdr_fill = yellow_fill if is_latest else blk_hdr_fill
+        hdr_color = "000000" if is_latest else "FF0000"
 
-        # Row 0 of block: header
+        # Row 0 of block: header ─────────────────────────────────────────
         ws2.cell(block_row, 3).value = "Actual Pick Up"
-        ws2.cell(block_row, 3).font = Font(bold=True, size=11, color="FFFF0000")
+        ws2.cell(block_row, 3).font = Font(bold=True, size=11, color=hdr_color)
+        ws2.cell(block_row, 3).fill = hdr_fill
 
         try:
             ws2.cell(block_row, 4).value = _date_xlsx.fromisoformat(report_date)
             ws2.cell(block_row, 4).number_format = "d-mmm-yy"
         except Exception:
             ws2.cell(block_row, 4).value = report_date
-        ws2.cell(block_row, 4).font = Font(size=10)
-        if is_latest:
-            ws2.cell(block_row, 4).fill = yellow_fill
+        ws2.cell(block_row, 4).font = Font(size=10, color=hdr_color)
+        ws2.cell(block_row, 4).fill = hdr_fill
 
         ws2.merge_cells(start_row=block_row, start_column=4, end_row=block_row, end_column=total_col)
 
         wo = weeks_out('2026-07-17', report_date)
         wo_label = f"{wo} weeks" if wo is not None else ""
         ws2.cell(block_row, last_col_idx).value = wo_label
-        ws2.cell(block_row, last_col_idx).font = Font(italic=True, size=11, color="FFFF0000")
-        if is_latest:
-            ws2.cell(block_row, last_col_idx).fill = yellow_fill
+        ws2.cell(block_row, last_col_idx).font = Font(italic=True, size=11, color=hdr_color)
+        ws2.cell(block_row, last_col_idx).fill = hdr_fill
 
-        # Row 1 of block: Total row
+        # Row 1 of block: Total row ──────────────────────────────────────
         tr = block_row + 1
         ws2.cell(tr, 4).value = "Total"
         ws2.cell(tr, 4).font = Font(bold=True, italic=True, size=10)
         ws2.cell(tr, 4).alignment = Alignment(horizontal="center")
+        ws2.cell(tr, 4).fill = blk_tot_fill
+        ws2.cell(tr, 4).border = Border(top=Side(style='thin'), bottom=Side(style='thin'),
+                                         left=Side(style='thin'), right=Side(style='hair'))
 
         for ni, ed in enumerate(event_dates):
             night_total = total_by_night.get(report_date, {}).get(ed, 0)
@@ -5096,23 +5149,33 @@ def pickup_event_report_xlsx(primary_cid):
             ws2.cell(tr, col_idx).number_format = "0"
             ws2.cell(tr, col_idx).font = Font(bold=True, size=11)
             ws2.cell(tr, col_idx).alignment = Alignment(horizontal="center")
+            ws2.cell(tr, col_idx).fill = blk_tot_fill
+            ws2.cell(tr, col_idx).border = Border(top=Side(style='thin'), bottom=Side(style='thin'),
+                                                   left=Side(style='hair'), right=Side(style='hair'))
 
         ws2.cell(tr, total_col).value = total_rooms_agg.get(report_date, 0) or None
         ws2.cell(tr, total_col).number_format = "0"
         ws2.cell(tr, total_col).font = Font(bold=True, size=11)
+        ws2.cell(tr, total_col).fill = blk_tot_fill
+        ws2.cell(tr, total_col).border = Border(top=Side(style='thin'), bottom=Side(style='thin'),
+                                                  left=Side(style='hair'), right=Side(style='thin'))
 
         pct_val = total_rooms_agg.get(report_date, 0) / combined_block if combined_block else None
         ws2.cell(tr, pct_col).value = pct_val
         ws2.cell(tr, pct_col).number_format = "0%"
         ws2.cell(tr, pct_col).font = Font(bold=True, size=11)
+        ws2.cell(tr, pct_col).fill = blk_tot_fill
 
-        # Rows 2-7 of block: per-hotel rows
+        # Rows 2-N of block: per-hotel rows ─────────────────────────────
         for hi, hd in enumerate(hotel_data):
             hr = block_row + 2 + hi
             cid = hd['config']['id']
+            h_row_fill = blk_h1_fill if hi % 2 == 0 else blk_h2_fill
             ws2.cell(hr, 4).value = hd['hotel_name']
             ws2.cell(hr, 4).font = Font(bold=True, italic=True, size=10)
             ws2.cell(hr, 4).alignment = Alignment(horizontal="center")
+            ws2.cell(hr, 4).fill = h_row_fill
+            ws2.cell(hr, 4).border = edge_l
 
             hotel_pbn_rd = hotel_pbn.get(cid, {}).get(report_date, {})
             for ni, ed in enumerate(event_dates):
@@ -5122,6 +5185,8 @@ def pickup_event_report_xlsx(primary_cid):
                 ws2.cell(hr, col_idx).number_format = "0"
                 ws2.cell(hr, col_idx).alignment = Alignment(horizontal="center")
                 ws2.cell(hr, col_idx).font = Font(size=11)
+                ws2.cell(hr, col_idx).fill = h_row_fill
+                ws2.cell(hr, col_idx).border = hair_b
 
             # Use stored total_rooms for the hotel
             w_entry = next((w for w in hd['weekly'] if w['report_date'] == report_date), None)
@@ -5130,22 +5195,25 @@ def pickup_event_report_xlsx(primary_cid):
             ws2.cell(hr, total_col).value = hotel_total if hotel_total else None
             ws2.cell(hr, total_col).number_format = "0"
             ws2.cell(hr, total_col).font = Font(bold=True, size=11)
+            ws2.cell(hr, total_col).fill = h_row_fill
+            ws2.cell(hr, total_col).border = edge_r
 
             h_pct = hotel_total / hd['contracted_total'] if hd['contracted_total'] else None
             ws2.cell(hr, pct_col).value = h_pct
             ws2.cell(hr, pct_col).number_format = "0%"
             ws2.cell(hr, pct_col).font = Font(bold=True, size=11)
+            ws2.cell(hr, pct_col).fill = h_row_fill
 
-    # ── Column widths Tab 2 ───────────────────────────────────────────────
-    ws2.column_dimensions['A'].width = 12
-    ws2.column_dimensions['B'].width = 20
-    ws2.column_dimensions['C'].width = 20
-    ws2.column_dimensions['D'].width = 26
+    # ── Remove empty cols A–B, then set column widths ────────────────────
+    ws2.delete_cols(1, 2)  # cols A (booking_id) + B (event_name) → now C→A, D→B, E→C …
+    # After deletion: A=org(empty), B=hotel name, C=first night, … total/pct/weeks-label shift -2
+    ws2.column_dimensions['A'].width = 4   # empty spacer
+    ws2.column_dimensions['B'].width = 26  # hotel name
     for ni in range(n_nights):
-        ws2.column_dimensions[get_column_letter(start_col + ni)].width = 9
-    ws2.column_dimensions[total_col_letter].width = 8
-    ws2.column_dimensions[pct_col_letter].width = 10
-    ws2.column_dimensions[get_column_letter(last_col_idx)].width = 10
+        ws2.column_dimensions[get_column_letter(start_col - 2 + ni)].width = 9
+    ws2.column_dimensions[get_column_letter(total_col - 2)].width = 8
+    ws2.column_dimensions[get_column_letter(pct_col - 2)].width = 14
+    ws2.column_dimensions[get_column_letter(last_col_idx - 2)].width = 10
 
     # ── Row heights Tab 2 ─────────────────────────────────────────────────
     for rn in range(2, 5):

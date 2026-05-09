@@ -92,6 +92,19 @@
       </div>
     </div>
 
+    {# Multi-hotel event banner #}
+    {% if is_multi_hotel %}
+    <div class="alert alert-info mt-3 mb-0 py-2 small d-flex align-items-center justify-content-between">
+      <span><i class="bi bi-buildings me-2"></i>
+      This event has <strong>multiple hotels</strong>. View pickup across all hotels together on the
+      <a href="{{ url_for('pickup_event_report', primary_cid=primary_cid_for_report) }}" class="alert-link">Combined Event Report</a>.</span>
+      <a href="{{ url_for('pickup_event_report', primary_cid=primary_cid_for_report) }}"
+         class="btn btn-sm btn-info ms-3 text-nowrap text-white">
+        <i class="bi bi-bar-chart me-1"></i>Event Report
+      </a>
+    </div>
+    {% endif %}
+
     {# Final History alert #}
     {% if past_cutoff and not has_final_history %}
     <div class="alert alert-warning mt-3 mb-0 py-2 small d-flex align-items-center justify-content-between">
