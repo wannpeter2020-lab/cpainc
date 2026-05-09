@@ -3339,9 +3339,9 @@ def admin_reset_password(uid):
 @app.route('/admin/export-pickup-data')
 def admin_export_pickup_data():
     """Export all pickup_weekly rows as JSON keyed by booking_id (safe to share)."""
-    key = os.environ.get('ADMIN_UPLOAD_KEY', '')
-    if not key or request.args.get('key', '') != key:
-        return 'Forbidden', 403
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
     db = get_db()
     rows = db.execute('''
         SELECT pc.booking_id, pw.report_date, pw.pickup_by_night, pw.total_rooms,
@@ -3362,18 +3362,14 @@ def admin_export_pickup_data():
 @app.route('/admin/import-pickup-data', methods=['GET', 'POST'])
 def admin_import_pickup_data():
     """Import pickup_weekly rows from JSON — matches by booking_id, never overwrites existing rows."""
-    key = os.environ.get('ADMIN_UPLOAD_KEY', '')
-    if not key:
-        return 'Disabled (ADMIN_UPLOAD_KEY not set).', 403
-    provided = request.args.get('key') or request.form.get('key') or ''
-    if provided != key:
-        return 'Forbidden', 403
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
     if request.method == 'GET':
-        return f'''<!doctype html><html><body style="font-family:sans-serif;padding:2rem">
+        return '''<!doctype html><html><body style="font-family:sans-serif;padding:2rem">
         <h3>Import Pickup Weekly Data</h3>
         <p>Uploads pickup_weekly rows matched by booking_id. Skips duplicates (same booking_id + report_date).</p>
         <form method="post" enctype="multipart/form-data">
-          <input type="hidden" name="key" value="{key}">
           <input type="file" name="json_file" accept=".json"><br><br>
           <button type="submit">Import</button>
         </form></body></html>'''
