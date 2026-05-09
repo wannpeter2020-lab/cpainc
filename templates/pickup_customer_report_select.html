@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Customer Report — Select Clients{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">
+    <i class="bi bi-file-earmark-spreadsheet me-2"></i>Customer Pick-Up Report
+  </h4>
+  <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+  </a>
+</div>
+
+<div class="alert alert-info py-2 mb-3 small">
+  <i class="bi bi-info-circle me-1"></i>
+  Select the clients you want included. The report will have a <strong>Summary tab</strong>
+  plus one <strong>Pick-Up Update tab per event</strong>, sorted by customer.
+</div>
+
+<form method="POST" action="{{ url_for('pickup_customer_report_xlsx') }}" id="reportForm">
+
+  {# ── Master controls ── #}
+  <div class="card mb-3">
+    <div class="card-body py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-3">
+        <div class="form-check mb-0">
+          <input class="form-check-input" type="checkbox" id="selectAll" checked>
+          <label class="form-check-label fw-semibold" for="selectAll">Select / Deselect All</label>
+        </div>
+        <span class="text-muted small">
+          <span id="selectedCount">{{ total }}</span> of {{ total }} events selected
+        </span>
+      </div>
+      <button type="submit" class="btn btn-success">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>Generate Report
+      </button>
+    </div>
+  </div>
+
+  {# ── Per-customer accordion ── #}
+  {% for org_name, events in orgs.items() %}
+  {% set org_slug = loop.index %}
+  <div class="card mb-2">
+    {# Org header #}
+    <div class="card-header py-2 d-flex align-items-center gap-2"
+         style="background:#d9e1f2;">
+      <div class="form-check mb-0">
+        <input class="form-check-input org-check" type="checkbox"
+               id="org-{{ org_slug }}" data-org="{{ org_slug }}" checked>
+        <label class="form-check-label fw-bold text-primary" for="org-{{ org_slug }}"
+               style="cursor:pointer">
+          {{ org_name }}
+        </label>
+      </div>
+      <span class="badge bg-secondary ms-1">{{ events|length }}
+        event{% if events|length != 1 %}s{% endif %}
+      </span>
+      <button type="button" class="btn btn-link btn-sm ms-auto p-0 text-muted"
+              data-bs-toggle="collapse" data-bs-target="#org-events-{{ org_slug }}">
+        <i class="bi bi-chevron-down"></i>
+      </button>
+    </div>
+
+    {# Event rows — shown by default #}
+    <div class="collapse show" id="org-events-{{ org_slug }}">
+      <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.88rem">
+        <thead class="table-light">
+          <tr>
+            <th style="width:2rem"></th>
+            <th>Event Name</th>
+            <th>Hotel</th>
+            <th>Start</th>
+            <th>End</th>
+            <th class="text-end">Block</th>
+            <th class="text-end">Pickup</th>
+            <th class="text-end">% Block</th>
+            <th>Cutoff</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ev in events %}
+          <tr>
+            <td>
+              <div class="form-check mb-0">
+                <input class="form-check-input event-check" type="checkbox"
+                       name="cids" value="{{ ev.config['id'] }}"
+                       data-org="{{ org_slug }}" checked>
+              </div>
+            </td>
+            <td class="fw-semibold">{{ ev.event_name }}</td>
+            <td class="text-muted">{{ ev.hotel or '—' }}</td>
+            <td>{{ ev.start_date | us_date }}</td>
+            <td>{{ ev.end_date   | us_date }}</td>
+            <td class="text-end">{{ '{:,}'.format(ev.contracted_total) }}</td>
+            <td class="text-end">
+              {% if ev.last_total %}{{ '{:,}'.format(ev.last_total) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end">
+              {% if ev.last_pct is not none %}
+                {% if ev.last_pct >= 80 %}
+                  <span class="fw-semibold text-success">{{ ev.last_pct }}%</span>
+                {% elif ev.last_pct >= 60 %}
+                  <span class="fw-semibold text-warning">{{ ev.last_pct }}%</span>
+                {% else %}
+                  <span class="fw-semibold text-danger">{{ ev.last_pct }}%</span>
+                {% endif %}
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td>{{ ev.config['cutoff_date'] | us_date }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# ── Bottom action bar ── #}
+  <div class="d-flex justify-content-between align-items-center mt-3 mb-4">
+    <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i>Cancel
+    </a>
+    <button type="submit" class="btn btn-success btn-lg">
+      <i class="bi bi-file-earmark-spreadsheet me-1"></i>
+      Generate Report (<span id="selectedCount2">{{ total }}</span> events)
+    </button>
+  </div>
+
+</form>
+
+<script>
+(function () {
+  const allChecks  = () => [...document.querySelectorAll('.event-check')];
+  const orgChecks  = () => [...document.querySelectorAll('.org-check')];
+  const masterBox  = document.getElementById('selectAll');
+  const cntEl      = document.getElementById('selectedCount');
+  const cntEl2     = document.getElementById('selectedCount2');
+
+  function updateCount() {
+    const n = allChecks().filter(c => c.checked).length;
+    cntEl.textContent  = n;
+    cntEl2.textContent = n;
+    masterBox.indeterminate = n > 0 && n < allChecks().length;
+    masterBox.checked = n === allChecks().length;
+  }
+
+  // Master checkbox toggles all
+  masterBox.addEventListener('change', function () {
+    allChecks().forEach(c => c.checked = this.checked);
+    orgChecks().forEach(c => c.checked = this.checked);
+    updateCount();
+  });
+
+  // Org checkbox toggles its events
+  orgChecks().forEach(function (orgBox) {
+    orgBox.addEventListener('change', function () {
+      const org = this.dataset.org;
+      allChecks()
+        .filter(c => c.dataset.org === org)
+        .forEach(c => c.checked = this.checked);
+      updateCount();
+    });
+  });
+
+  // Individual event checkbox updates org + master state
+  allChecks().forEach(function (evBox) {
+    evBox.addEventListener('change', function () {
+      const org   = this.dataset.org;
+      const peers = allChecks().filter(c => c.dataset.org === org);
+      const orgBox = document.querySelector(`.org-check[data-org="${org}"]`);
+      const anyOn = peers.some(c => c.checked);
+      const allOn = peers.every(c => c.checked);
+      orgBox.indeterminate = anyOn && !allOn;
+      orgBox.checked = allOn;
+      updateCount();
+    });
+  });
+})();
+</script>
+
+{% endblock %}

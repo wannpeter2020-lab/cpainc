@@ -281,10 +281,10 @@
           <i class="bi bi-people me-1"></i>By Customer
         </a>
       </div>
-      {# Customer Report download — prominent when in customer sort mode #}
-      <a href="{{ url_for('pickup_customer_report_xlsx') }}"
+      {# Customer Report — opens selection page #}
+      <a href="{{ url_for('pickup_customer_report_select') }}"
          class="btn btn-sm {% if sort_mode == 'customer' %}btn-success{% else %}btn-outline-success{% endif %}"
-         title="Download Excel report: summary + per-event pace tabs sorted by customer">
+         title="Choose customers then download Excel report">
         <i class="bi bi-file-earmark-spreadsheet me-1"></i>Customer Report
       </a>
       <button class="btn btn-sm btn-outline-secondary" type="button"

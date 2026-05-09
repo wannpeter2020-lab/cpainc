@@ -5238,19 +5238,11 @@ def pickup_event_report_xlsx(primary_cid):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
-@app.route('/pickup/customer-report-xlsx')
-def pickup_customer_report_xlsx():
-    """Generate multi-tab XLSX: Tab 1 = summary sorted by customer, Tab N = per-event pace report."""
-    from openpyxl import Workbook
-    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
+def _get_current_pickup_events(db):
+    """Shared helper: return current-section events sorted by org → event_start."""
     from datetime import date as _d
-    import io, re as _re
-
-    db    = get_db()
     today = _d.today()
     future_cutoff = today + timedelta(days=120)
-
     configs = db.execute("""
         SELECT c.*,
                p.StartDate AS bk_start, p.EndDate AS bk_end,
@@ -5260,14 +5252,11 @@ def pickup_customer_report_xlsx():
         LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
         WHERE c.status='active'
     """).fetchall()
-
     current_events = []
     for c in configs:
-        block      = json.loads(c['contracted_block'] or '{}')
-        all_dates  = sorted(block.keys())
+        block            = json.loads(c['contracted_block'] or '{}')
+        all_dates        = sorted(block.keys())
         contracted_total = sum(block.values())
-
-        # Determine start date for section classification
         start_date = None
         if all_dates:
             try:
@@ -5279,43 +5268,42 @@ def pickup_customer_report_xlsx():
                 start_date = _d.fromisoformat(str(c['bk_start'])[:10])
             except Exception:
                 pass
-
-        # Classify section (mirrors pickup_dashboard logic)
         has_final = db.execute(
             "SELECT COUNT(*) FROM pickup_weekly WHERE config_id=? AND LOWER(label) LIKE '%final%'",
             (c['id'],)
         ).fetchone()[0] > 0
-        force_past = bool(c['force_past'])
-        if has_final or force_past:
+        if has_final or bool(c['force_past']):
             continue
-        if c['force_current']:
-            pass  # include
-        elif start_date is not None and start_date < today:
-            continue
-        elif start_date is not None and start_date > future_cutoff:
-            continue
-
-        # Pull current weekly entries (no historical/final labels)
-        weekly_rows = db.execute("""
-            SELECT report_date, total_rooms, pct_of_block, pct_of_attrition, pickup_by_night
-            FROM pickup_weekly
-            WHERE config_id=?
-              AND (label IS NULL
-                   OR (label NOT LIKE 'ASAS %'
-                       AND label NOT LIKE 'Historical%'
-                       AND LOWER(label) NOT LIKE '%final%'))
-            ORDER BY report_date DESC
-        """, (c['id'],)).fetchall()
-
+        if not c['force_current']:
+            if start_date is not None and start_date < today:
+                continue
+            if start_date is not None and start_date > future_cutoff:
+                continue
+        last_w = db.execute(
+            """SELECT total_rooms, pct_of_block FROM pickup_weekly
+               WHERE config_id=? AND (label IS NULL OR label NOT LIKE '%final%')
+               ORDER BY report_date DESC LIMIT 1""",
+            (c['id'],)
+        ).fetchone()
+        weekly_rows = db.execute(
+            """SELECT report_date, total_rooms, pct_of_block, pct_of_attrition, pickup_by_night
+               FROM pickup_weekly
+               WHERE config_id=?
+                 AND (label IS NULL
+                      OR (label NOT LIKE 'ASAS %'
+                          AND label NOT LIKE 'Historical%'
+                          AND LOWER(label) NOT LIKE '%final%'))
+               ORDER BY report_date DESC""",
+            (c['id'],)
+        ).fetchall()
         org        = c['organization'] or c['bk_org'] or ''
-        event_name = c['event_name']  or c['bk_event'] or org
+        event_name = c['event_name']   or c['bk_event'] or org
         end_date   = None
         if all_dates:
             try:
                 end_date = _d.fromisoformat(all_dates[-1])
             except Exception:
                 pass
-
         current_events.append({
             'config':           c,
             'block':            block,
@@ -5327,10 +5315,59 @@ def pickup_customer_report_xlsx():
             'start_date':       start_date,
             'end_date':         end_date,
             'weekly':           [dict(w) for w in weekly_rows],
+            'last_total':       last_w['total_rooms']  if last_w else 0,
+            'last_pct':         last_w['pct_of_block'] if last_w else None,
         })
-
-    # Sort by organisation then event start
     current_events.sort(key=lambda r: (r['org'].lower(), str(r['start_date'] or '')))
+    return current_events
+
+
+@app.route('/pickup/customer-report', methods=['GET'])
+def pickup_customer_report_select():
+    """Selection page — choose which customers/events to include in the report."""
+    db = get_db()
+    current_events = _get_current_pickup_events(db)
+
+    # Group by organisation for the UI
+    from collections import OrderedDict
+    orgs = OrderedDict()
+    for ev in current_events:
+        key = ev['org'] or '(No Organisation)'
+        orgs.setdefault(key, []).append(ev)
+
+    return render_template('pickup_customer_report_select.html',
+                           orgs=orgs, total=len(current_events))
+
+
+@app.route('/pickup/customer-report-xlsx', methods=['GET', 'POST'])
+def pickup_customer_report_xlsx():
+    """Generate multi-tab XLSX: Tab 1 = summary sorted by customer, Tab N = per-event pace report."""
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from datetime import date as _d
+    import io, re as _re
+
+    db    = get_db()
+    today = _d.today()
+
+    # Load all current events via shared helper
+    all_events = _get_current_pickup_events(db)
+
+    # If POSTed from the selection page, filter to chosen config IDs only
+    if request.method == 'POST':
+        selected_ids = set(request.form.getlist('cids'))
+        if selected_ids:
+            current_events = [ev for ev in all_events
+                              if str(ev['config']['id']) in selected_ids]
+        else:
+            current_events = all_events   # nothing checked → include all
+    else:
+        current_events = all_events       # direct GET → include all
+
+    if not current_events:
+        flash('No events selected — nothing to download.', 'warning')
+        return redirect(url_for('pickup_customer_report_select'))
 
     # ── Colour / style constants ─────────────────────────────────────────────
     navy       = "1A3A5C"
