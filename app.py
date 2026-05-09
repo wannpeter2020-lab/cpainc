@@ -3336,41 +3336,90 @@ def admin_reset_password(uid):
     return jsonify({'ok': True})
 
 
-@app.route('/admin/upload-db', methods=['GET', 'POST'])
-def admin_upload_db():
-    """Secure database upload endpoint — protected by ADMIN_UPLOAD_KEY env var."""
-    import shutil, hashlib
+@app.route('/admin/export-pickup-data')
+def admin_export_pickup_data():
+    """Export all pickup_weekly rows as JSON keyed by booking_id (safe to share)."""
+    key = os.environ.get('ADMIN_UPLOAD_KEY', '')
+    if not key or request.args.get('key', '') != key:
+        return 'Forbidden', 403
+    db = get_db()
+    rows = db.execute('''
+        SELECT pc.booking_id, pw.report_date, pw.pickup_by_night, pw.total_rooms,
+               pw.pct_of_block, pw.pct_of_attrition, pw.ota_rate, pw.label, pw.notes
+        FROM pickup_weekly pw
+        JOIN pickup_config pc ON pc.id = pw.config_id
+        ORDER BY pc.booking_id, pw.report_date
+    ''').fetchall()
+    out = [dict(r) for r in rows]
+    resp = app.response_class(
+        response=json.dumps(out, indent=2),
+        mimetype='application/json',
+        headers={'Content-Disposition': 'attachment; filename="pickup_weekly_export.json"'}
+    )
+    return resp
+
+
+@app.route('/admin/import-pickup-data', methods=['GET', 'POST'])
+def admin_import_pickup_data():
+    """Import pickup_weekly rows from JSON — matches by booking_id, never overwrites existing rows."""
     key = os.environ.get('ADMIN_UPLOAD_KEY', '')
     if not key:
-        return 'Upload endpoint disabled (ADMIN_UPLOAD_KEY not set).', 403
-    if request.method == 'GET':
-        provided = request.args.get('key', '')
-        if not provided or provided != key:
-            return 'Forbidden', 403
-        return '''<!doctype html><html><body>
-        <h3>Upload CPAinc Database</h3>
-        <form method="post" enctype="multipart/form-data">
-          <input type="hidden" name="key" value="''' + key + '''">
-          <input type="file" name="db_file" accept=".sqlite"><br><br>
-          <button type="submit">Upload & Replace Database</button>
-        </form></body></html>'''
-    # POST
-    provided = request.form.get('key', '')
-    if not provided or provided != key:
+        return 'Disabled (ADMIN_UPLOAD_KEY not set).', 403
+    provided = request.args.get('key') or request.form.get('key') or ''
+    if provided != key:
         return 'Forbidden', 403
-    f = request.files.get('db_file')
+    if request.method == 'GET':
+        return f'''<!doctype html><html><body style="font-family:sans-serif;padding:2rem">
+        <h3>Import Pickup Weekly Data</h3>
+        <p>Uploads pickup_weekly rows matched by booking_id. Skips duplicates (same booking_id + report_date).</p>
+        <form method="post" enctype="multipart/form-data">
+          <input type="hidden" name="key" value="{key}">
+          <input type="file" name="json_file" accept=".json"><br><br>
+          <button type="submit">Import</button>
+        </form></body></html>'''
+    # POST — process uploaded JSON file
+    f = request.files.get('json_file')
     if not f:
         return 'No file provided.', 400
-    # Back up existing database
-    backup_path = DATABASE + '.backup'
-    if os.path.exists(DATABASE):
-        shutil.copy2(DATABASE, backup_path)
-    f.save(DATABASE)
-    # Close any open db connections
-    if 'db' in g:
-        g.db.close()
-        g.pop('db', None)
-    return f'Database replaced successfully. Backup saved to {backup_path}. <a href="/">Go home</a>'
+    try:
+        data = json.loads(f.read().decode('utf-8'))
+    except Exception as e:
+        return f'Invalid JSON: {e}', 400
+    db = get_db()
+    # Build booking_id → config_id map from THIS database
+    cfg_map = {}
+    for row in db.execute('SELECT id, booking_id FROM pickup_config'):
+        if row['booking_id']:
+            cfg_map[str(row['booking_id'])] = row['id']
+    # Get existing (config_id, report_date) pairs to skip duplicates
+    existing = set()
+    for row in db.execute('SELECT config_id, report_date FROM pickup_weekly'):
+        existing.add((row['config_id'], row['report_date']))
+    inserted = skipped_no_config = skipped_duplicate = 0
+    for row in data:
+        bid = str(row.get('booking_id', ''))
+        cid = cfg_map.get(bid)
+        if not cid:
+            skipped_no_config += 1
+            continue
+        rd = row.get('report_date', '')
+        if (cid, rd) in existing:
+            skipped_duplicate += 1
+            continue
+        db.execute('''INSERT INTO pickup_weekly
+            (config_id, report_date, pickup_by_night, total_rooms,
+             pct_of_block, pct_of_attrition, ota_rate, label, notes)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (cid, rd, row.get('pickup_by_night'), row.get('total_rooms'),
+             row.get('pct_of_block'), row.get('pct_of_attrition'),
+             row.get('ota_rate'), row.get('label'), row.get('notes')))
+        existing.add((cid, rd))
+        inserted += 1
+    db.commit()
+    return (f'<p>Done. Inserted: <strong>{inserted}</strong> rows. '
+            f'Skipped duplicates: {skipped_duplicate}. '
+            f'Skipped (event not found here): {skipped_no_config}.</p>'
+            f'<a href="/pickup">Go to Pickup Tracking</a>')
 
 
 def _create_pickup_config_from_booking(db, bid, account, event, hotel,
@@ -4203,11 +4252,15 @@ def pickup_event(cid):
     attrition_pct   = config['attrition_pct'] or 0
     attrition_rooms = round(contracted_total * attrition_pct, 1)
 
-    # Split rows into historical summaries vs current reporting rows
-    raw_historical = [w for w in all_weekly if w['label'] and w['label'].startswith('Historical')]
-    raw_current    = [w for w in all_weekly if not (w['label'] and w['label'].startswith('Historical'))]
+    # Split rows into historical pace rows (label = 'ASAS YYYY') vs current reporting rows
+    raw_historical = [w for w in all_weekly if w['label'] and (
+        w['label'].startswith('Historical') or w['label'].startswith('ASAS ')
+    )]
+    raw_current    = [w for w in all_weekly if not (w['label'] and (
+        w['label'].startswith('Historical') or w['label'].startswith('ASAS ')
+    ))]
 
-    # Build historical display list (sorted most recent year first by report_date DESC)
+    # Build historical display list (for backward-compat; sorted most recent year first)
     historical_years = []
     for w in sorted(raw_historical, key=lambda x: x['report_date'], reverse=True):
         pbn = json.loads(w['pickup_by_night'] or '{}')
@@ -4215,6 +4268,88 @@ def pickup_event(cid):
         row = dict(w)
         row['total_rooms'] = total
         historical_years.append(row)
+
+    # Build pace comparison structure for multi-year chart
+    pace_comparison = None
+    if raw_historical:
+        # Event start dates for ASAS historical years (confirmed from Excel data)
+        ASAS_EVENT_STARTS = {
+            2021: '2021-07-11',  # Louisville, KY
+            2022: '2022-06-23',  # OKC
+            2023: '2023-07-15',  # Albuquerque
+            2024: '2024-07-17',  # Calgary
+            2025: '2025-06-30',  # The Diplomat
+            2026: '2026-07-17',  # Madison
+        }
+        from datetime import date as _ddate
+
+        def _weeks_out(event_start_str, report_date_str):
+            try:
+                es = _ddate.fromisoformat(event_start_str)
+                rd = _ddate.fromisoformat(report_date_str)
+                return (es - rd).days // 7
+            except Exception:
+                return None
+
+        # Build per-year dict: year -> list of {weeks_out, total_rooms}
+        hist_by_year = {}
+        for w in raw_historical:
+            lbl = w['label'] or ''
+            # Support both 'ASAS YYYY' and legacy 'Historical YYYY...' labels
+            import re as _re
+            m = _re.search(r'(\d{4})', lbl)
+            if not m:
+                continue
+            yr = int(m.group(1))
+            es = ASAS_EVENT_STARTS.get(yr)
+            if not es:
+                continue
+            wo = _weeks_out(es, w['report_date'])
+            if wo is None or wo < 0:
+                continue
+            pbn = json.loads(w['pickup_by_night'] or '{}')
+            total = pbn.get('historical_total', w['total_rooms'] or 0)
+            if yr not in hist_by_year:
+                hist_by_year[yr] = {}
+            # Keep the entry with highest weeks_out match; for duplicate weeks, keep most rooms
+            if wo not in hist_by_year[yr] or total > hist_by_year[yr][wo]:
+                hist_by_year[yr][wo] = total
+
+        # Add 2026 current data
+        current_event_start = ASAS_EVENT_STARTS.get(2026)
+        if current_event_start and raw_current:
+            hist_by_year[2026] = {}
+            for w in raw_current:
+                pbn = json.loads(w['pickup_by_night'] or '{}')
+                total = sum(v for v in pbn.values() if isinstance(v, (int, float)))
+                wo = _weeks_out(current_event_start, w['report_date'])
+                if wo is None or wo < 0:
+                    continue
+                if wo not in hist_by_year[2026] or total > hist_by_year[2026][wo]:
+                    hist_by_year[2026][wo] = total
+
+        # Collect all unique weeks_out values and sort descending (most weeks out first)
+        all_weeks = sorted(
+            set(wo for yr_data in hist_by_year.values() for wo in yr_data.keys()),
+            reverse=True
+        )
+
+        # Build by_weeks_out lookup
+        by_weeks_out = {}
+        for wo in all_weeks:
+            by_weeks_out[wo] = {}
+            for yr, yr_data in hist_by_year.items():
+                if wo in yr_data:
+                    by_weeks_out[wo][str(yr)] = yr_data[wo]
+
+        years_available = sorted(hist_by_year.keys(), reverse=True)
+
+        pace_comparison = {
+            'years': years_available,
+            'event_starts': ASAS_EVENT_STARTS,
+            'by_weeks_out': by_weeks_out,
+            'all_weeks': all_weeks,
+        }
 
     # Build current weekly display with pct_of_block / WoW calculations
     weekly_display = []
@@ -4250,6 +4385,7 @@ def pickup_event(cid):
 
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
+                           pace_comparison=pace_comparison,
                            rooming=rooming,
                            contact_log=contact_log, block=block, all_dates=all_dates,
                            day_map=day_map, contracted_total=contracted_total,

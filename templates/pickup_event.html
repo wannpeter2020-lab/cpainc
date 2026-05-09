@@ -209,8 +209,48 @@
   </div>
 </div>
 
-{# Historical Pace Comparison card — only shown when historical summary rows exist #}
-{% if historical_years %}
+{# Historical Pace Comparison card — multi-year weekly pace table #}
+{% if pace_comparison %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Historical Pace Comparison</span>
+    <small class="text-muted">Rooms picked up by weeks out from event start</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0 align-middle" style="font-size:.85rem">
+      <thead class="table-light">
+        <tr>
+          <th style="width:90px">Weeks Out</th>
+          {% for yr in pace_comparison.years %}
+          <th class="text-end {% if yr == 2026 %}fw-bold{% endif %}">
+            {{ yr }}{% if yr == 2026 %} <span class="badge bg-primary" style="font-size:.7rem">Current</span>{% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for wo in pace_comparison.all_weeks %}
+        {% set row_data = pace_comparison.by_weeks_out[wo] %}
+        <tr>
+          <td class="text-muted">{{ wo }} wk{% if wo != 1 %}s{% endif %}</td>
+          {% for yr in pace_comparison.years %}
+          {% set val = row_data.get(yr|string) %}
+          <td class="text-end {% if yr == 2026 %}fw-bold{% endif %}">
+            {% if val is not none %}
+              {{ '{:,}'.format(val) }}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% elif historical_years %}
+{# Fallback: simple summary table for non-ASAS events with legacy historical rows #}
 <div class="card mb-3">
   <div class="card-header">Historical Pace Comparison</div>
   <div class="card-body p-0">
