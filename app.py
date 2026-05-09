@@ -3336,6 +3336,43 @@ def admin_reset_password(uid):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/upload-db', methods=['GET', 'POST'])
+def admin_upload_db():
+    """Secure database upload endpoint — protected by ADMIN_UPLOAD_KEY env var."""
+    import shutil, hashlib
+    key = os.environ.get('ADMIN_UPLOAD_KEY', '')
+    if not key:
+        return 'Upload endpoint disabled (ADMIN_UPLOAD_KEY not set).', 403
+    if request.method == 'GET':
+        provided = request.args.get('key', '')
+        if not provided or provided != key:
+            return 'Forbidden', 403
+        return '''<!doctype html><html><body>
+        <h3>Upload CPAinc Database</h3>
+        <form method="post" enctype="multipart/form-data">
+          <input type="hidden" name="key" value="''' + key + '''">
+          <input type="file" name="db_file" accept=".sqlite"><br><br>
+          <button type="submit">Upload & Replace Database</button>
+        </form></body></html>'''
+    # POST
+    provided = request.form.get('key', '')
+    if not provided or provided != key:
+        return 'Forbidden', 403
+    f = request.files.get('db_file')
+    if not f:
+        return 'No file provided.', 400
+    # Back up existing database
+    backup_path = DATABASE + '.backup'
+    if os.path.exists(DATABASE):
+        shutil.copy2(DATABASE, backup_path)
+    f.save(DATABASE)
+    # Close any open db connections
+    if 'db' in g:
+        g.db.close()
+        g.pop('db', None)
+    return f'Database replaced successfully. Backup saved to {backup_path}. <a href="/">Go home</a>'
+
+
 def _create_pickup_config_from_booking(db, bid, account, event, hotel,
                                        start_str, end_str, peak_rooms, room_rate):
     """Create a pickup_config entry for a booking if one doesn't already exist.
@@ -4147,7 +4184,7 @@ def pickup_event(cid):
     if not config:
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
-    weekly = db.execute("SELECT * FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC", (cid,)).fetchall()
+    all_weekly = db.execute("SELECT * FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC", (cid,)).fetchall()
     rooming = db.execute(
         "SELECT id, upload_date, filename, total_guests, reconciliation_status, discrepancy_notes FROM pickup_rooming_list WHERE config_id=? ORDER BY upload_date DESC", (cid,)
     ).fetchall()
@@ -4165,9 +4202,24 @@ def pickup_event(cid):
             day_map[d] = ''
     attrition_pct   = config['attrition_pct'] or 0
     attrition_rooms = round(contracted_total * attrition_pct, 1)
+
+    # Split rows into historical summaries vs current reporting rows
+    raw_historical = [w for w in all_weekly if w['label'] and w['label'].startswith('Historical')]
+    raw_current    = [w for w in all_weekly if not (w['label'] and w['label'].startswith('Historical'))]
+
+    # Build historical display list (sorted most recent year first by report_date DESC)
+    historical_years = []
+    for w in sorted(raw_historical, key=lambda x: x['report_date'], reverse=True):
+        pbn = json.loads(w['pickup_by_night'] or '{}')
+        total = pbn.get('historical_total', w['total_rooms'] or 0)
+        row = dict(w)
+        row['total_rooms'] = total
+        historical_years.append(row)
+
+    # Build current weekly display with pct_of_block / WoW calculations
     weekly_display = []
     prev_total = None
-    for w in reversed(weekly):
+    for w in reversed(raw_current):
         pbn = json.loads(w['pickup_by_night'] or '{}')
         computed_total = sum(v for v in pbn.values() if v is not None and v != '')
         pct_blk  = round(computed_total / contracted_total * 100, 1) if contracted_total else None
@@ -4181,8 +4233,9 @@ def pickup_event(cid):
         weekly_display.append(row)
         prev_total = computed_total
     weekly_display.reverse()
+
     past_cutoff = False
-    has_final_history = any(w['label'] and 'final' in w['label'].lower() for w in weekly)
+    has_final_history = any(w['label'] and 'final' in w['label'].lower() for w in all_weekly)
     if all_dates:
         try:
             if _dt.strptime(all_dates[0], '%Y-%m-%d') < _dt.today():
@@ -4196,7 +4249,8 @@ def pickup_event(cid):
     has_hhr = bool(hhr_row)
 
     return render_template('pickup_event.html',
-                           config=config, weekly=weekly_display, rooming=rooming,
+                           config=config, weekly=weekly_display, historical_years=historical_years,
+                           rooming=rooming,
                            contact_log=contact_log, block=block, all_dates=all_dates,
                            day_map=day_map, contracted_total=contracted_total,
                            attrition_pct=attrition_pct, attrition_rooms=attrition_rooms,

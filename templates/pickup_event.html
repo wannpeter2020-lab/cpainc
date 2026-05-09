@@ -209,6 +209,36 @@
   </div>
 </div>
 
+{# Historical Pace Comparison card — only shown when historical summary rows exist #}
+{% if historical_years %}
+<div class="card mb-3">
+  <div class="card-header">Historical Pace Comparison</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0" style="font-size:.88rem">
+      <thead class="table-light">
+        <tr>
+          <th>Year</th>
+          <th>Location</th>
+          <th class="text-end">Final Rooms Picked Up</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in historical_years %}
+        {% set parts = h.label.split(' — ') %}
+        {% set year_part = parts[0].replace('Historical ', '') %}
+        {% set loc_part = parts[1] if parts|length > 1 else '' %}
+        <tr>
+          <td>{{ year_part }}</td>
+          <td class="text-muted">{{ loc_part }}</td>
+          <td class="text-end">{{ '{:,}'.format(h.total_rooms) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {# Weekly history — spreadsheet grid #}
 <div class="card mb-3">
   <div class="card-header">Weekly Pickup History</div>
