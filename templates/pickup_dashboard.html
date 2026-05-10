@@ -164,7 +164,7 @@
 {% if rows %}
 <div class="table-responsive">
   <table class="table table-hover mb-0 align-middle sortable-table" id="{{ table_id }}">
-    <thead>
+    <thead style="position:sticky;top:57px;z-index:3;">
       <tr>
         <th>Booking ID</th>
         <th>Event / Organization</th>
@@ -191,7 +191,7 @@
         <th>OTA Rate</th>
         <th>Status</th>
         {% if show_history %}<th>History</th>{% endif %}
-        <th style="position:sticky;right:0;background:#f8f9fa;z-index:2;"></th>
+        <th style="position:sticky;right:0;background:#eaf0fb;z-index:4;"></th>
       </tr>
     </thead>
     <tbody>
