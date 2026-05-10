@@ -460,19 +460,96 @@ def booking_cancel(booking_id):
 
 @app.route('/booking/<booking_id>/contract/upload', methods=['POST'])
 def booking_contract_upload(booking_id):
+    from pickup_utils import parse_contract_document
     files = request.files.getlist('contract_files')
     db = get_db()
     added = 0
+    last_bcid = None
+    last_bytes = None
+    last_name  = None
     for f in files:
         if f and f.filename:
-            db.execute(
+            file_bytes = f.read()
+            row = db.execute(
                 'INSERT INTO booking_contract (booking_id, filename, file_data, upload_date) VALUES (?,?,?,date("now"))',
-                (booking_id, f.filename, f.read())
+                (booking_id, f.filename, file_bytes)
             )
+            last_bcid  = row.lastrowid
+            last_bytes = file_bytes
+            last_name  = f.filename
             added += 1
     db.commit()
+
+    # If exactly one file, try to offer AI extraction for pickup records
+    if added == 1 and last_bcid:
+        configs = db.execute(
+            "SELECT * FROM pickup_config WHERE CAST(booking_id AS TEXT)=CAST(? AS TEXT) AND status != 'archived' ORDER BY id",
+            (booking_id,)
+        ).fetchall()
+        if len(configs) == 1:
+            # Auto-parse and go straight to review
+            extracted = parse_contract_document(last_bytes, filename=last_name)
+            if not extracted.get('error'):
+                import base64
+                return render_template('pickup_contract_review.html',
+                                       config=configs[0], extracted=extracted,
+                                       filename=last_name,
+                                       file_b64=base64.b64encode(last_bytes).decode())
+            else:
+                flash(f'Contract saved. Auto-extract failed: {extracted["error"]}', 'warning')
+        elif len(configs) > 1:
+            # Let user choose which hotel this contract belongs to
+            return redirect(url_for('booking_contract_select_pickup',
+                                    booking_id=booking_id, bcid=last_bcid))
+
     flash(f'{added} contract file{"s" if added != 1 else ""} uploaded.', 'success')
     return redirect(url_for('booking_detail', booking_id=booking_id))
+
+
+@app.route('/booking/<booking_id>/contract/<int:bcid>/select-pickup')
+def booking_contract_select_pickup(booking_id, bcid):
+    """Choose which pickup hotel record a booking-level contract belongs to."""
+    db = get_db()
+    bc = db.execute(
+        'SELECT id, filename FROM booking_contract WHERE id=? AND CAST(booking_id AS TEXT)=CAST(? AS TEXT)',
+        (bcid, booking_id)
+    ).fetchone()
+    if not bc:
+        flash('Contract not found.', 'error')
+        return redirect(url_for('booking_detail', booking_id=booking_id))
+    configs = db.execute(
+        "SELECT * FROM pickup_config WHERE CAST(booking_id AS TEXT)=CAST(? AS TEXT) AND status != 'archived' ORDER BY id",
+        (booking_id,)
+    ).fetchall()
+    return render_template('booking_contract_select_pickup.html',
+                           booking_id=booking_id, bc=bc, configs=configs)
+
+
+@app.route('/booking/<booking_id>/contract/<int:bcid>/parse-for-pickup/<int:cid>')
+def booking_contract_parse_for_pickup(booking_id, bcid, cid):
+    """Parse a stored booking contract and show the pickup review page for a chosen hotel."""
+    from pickup_utils import parse_contract_document
+    import base64
+    db = get_db()
+    bc = db.execute(
+        'SELECT filename, file_data FROM booking_contract WHERE id=? AND CAST(booking_id AS TEXT)=CAST(? AS TEXT)',
+        (bcid, booking_id)
+    ).fetchone()
+    if not bc or not bc['file_data']:
+        flash('Contract file not found.', 'error')
+        return redirect(url_for('booking_detail', booking_id=booking_id))
+    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
+    if not config:
+        flash('Pickup record not found.', 'error')
+        return redirect(url_for('booking_detail', booking_id=booking_id))
+    extracted = parse_contract_document(bc['file_data'], filename=bc['filename'])
+    if extracted.get('error'):
+        flash(f'Could not parse contract: {extracted["error"]}', 'error')
+        return redirect(url_for('booking_detail', booking_id=booking_id))
+    return render_template('pickup_contract_review.html',
+                           config=config, extracted=extracted,
+                           filename=bc['filename'],
+                           file_b64=base64.b64encode(bc['file_data']).decode())
 
 @app.route('/booking/<booking_id>/contract/<int:cid>/download')
 def booking_contract_download(booking_id, cid):
