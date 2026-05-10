@@ -27,7 +27,7 @@ except Exception:
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cpainc2026')
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32 MB upload limit
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB upload limit
 
 # In production (Railway), DATA_DIR points to the mounted persistent volume.
 # Locally it defaults to the project folder.
@@ -3768,7 +3768,7 @@ def status_board():
                 'event_start': event_start,
                 'event_end':   event_end,
                 'detail':      detail,
-                'fix_url':     fix_url or url_for('pickup_edit_event', cid=cid),
+                'fix_url':     fix_url or url_for('pickup_event', cid=cid),
             })
 
         is_started = event_start and event_start <= today
