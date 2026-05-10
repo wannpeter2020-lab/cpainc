@@ -3583,27 +3583,6 @@ def admin_fix_asa_dates():
     return html
 
 
-# ── One-time: archive cancelled pickup_config record 25 on production ──────────
-@app.route('/admin/archive-cancelled-pickups')
-def admin_archive_cancelled_pickups():
-    """One-time: archive pickup_config records whose booking is Cancelled in ReportPipeline."""
-    user = get_current_user()
-    if not user or not has_permission(user, 'admin_panel'):
-        return 'Forbidden — admin login required.', 403
-    db = get_db()
-    result = db.execute(
-        """UPDATE pickup_config SET status='archived'
-           WHERE status != 'archived'
-           AND booking_id IN (
-               SELECT BookingId FROM ReportPipeline WHERE BookingStatus='Cancelled'
-           )"""
-    )
-    db.commit()
-    return (f'<h3>Done — {result.rowcount} pickup_config record(s) archived '
-            f'(linked to cancelled bookings).</h3>'
-            f'<p><a href="/pickup">Go to Pickup Tracking</a></p>')
-
-
 # ── Status Board ──────────────────────────────────────────────────────────────
 
 @app.route('/status-board')
