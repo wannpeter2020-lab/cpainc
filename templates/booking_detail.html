@@ -141,7 +141,7 @@
       </span>
       <div class="d-flex gap-2">
         <a href="{{ url_for('booking_contract_extract', booking_id=booking.BookingId, bcid=c['id']) }}"
-           class="btn btn-sm btn-outline-success" title="Extract room block, rate & contacts into Pickup">
+           class="btn btn-sm btn-outline-success extract-to-pickup-btn" title="Extract room block, rate & contacts into Pickup">
           <i class="bi bi-magic me-1"></i>Extract to Pickup
         </a>
         <a href="/booking/{{ booking.BookingId }}/contract/{{ c['id'] }}/download"
@@ -311,7 +311,26 @@ function confirmDeletePickup(rowid) {
   document.getElementById('deletePickupForm').action = '/pickup/' + rowid + '/delete';
   new bootstrap.Modal(document.getElementById('deletePickupModal')).show();
 }
+
+// Loading overlay for Extract to Pickup (calls Claude API — takes a few seconds)
+document.querySelectorAll('.extract-to-pickup-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var overlay = document.getElementById('parse-loading-overlay');
+    if (overlay) overlay.style.display = 'flex';
+  });
+});
+// Hide overlay if user navigates back
+window.addEventListener('pageshow', function() {
+  var overlay = document.getElementById('parse-loading-overlay');
+  if (overlay) overlay.style.display = 'none';
+});
 </script>
+
+<div id="parse-loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+  <div class="spinner-border text-light" style="width:3.5rem;height:3.5rem;" role="status"></div>
+  <div style="color:#fff;font-size:1.1rem;font-weight:600">Extracting contract data…</div>
+  <div style="color:#ddd;font-size:.9rem">Claude is reading the contract — usually 5–15 seconds</div>
+</div>
 {% endblock %}
 
 {% endblock %}

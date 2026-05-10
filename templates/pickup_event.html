@@ -621,5 +621,25 @@
     }
   });
 })();
+
+// Show loading overlay when Upload & Parse is submitted
+(function() {
+  const form = document.querySelector('#contractModal form');
+  if (!form) return;
+  form.addEventListener('submit', function() {
+    var overlay = document.getElementById('parse-loading-overlay');
+    if (overlay) overlay.style.display = 'flex';
+  });
+  window.addEventListener('pageshow', function() {
+    var overlay = document.getElementById('parse-loading-overlay');
+    if (overlay) overlay.style.display = 'none';
+  });
+})();
 </script>
+
+<div id="parse-loading-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+  <div class="spinner-border text-light" style="width:3.5rem;height:3.5rem;" role="status"></div>
+  <div style="color:#fff;font-size:1.1rem;font-weight:600">Extracting contract data…</div>
+  <div style="color:#ddd;font-size:.9rem">Claude is reading the contract — usually 5–15 seconds</div>
+</div>
 {% endblock %}
