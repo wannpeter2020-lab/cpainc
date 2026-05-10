@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Status Board — CPAinc{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-clipboard2-check me-2"></i>Status Board</h4>
+    <div class="text-muted small mt-1">Action items filtered to your account access — as of {{ today }}</div>
+  </div>
+  <a href="{{ url_for('status_board') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+  </a>
+</div>
+
+{# ── Summary badges ── #}
+{% set severity_order = ['overdue_pickup','past_cutoff_no_history','no_recent_contact','uniform_block','empty_block','missing_hotel_email','missing_client_contact','missing_cutoff','missing_rate'] %}
+{% set total = total_issues %}
+
+{% if total == 0 %}
+<div class="card border-success mb-4" style="max-width:600px">
+  <div class="card-body text-center py-5">
+    <i class="bi bi-check-circle-fill text-success" style="font-size:3rem;"></i>
+    <h4 class="mt-3 text-success">Everything looks good!</h4>
+    <p class="text-muted mb-0">No action items for your accounts right now.</p>
+  </div>
+</div>
+{% else %}
+
+{# ── Count pills ── #}
+<div class="d-flex flex-wrap gap-2 mb-4">
+  {% for itype in severity_order %}
+    {% set items = issues_by_type[itype] %}
+    {% if items %}
+      {% set meta = issue_meta[itype] %}
+      {% set col = 'danger' if meta[0] == 'danger' else ('warning' if meta[0] == 'warning' else 'info') %}
+      <a href="#section-{{ itype }}" class="text-decoration-none">
+        <span class="badge rounded-pill bg-{{ col }} fs-6 px-3 py-2">
+          <i class="bi {{ meta[2] }} me-1"></i>
+          {{ items|length }} {{ meta[1] }}
+        </span>
+      </a>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{# ── Issue sections ── #}
+{% for itype in severity_order %}
+  {% set items = issues_by_type[itype] %}
+  {% if items %}
+    {% set meta = issue_meta[itype] %}
+    {% set col  = meta[0] %}
+    <div class="card mb-4" id="section-{{ itype }}">
+      <div class="card-header d-flex justify-content-between align-items-center
+        {% if col == 'danger' %}bg-danger{% elif col == 'warning' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %}">
+        <span>
+          <i class="bi {{ meta[2] }} me-2"></i>{{ meta[1] }}
+          <span class="badge bg-white text-dark ms-2">{{ items|length }}</span>
+        </span>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-hover table-sm mb-0 align-middle">
+          <thead>
+            <tr>
+              <th>Booking ID</th>
+              <th>Event / Organization</th>
+              <th>Hotel</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Issue</th>
+              <th style="min-width:90px"></th>
+              <th style="min-width:160px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr id="row-{{ itype }}-{{ item.config_id }}">
+              <td class="font-monospace small">
+                {% if item.booking_id %}
+                  <a href="{{ url_for('booking_detail', booking_id=item.booking_id) }}"
+                     class="text-decoration-none" title="Open booking">{{ item.booking_id }}</a>
+                {% else %}—{% endif %}
+              </td>
+              <td>
+                <div class="fw-semibold">{{ item.event_name }}</div>
+                {% if item.organization and item.organization != item.event_name %}
+                <div class="text-muted small">{{ item.organization }}</div>
+                {% endif %}
+              </td>
+              <td class="small">{{ item.hotel }}</td>
+              <td class="small text-nowrap">{{ item.event_start or '—' }}</td>
+              <td class="small text-nowrap">{{ item.event_end   or '—' }}</td>
+              <td class="small text-muted">{{ item.detail }}</td>
+              <td>
+                <a href="{{ item.fix_url }}" class="btn btn-sm btn-primary">
+                  <i class="bi bi-pencil-fill me-1"></i>Fix
+                </a>
+              </td>
+              <td>
+                {# ── Ignore dropdown ── #}
+                <div class="input-group input-group-sm ignore-group" style="width:160px">
+                  <select class="form-select form-select-sm ignore-mode"
+                          data-cid="{{ item.config_id }}"
+                          data-itype="{{ itype }}"
+                          id="mode-{{ itype }}-{{ item.config_id }}">
+                    <option value="1month">Ignore 1 month</option>
+                    <option value="2months">Ignore 2 months</option>
+                    <option value="custom">Custom date…</option>
+                    <option value="permanent">Permanent</option>
+                  </select>
+                  <button class="btn btn-outline-secondary ignore-btn"
+                          data-cid="{{ item.config_id }}"
+                          data-itype="{{ itype }}"
+                          title="Ignore this item">
+                    <i class="bi bi-eye-slash"></i>
+                  </button>
+                </div>
+                {# Custom date picker — hidden until "Custom date" selected #}
+                <div class="custom-date-wrap mt-1" id="custom-{{ itype }}-{{ item.config_id }}"
+                     style="display:none; width:160px">
+                  <input type="date" class="form-control form-control-sm custom-date-input"
+                         data-cid="{{ item.config_id }}"
+                         data-itype="{{ itype }}"
+                         min="{{ today }}">
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+{% endfor %}
+
+{% endif %}{# end total > 0 #}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Show/hide custom date picker when "Custom date…" selected
+document.querySelectorAll('.ignore-mode').forEach(function(sel) {
+  sel.addEventListener('change', function() {
+    const cid   = this.dataset.cid;
+    const itype = this.dataset.itype;
+    const wrap  = document.getElementById('custom-' + itype + '-' + cid);
+    if (wrap) wrap.style.display = (this.value === 'custom') ? 'block' : 'none';
+  });
+});
+
+// Ignore button click
+document.querySelectorAll('.ignore-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    const cid   = this.dataset.cid;
+    const itype = this.dataset.itype;
+    const sel   = document.getElementById('mode-' + itype + '-' + cid);
+    const mode  = sel ? sel.value : '1month';
+
+    let customDate = '';
+    if (mode === 'custom') {
+      const inp = document.querySelector(
+        '.custom-date-input[data-cid="' + cid + '"][data-itype="' + itype + '"]'
+      );
+      customDate = inp ? inp.value : '';
+      if (!customDate) {
+        alert('Please select a custom date first.');
+        return;
+      }
+    }
+
+    // Confirm for permanent
+    if (mode === 'permanent') {
+      if (!confirm('Permanently ignore this issue for this event? It will never appear again unless you clear the ignore records.')) return;
+    }
+
+    const row = document.getElementById('row-' + itype + '-' + cid);
+    if (row) {
+      row.style.transition = 'opacity .4s';
+      row.style.opacity    = '0.4';
+      row.style.pointerEvents = 'none';
+    }
+
+    fetch('/status-board/ignore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config_id: parseInt(cid), issue_type: itype, mode: mode, custom_date: customDate })
+    })
+    .then(r => r.json())
+    .then(function(data) {
+      if (data.ok) {
+        if (row) {
+          row.style.transition = 'opacity .3s, max-height .4s';
+          row.style.opacity    = '0';
+          setTimeout(function() {
+            row.remove();
+            // Check if tbody is now empty — add "all clear" row
+            const tbody = document.querySelector('#section-' + itype + ' tbody');
+            if (tbody && tbody.querySelectorAll('tr').length === 0) {
+              const card = document.getElementById('section-' + itype);
+              if (card) {
+                card.querySelector('.card-body').innerHTML =
+                  '<div class="p-3 text-success"><i class="bi bi-check-circle-fill me-2"></i>All resolved or ignored.</div>';
+              }
+            }
+          }, 350);
+        }
+      } else {
+        if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
+        alert('Could not save: ' + (data.error || 'unknown error'));
+      }
+    })
+    .catch(function() {
+      if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
+      alert('Network error — please try again.');
+    });
+  });
+});
+</script>
+{% endblock %}

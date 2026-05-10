@@ -16,7 +16,7 @@ if os.path.exists(_env_path):
                 os.environ.setdefault(_k.strip(), _v.strip())
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file, g, session
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     import outlook_connector as _oc
@@ -3110,6 +3110,15 @@ def ensure_auth_tables():
             ms_user_email TEXT,
             connected_at  TEXT    DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS status_board_ignore (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES Users(id) ON DELETE CASCADE,
+            config_id    INTEGER NOT NULL REFERENCES pickup_config(id) ON DELETE CASCADE,
+            issue_type   TEXT NOT NULL,
+            ignore_until TEXT,
+            created_at   TEXT DEFAULT (datetime('now')),
+            UNIQUE(user_id, config_id, issue_type)
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -3530,6 +3539,228 @@ def admin_fix_asa_dates():
         html += '<p>No matching records found — nothing to fix (or already fixed).</p>'
     html += '<p><a href="/pickup">Go to Pickup Tracking</a></p>'
     return html
+
+
+# ── Status Board ──────────────────────────────────────────────────────────────
+
+@app.route('/status-board')
+def status_board():
+    """Per-user action-item dashboard for pickup tracking data quality."""
+    user = get_current_user()
+    if not has_permission(user, 'pickups_payments'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
+
+    db          = get_db()
+    today       = datetime.today().strftime('%Y-%m-%d')
+    acct_filter = get_user_account_filter(user)
+
+    # --- Load active ignore records for this user ---
+    ignored = set()
+    for row in db.execute(
+        "SELECT config_id, issue_type FROM status_board_ignore "
+        "WHERE user_id=? AND (ignore_until IS NULL OR ignore_until > ?)",
+        (user['id'], today)
+    ).fetchall():
+        ignored.add((row['config_id'], row['issue_type']))
+
+    # --- Load all non-archived pickup_config with account filter ---
+    base_sql = "SELECT * FROM pickup_config WHERE status != 'archived'"
+    params   = []
+    if acct_filter is None:
+        pass
+    elif acct_filter:
+        ph = ','.join('?' * len(acct_filter))
+        base_sql += f' AND organization IN ({ph})'
+        params.extend(acct_filter)
+    else:
+        base_sql += ' AND 1=0'
+    configs = db.execute(base_sql, params).fetchall()
+
+    # --- Latest pickup_weekly per config ---
+    latest_pickup = {}
+    for row in db.execute(
+        "SELECT config_id, MAX(report_date) as last_date FROM pickup_weekly GROUP BY config_id"
+    ).fetchall():
+        latest_pickup[row['config_id']] = row['last_date']
+
+    # --- Latest contact log per config ---
+    latest_contact = {}
+    for row in db.execute(
+        "SELECT config_id, MAX(contact_date) as last_contact FROM pickup_contact_log GROUP BY config_id"
+    ).fetchall():
+        latest_contact[row['config_id']] = row['last_contact']
+
+    # --- Configs that have ANY pickup_weekly rows ---
+    has_history = set()
+    for row in db.execute("SELECT DISTINCT config_id FROM pickup_weekly").fetchall():
+        has_history.add(row['config_id'])
+
+    # --- Issue definitions: (type, severity, title, card_color) ---
+    ISSUE_META = {
+        'overdue_pickup':        ('danger',  'Overdue Pickup Report',           'bi-exclamation-circle-fill'),
+        'past_cutoff_no_history':('danger',  'Past Cutoff — No History Entered','bi-exclamation-triangle-fill'),
+        'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',    'bi-telephone-x-fill'),
+        'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)', 'bi-grid-fill'),
+        'empty_block':           ('warning', 'No Contracted Block Entered',     'bi-calendar-x-fill'),
+        'missing_hotel_email':   ('info',    'Missing Hotel Contact Email',     'bi-envelope-x-fill'),
+        'missing_client_contact':('info',    'Missing Client Name or Email',    'bi-person-x-fill'),
+        'missing_cutoff':        ('info',    'No Cutoff Date Set',              'bi-calendar-minus-fill'),
+        'missing_rate':          ('info',    'No Contracted Room Rate',         'bi-currency-dollar'),
+    }
+
+    issues_by_type = {k: [] for k in ISSUE_META}
+
+    for cfg in configs:
+        cid   = cfg['id']
+        block = {}
+        try:
+            block = json.loads(cfg['contracted_block'] or '{}')
+        except Exception:
+            pass
+
+        dates       = sorted(block.keys())
+        event_start = dates[0]  if dates else None
+        event_end   = dates[-1] if dates else None
+        total_block = sum(block.values()) if block else 0
+        block_vals  = list(block.values())
+
+        def _issue(itype, detail, fix_url=None):
+            if (cid, itype) in ignored:
+                return
+            issues_by_type[itype].append({
+                'config_id':   cid,
+                'issue_type':  itype,
+                'event_name':  cfg['event_name'] or cfg['organization'],
+                'organization':cfg['organization'],
+                'hotel':       cfg['hotel'] or '—',
+                'booking_id':  cfg['booking_id'],
+                'event_start': event_start,
+                'event_end':   event_end,
+                'detail':      detail,
+                'fix_url':     fix_url or url_for('pickup_edit_event', cid=cid),
+            })
+
+        is_started = event_start and event_start <= today
+        is_ended   = event_end   and event_end   <  today
+        is_current = is_started and not is_ended
+
+        last_rpt  = latest_pickup.get(cid)
+        last_ctct = latest_contact.get(cid)
+        cutoff    = (cfg['cutoff_date'] or '').strip()
+
+        # 1. Overdue pickup report (current events only)
+        if is_current:
+            if not last_rpt:
+                _issue('overdue_pickup',
+                       'No pickup reports filed yet — event already started.',
+                       url_for('pickup_event', cid=cid))
+            else:
+                days_since = (datetime.strptime(today, '%Y-%m-%d') -
+                              datetime.strptime(last_rpt,  '%Y-%m-%d')).days
+                if days_since >= 7:
+                    _issue('overdue_pickup',
+                           f'Last report was {days_since} days ago ({last_rpt}).',
+                           url_for('pickup_event', cid=cid))
+
+        # 2. Past cutoff with no pickup history
+        if cutoff and cutoff < today and cid not in has_history:
+            _issue('past_cutoff_no_history',
+                   f'Cutoff was {cutoff} and no pickup history has been entered.',
+                   url_for('pickup_event', cid=cid))
+
+        # 3. No hotel contact in 21+ days (current events only)
+        if is_current:
+            if not last_ctct:
+                _issue('no_recent_contact',
+                       'No contact with hotel has ever been logged.',
+                       url_for('pickup_event', cid=cid))
+            else:
+                days_since = (datetime.strptime(today, '%Y-%m-%d') -
+                              datetime.strptime(last_ctct, '%Y-%m-%d')).days
+                if days_since >= 21:
+                    _issue('no_recent_contact',
+                           f'Last hotel contact logged {days_since} days ago ({last_ctct}).',
+                           url_for('pickup_event', cid=cid))
+
+        # 4. Uniform block (all nights identical — needs real nightly breakdown)
+        if len(block) > 1 and len(set(block_vals)) == 1 and block_vals[0] > 0:
+            _issue('uniform_block',
+                   f'Every night shows exactly {block_vals[0]} rooms — likely auto-filled.')
+
+        # 5. Empty block
+        if not block or total_block == 0:
+            _issue('empty_block', 'contracted_block is empty or all zeros.')
+
+        # 6. Missing hotel email
+        if not (cfg['hotel_contact_email'] or '').strip():
+            _issue('missing_hotel_email', 'No hotel contact email on file.')
+
+        # 7. Missing client contact
+        no_name  = not (cfg['group_contact'] or '').strip()
+        no_email = not (cfg['group_contact_email'] or '').strip()
+        if no_name or no_email:
+            parts = []
+            if no_name:  parts.append('name')
+            if no_email: parts.append('email')
+            _issue('missing_client_contact',
+                   'Missing client ' + ' and '.join(parts) + '.')
+
+        # 8. Missing cutoff
+        if not cutoff:
+            _issue('missing_cutoff', 'No cutoff date has been set.')
+
+        # 9. Missing room rate
+        if not cfg['contracted_rate'] or cfg['contracted_rate'] == 0:
+            _issue('missing_rate', 'No contracted room rate entered.')
+
+    total_issues = sum(len(v) for v in issues_by_type.values())
+
+    return render_template('status_board.html',
+                           issues_by_type=issues_by_type,
+                           issue_meta=ISSUE_META,
+                           total_issues=total_issues,
+                           today=today)
+
+
+@app.route('/status-board/ignore', methods=['POST'])
+def status_board_ignore():
+    """Set or update an ignore record for a status board issue."""
+    user = get_current_user()
+    if not has_permission(user, 'pickups_payments'):
+        return jsonify({'ok': False, 'error': 'Access denied'}), 403
+
+    data       = request.get_json(silent=True) or {}
+    config_id  = int(data.get('config_id', 0))
+    issue_type = data.get('issue_type', '')
+    mode       = data.get('mode', '1month')   # '1month' | '2months' | 'custom' | 'permanent'
+    custom_dt  = data.get('custom_date', '')
+
+    if not config_id or not issue_type:
+        return jsonify({'ok': False, 'error': 'Missing params'}), 400
+
+    today = datetime.today()
+    if mode == 'permanent':
+        ignore_until = None
+    elif mode == '2months':
+        ignore_until = (today + timedelta(days=60)).strftime('%Y-%m-%d')
+    elif mode == 'custom' and custom_dt:
+        ignore_until = custom_dt
+    else:  # default: 1 month
+        ignore_until = (today + timedelta(days=30)).strftime('%Y-%m-%d')
+
+    db = get_db()
+    db.execute(
+        '''INSERT INTO status_board_ignore (user_id, config_id, issue_type, ignore_until)
+           VALUES (?,?,?,?)
+           ON CONFLICT(user_id, config_id, issue_type)
+           DO UPDATE SET ignore_until=excluded.ignore_until,
+                         created_at=datetime('now')''',
+        (user['id'], config_id, issue_type, ignore_until)
+    )
+    db.commit()
+    label = 'permanently' if ignore_until is None else f'until {ignore_until}'
+    return jsonify({'ok': True, 'label': label})
 
 
 def _create_pickup_config_from_booking(db, bid, account, event, hotel,
@@ -8458,6 +8689,7 @@ def profile():
         (user['id'],)
     ).fetchone()
     return render_template('profile.html', user=user, ms_token=ms_row)
+
 
 
 if __name__ == '__main__':
