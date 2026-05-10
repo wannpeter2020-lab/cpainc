@@ -244,9 +244,177 @@
       #sidebar { display: none; }
       #main { margin-left: 0; padding: 24px 18px; }
     }
+
+    /* ── Print button (screen only) ── */
+    #print-btn {
+      position: fixed; bottom: 28px; right: 28px; z-index: 200;
+      background: var(--navy); color: #fff;
+      border: none; border-radius: 50px; padding: 12px 22px;
+      font-size: .88rem; font-weight: 600; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,.25);
+      display: flex; align-items: center; gap: 8px;
+      transition: background .15s;
+    }
+    #print-btn:hover { background: var(--navy-mid); }
+
+    /* ── Print stylesheet ── */
     @media print {
-      #sidebar { display: none; }
-      #main { margin-left: 0; }
+      /* Page setup */
+      @page {
+        size: Letter portrait;
+        margin: 18mm 15mm 20mm 15mm;
+        @bottom-center {
+          content: "Conference Planning Associates Inc.  ·  Page " counter(page) " of " counter(pages);
+          font-size: 8pt; color: #888; font-family: 'Segoe UI', Arial, sans-serif;
+        }
+      }
+      @page :first { @bottom-center { content: none; } }
+
+      /* Hide chrome */
+      #sidebar, #print-btn { display: none !important; }
+
+      /* Body & layout */
+      body { background: #fff !important; display: block; }
+      #main {
+        margin-left: 0 !important; padding: 0 !important;
+        max-width: 100% !important;
+      }
+
+      /* Hero → clean title block */
+      .hero {
+        background: none !important;
+        border: none !important;
+        border-bottom: 3px solid #1a3a5c !important;
+        border-radius: 0 !important;
+        padding: 0 0 18px 0 !important;
+        margin-bottom: 28px !important;
+        color: #000 !important;
+      }
+      .hero h1 { font-size: 20pt !important; color: #1a3a5c !important; }
+      .hero p { color: #333 !important; opacity: 1 !important; font-size: 10pt !important; }
+      .hero .version { color: #666 !important; opacity: 1 !important; font-size: 8.5pt !important; }
+
+      /* Section headings */
+      .section-title {
+        font-size: 13pt !important; color: #1a3a5c !important;
+        border-bottom: 2px solid #1a3a5c !important;
+        padding-bottom: 5px !important; margin-bottom: 14px !important;
+      }
+      h3 { font-size: 11pt !important; color: #1a3a5c !important; }
+      h4 { font-size: 10pt !important; }
+      p, li { font-size: 9.5pt !important; line-height: 1.6 !important; }
+
+      /* Sections — avoid splitting across pages */
+      .section { page-break-inside: avoid; margin-bottom: 32pt !important; }
+      .section:not(:first-child) { page-break-before: auto; }
+
+      /* Keep steps, callouts, tables together */
+      .step { page-break-inside: avoid !important; }
+      .callout { page-break-inside: avoid !important; }
+      .info-table { page-break-inside: avoid !important; }
+      .flowchart-wrap { page-break-inside: avoid !important; }
+
+      /* Steps */
+      .step {
+        border: 1px solid #dde2ee !important;
+        background: #fff !important;
+        margin-bottom: 8pt !important;
+        padding: 10pt 12pt !important;
+      }
+      .step-num {
+        background: #1a3a5c !important;
+        color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .step-body strong { color: #1a3a5c !important; }
+
+      /* Callouts */
+      .callout {
+        border-radius: 0 !important;
+        padding: 9pt 11pt !important;
+        margin: 10pt 0 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .callout.tip { background: #f0faf2 !important; border-left: 4px solid #198754 !important; }
+      .callout.info { background: #f0f6ff !important; border-left: 4px solid #1976d2 !important; }
+      .callout.warning { background: #fffbf0 !important; border-left: 4px solid #fd7e14 !important; }
+      .callout p { font-size: 9pt !important; }
+
+      /* Tables */
+      .info-table th {
+        background: #1a3a5c !important; color: #fff !important;
+        font-size: 8.5pt !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .info-table td { font-size: 8.5pt !important; padding: 6pt 9pt !important; }
+      .info-table tr:nth-child(even) td {
+        background: #f5f7fb !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      /* Screen mockups — show as a bordered preview box */
+      .screen {
+        box-shadow: none !important;
+        border: 1px solid #ccd !important;
+        border-radius: 6px !important;
+        overflow: hidden !important;
+        page-break-inside: avoid !important;
+        margin: 12pt 0 !important;
+      }
+      .screen-bar {
+        background: #1a3a5c !important; color: #fff !important;
+        font-size: 7.5pt !important; padding: 6pt 10pt !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .screen-bar .dots { display: none !important; }
+      .screen-bar .url { color: rgba(255,255,255,.7) !important; }
+      .mock-content { padding: 12pt 14pt !important; }
+      .mock-navbar {
+        background: #1a3a5c !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        padding: 7pt 12pt !important;
+      }
+      .mock-navbar a, .mock-navbar .brand { font-size: 7.5pt !important; }
+      .mock-table th {
+        background: #eaf0fb !important;
+        font-size: 7.5pt !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .mock-table td { font-size: 8pt !important; padding: 5pt 8pt !important; }
+      .mock-card { padding: 10pt 12pt !important; }
+      .mock-card .value { font-size: 14pt !important; }
+      .mock-btn { font-size: 7pt !important; padding: 3pt 8pt !important; }
+      .mock-btn.primary {
+        background: #1a3a5c !important; color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      /* Badges */
+      .badge-success { background: #d1f0e0 !important; color: #198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .badge-warning { background: #fff3cd !important; color: #856404 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .badge-danger  { background: #f8d7da !important; color: #dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+      /* Flowcharts — keep if rendered, hide if not */
+      .flowchart-wrap { border: 1px solid #dde !important; box-shadow: none !important; }
+
+      /* Footer */
+      #main > div:last-child {
+        border-top: 1px solid #ccc !important;
+        padding-top: 12pt !important;
+        font-size: 8pt !important;
+        color: #888 !important;
+      }
+
+      /* Links — show as plain text in print */
+      a { color: inherit !important; text-decoration: none !important; }
     }
   </style>
 </head>
@@ -1376,6 +1544,11 @@ flowchart TD
   </div>
 
 </main>
+
+<!-- Print / Save as PDF button -->
+<button id="print-btn" onclick="window.print()" title="Save as PDF">
+  <i class="bi bi-file-earmark-pdf"></i> Save as PDF
+</button>
 
 <script>
   // Init Mermaid
