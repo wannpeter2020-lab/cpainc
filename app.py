@@ -6408,11 +6408,10 @@ def pickup_upload_contract(cid):
             flash(f'Could not parse contract: {extracted["error"]}', 'error')
             return redirect(url_for('pickup_event', cid=cid))
 
-        import base64
-        file_b64 = base64.b64encode(file_bytes).decode('utf-8')
+        # Don't round-trip the PDF through the form — file_b64 stays empty
         return render_template('pickup_contract_review.html',
                                config=config, extracted=extracted,
-                               filename=f.filename, file_b64=file_b64)
+                               filename=f.filename, file_b64='')
 
     return render_template('pickup_contract_upload.html', config=config)
 
