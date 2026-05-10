@@ -1116,12 +1116,39 @@ flowchart TD
 
     {% if can_imp_bk %}
     <h3>Importing Bookings — Step by Step</h3>
-    <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Export from ConferenceDirect</strong><p>Run the Event Bookings Report and save as .xlsx or .csv.</p></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Go to Import → Bookings</strong><p>In the navigation bar.</p></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Choose your file and click Import</strong><p>The system processes the file and shows a summary of records added, updated, and skipped.</p></div></div>
+    <p>Booking data is downloaded from <strong>my.conferencedirect.com</strong> and then imported into CPAinc.</p>
+
+    <h4 style="margin-top:20px;">Part 1 — Download the Associate Booking Report</h4>
+
+    <div class="step" style="flex-direction:column;gap:10px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Log in and open the Report Browser</strong>
+          <p>Go to <strong>my.conferencedirect.com</strong>. Click <strong>Reports</strong> in the navigation, then select <strong>Associate Booking Report</strong> from the report list.</p>
+        </div>
+      </div>
+      <img src="/static/manual/mycd/report-browser.png" alt="Report Browser showing Associate Booking Report" style="width:100%;max-width:600px;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
     </div>
-    <div class="callout info"><i class="bi bi-info-circle"></i><p>Duplicate Booking IDs are automatically skipped — it's safe to re-import a file you've already imported. Only new records will be added.</p></div>
+
+    <div class="step" style="flex-direction:column;gap:10px;margin-top:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Set the date range and download</strong>
+          <p>Click <strong>Booked Date</strong> to open the date filter. Select <strong>Specific Dates</strong>, enter your <strong>From</strong> and <strong>To</strong> dates, then click <strong>Apply</strong>. The report will download to your Downloads folder automatically.</p>
+        </div>
+      </div>
+      <img src="/static/manual/mycd/date-filter.png" alt="Booked Date filter with From and To date fields" style="width:100%;max-width:440px;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <h4 style="margin-top:24px;">Part 2 — Import into CPAinc</h4>
+
+    <div class="steps" style="margin-top:10px;">
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Go to Import → Bookings</strong><p>Click <strong>Import</strong> in the navigation bar, then select <strong>Bookings</strong>.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Choose your file and click Import</strong><p>Select the Associate Booking Report file from your Downloads folder. The system processes the file and shows a summary of records added, updated, and skipped.</p></div></div>
+    </div>
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>Previously imported Booking IDs are automatically skipped — it's safe to re-import a file you've already imported. Only new records will be added.</p></div>
     {% endif %}
   </div>
   {% endif %}
