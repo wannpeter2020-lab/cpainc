@@ -3721,11 +3721,12 @@ def pickup_fill_missing():
         flash('Access denied.', 'error')
         return redirect(url_for('index'))
 
-    db    = get_db()
-    today = datetime.today().strftime('%Y-%m-%d')
+    db           = get_db()
+    today        = datetime.today().strftime('%Y-%m-%d')
+    acct_filter  = get_user_account_filter(user)   # None = admin, [] = none, [...] = allowed list
 
-    # Future non-cancelled Kristin House bookings without a pickup_config entry
-    missing = db.execute('''
+    # Base query: future non-cancelled Kristin House bookings without a pickup_config entry
+    base_sql = '''
         SELECT r.BookingId, r.BookingName, r.EventName, r.AccountName,
                r.Customer, r.StartDate, r.EndDate, r.PeakRooms, r.RoomRate,
                r.BookingAssociate, r.BookingStatus
@@ -3736,8 +3737,22 @@ def pickup_fill_missing():
           AND NOT EXISTS (
               SELECT 1 FROM pickup_config p WHERE p.booking_id = CAST(r.BookingId AS TEXT)
           )
-        ORDER BY r.StartDate
-    ''', (today,)).fetchall()
+    '''
+    params = [today]
+
+    if acct_filter is None:
+        # Admin — no account restriction
+        pass
+    elif acct_filter:
+        ph = ','.join('?' * len(acct_filter))
+        base_sql += f' AND r.AccountName IN ({ph})'
+        params.extend(acct_filter)
+    else:
+        # User has no accounts assigned — show nothing
+        base_sql += ' AND 1=0'
+
+    base_sql += ' ORDER BY r.StartDate'
+    missing = db.execute(base_sql, params).fetchall()
 
     if request.method == 'POST':
         selected_ids = request.form.getlist('booking_ids')
