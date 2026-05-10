@@ -241,6 +241,7 @@
   <nav>
     <a href="#overview"><i class="bi bi-house"></i> Overview</a>
     <a href="#login"><i class="bi bi-box-arrow-in-right"></i> Logging In</a>
+    <a href="#status-board"><i class="bi bi-clipboard2-check"></i> Status Board</a>
     <a href="#dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
 
     <div class="section-label">Bookings</div>
@@ -282,7 +283,7 @@
 
   <!-- Hero -->
   <div class="hero">
-    <h1>CPAinc Pipeline — User Manual</h1>
+    <h1>Conference Planning Associates Inc. — User Manual</h1>
     <p>Complete guide to managing bookings, pickup tracking, RFPs, and commission reporting for the Kristin House team at ConferenceDirect.</p>
     <div class="version">May 2026 edition &nbsp;·&nbsp; For support contact Peter Wann</div>
   </div>
@@ -347,7 +348,76 @@
     <div class="callout info"><i class="bi bi-info-circle"></i><p>To log out, click your name in the top-right corner of the navigation bar and select <strong>Logout</strong>. If you forget your password, contact Peter Wann to have it reset.</p></div>
   </div>
 
-  <!-- ── 3. Dashboard ────────────────────────────────────────────── -->
+  <!-- ── 3. Status Board ───────────────────────────────────────────── -->
+  <div class="section" id="status-board">
+    <div class="section-title"><i class="bi bi-clipboard2-check"></i> Status Board</div>
+    <p>Click <strong>Status Board</strong> in the top navigation. This is your personal action-item dashboard — it scans all of your assigned accounts and surfaces bookings that need attention right now. Items are filtered to only the accounts you have access to.</p>
+
+    <div class="screen">
+      <div class="screen-bar">
+        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Status Board — CPAinc</span>
+        <span class="url">/status-board</span>
+      </div>
+      <div class="mock-content">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <div><div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Status Board</div><div style="font-size:.75rem;color:#888;">Action items filtered to your account access</div></div>
+          <span class="mock-btn outline" style="font-size:.78rem;">⟳ Refresh</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+          <span class="badge badge-danger" style="font-size:.85rem;padding:6px 14px;">⚠ 3 Overdue Pickup</span>
+          <span class="badge badge-warning" style="font-size:.85rem;padding:6px 14px;color:#333;">👁 5 No Recent Contact</span>
+          <span class="badge badge-info" style="font-size:.85rem;padding:6px 14px;">ℹ 4 Missing Cutoff Date</span>
+        </div>
+        <div style="background:var(--danger);color:#fff;padding:10px 14px;border-radius:6px 6px 0 0;font-weight:600;font-size:.85rem;">⚠ Overdue Pickup <span style="background:rgba(255,255,255,.25);border-radius:10px;padding:1px 8px;font-size:.78rem;margin-left:6px;">3</span></div>
+        <table class="mock-table" style="border-top:none;">
+          <thead><tr><th>Booking ID</th><th>Event / Organisation</th><th>Hotel</th><th>Start</th><th>End</th><th>Issue</th><th></th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span style="color:#1a3a5c;font-weight:600;">196621</span></td>
+              <td><div style="font-weight:600;font-size:.82rem;">2026 IECA Annual Conference</div><div style="font-size:.72rem;color:#888;">International Erosion Control Association</div></td>
+              <td>Omni Fort Worth</td><td>02/27/2026</td><td>03/02/2026</td>
+              <td style="font-size:.8rem;color:#888;">Cutoff was 01/15/2026 — no final pickup entered</td>
+              <td><span class="mock-btn primary" style="font-size:.72rem;">✏ Fix</span></td>
+              <td>
+                <div style="display:flex;gap:4px;align-items:center;">
+                  <div style="border:1px solid #ccc;border-radius:4px;padding:4px 8px;font-size:.72rem;color:#444;">Ignore 1 month ▾</div>
+                  <span style="color:#888;font-size:1rem;">🚫</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h3>Issue Categories</h3>
+    <table class="info-table">
+      <tr><th>Category</th><th>Colour</th><th>What It Means</th></tr>
+      <tr><td><strong>Overdue Pickup</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Event has passed its cutoff date but no final pickup has been entered</td></tr>
+      <tr><td><strong>Past Cutoff — No History</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Cutoff has passed and no pickup history exists at all</td></tr>
+      <tr><td><strong>No Recent Contact</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contact logged in the past 14 days and cutoff is approaching</td></tr>
+      <tr><td><strong>Uniform Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>All nightly block values are identical — possible copy-paste error</td></tr>
+      <tr><td><strong>Empty Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contracted block data has been entered yet</td></tr>
+      <tr><td><strong>Missing Hotel Email</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No hotel contact email on file for this event</td></tr>
+      <tr><td><strong>Missing Client Contact</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No client contact email on file for this event</td></tr>
+      <tr><td><strong>Missing Cutoff Date</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No cutoff date has been set for this event</td></tr>
+      <tr><td><strong>Missing Room Rate</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No contracted room rate has been entered</td></tr>
+    </table>
+
+    <h3>Ignoring an Item</h3>
+    <p>If an item is not immediately actionable, you can hide it temporarily using the ignore dropdown on the right side of each row. Select an option, then click the eye-slash button to apply. The row fades out immediately.</p>
+    <table class="info-table">
+      <tr><th>Option</th><th>Effect</th></tr>
+      <tr><td><strong>Ignore 1 month</strong></td><td>Hides the item for 30 days</td></tr>
+      <tr><td><strong>Ignore 2 months</strong></td><td>Hides the item for 60 days</td></tr>
+      <tr><td><strong>Custom date…</strong></td><td>A date picker appears — choose any future date to hide until</td></tr>
+      <tr><td><strong>Permanent</strong></td><td>Hides the item indefinitely (requires confirmation prompt)</td></tr>
+    </table>
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>Items reappear automatically after the ignore period expires. Permanent ignores suppress an item forever but do not delete any data. Contact your administrator to clear a permanent ignore if needed.</p></div>
+  </div>
+
+  <!-- ── 4. Dashboard ────────────────────────────────────────────── -->
   <div class="section" id="dashboard">
     <div class="section-title"><i class="bi bi-speedometer2"></i> Dashboard</div>
     <p>The Dashboard shows a financial snapshot of the current year's commission activity. Click <strong>Dashboard</strong> in the top navigation bar to access it.</p>
@@ -515,10 +585,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
           <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Pickup Tracking</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <span class="mock-btn outline" style="font-size:.74rem;">⟳ Sync from Pipeline</span>
-            <span class="mock-btn outline" style="font-size:.74rem;">🔗 Match Bookings</span>
-            <span class="mock-btn warning" style="font-size:.74rem;">Fill Missing</span>
-            <span class="mock-btn outline" style="font-size:.74rem;">📥 Import Excel</span>
+            <span class="mock-btn primary" style="font-size:.74rem;">Fill Missing</span>
             <span class="mock-btn primary" style="font-size:.74rem;">+ New Event</span>
           </div>
         </div>
@@ -586,12 +653,12 @@
     <h3>Toolbar Buttons</h3>
     <table class="info-table">
       <tr><th>Button</th><th>What It Does</th></tr>
-      <tr><td><strong>Sync from Pipeline</strong></td><td>Pulls the latest booking data (name, hotel, dates) from the ConferenceDirect pipeline for all pickup events</td></tr>
-      <tr><td><strong>Match Bookings</strong></td><td>Auto-matches pickup configs to pipeline bookings by hotel and date when booking IDs are missing</td></tr>
-      <tr><td><strong>Fill Missing</strong></td><td>Shows pickup events that are missing key data (hotel contacts, block info) so you can complete them</td></tr>
-      <tr><td><strong>Import Excel</strong></td><td>Import pickup data from a hotel-provided Excel spreadsheet</td></tr>
+      <tr><td><strong>Fill Missing</strong></td><td>Creates placeholder pickup tracking records for Kristin's bookings within your assigned accounts that don't yet have a tracking record — saves you from having to enter them one by one</td></tr>
       <tr><td><strong>New Event</strong></td><td>Manually create a new pickup tracking record for an event</td></tr>
     </table>
+
+    <h3>Sticky Column Header</h3>
+    <p>When you scroll down on the Pickup Tracking page, the column header row (Booking ID, Event / Organisation, Hotel, etc.) automatically stays pinned near the top of the screen so you always know which column you're reading. The header follows as you scroll both vertically and horizontally.</p>
   </div>
 
   <div class="section" id="pickup-event">
@@ -1000,8 +1067,24 @@ flowchart LR
       <tr><td><strong>Kristin's Cut from Team</strong></td><td>Kristin's override percentage on team associate bookings (e.g., 10%)</td></tr>
       <tr><td><strong>Default Commission Split</strong></td><td>The standard share applied to all bookings unless a per-account override is set</td></tr>
       <tr><td><strong>Payment Tolerance</strong></td><td>Payments within this % of the actual commission are not flagged as "out of tolerance" on the Payment Report</td></tr>
+      <tr><td><strong>Date Display Format</strong></td><td>Controls how dates appear throughout the entire site — dashboards, reports, pickup tracking, and the status board</td></tr>
       <tr><td><strong>Account-Specific Overrides</strong></td><td>Some clients have a negotiated split — add them here with account name, split %, and optionally specific countries</td></tr>
     </table>
+
+    <h3>Date Display Format</h3>
+    <p>Choose your preferred date format from the dropdown in the <strong>Date Display Format</strong> card. A live preview updates instantly so you can see how the format will look before saving.</p>
+    <table class="info-table">
+      <tr><th>Format</th><th>Example</th></tr>
+      <tr><td>MM/DD/YYYY</td><td>05/10/2026</td></tr>
+      <tr><td>M/D/YYYY</td><td>5/10/2026</td></tr>
+      <tr><td>YYYY-MM-DD</td><td>2026-05-10</td></tr>
+      <tr><td>DD/MM/YYYY</td><td>10/05/2026</td></tr>
+      <tr><td>Mon DD, YYYY</td><td>May 10, 2026</td></tr>
+      <tr><td>DD Mon YYYY</td><td>10 May 2026</td></tr>
+      <tr><td>Month DD, YYYY</td><td>May 10, 2026</td></tr>
+      <tr><td>Weekday, Month DD, YYYY</td><td>Sunday, May 10, 2026</td></tr>
+    </table>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>The selected format applies site-wide immediately after saving — every date on every page changes to match your preference.</p></div>
   </div>
 
   <!-- ── 11. Admin / User Management ────────────────────────────── -->
@@ -1049,6 +1132,7 @@ flowchart LR
       <tr><th>Permission</th><th>Grants Access To</th></tr>
       <tr><td><strong>Dashboard</strong></td><td>The commission dashboard page</td></tr>
       <tr><td><strong>Admin Panel</strong></td><td>User management page</td></tr>
+      <tr><td><strong>Contracts</strong></td><td>The Contracts nav link and contract template pages</td></tr>
       <tr><td><strong>Import → Bookings</strong></td><td>Booking import tool</td></tr>
       <tr><td><strong>Import → Payments</strong></td><td>Payment import tool</td></tr>
       <tr><td><strong>Import → HHR</strong></td><td>Housing History Report import</td></tr>
@@ -1059,11 +1143,11 @@ flowchart LR
       <tr><td><strong>Reports → Customer Summary</strong></td><td>Customer summary report</td></tr>
       <tr><td><strong>View Bookings</strong></td><td>Bookings list and detail pages</td></tr>
       <tr><td><strong>Add / Edit Bookings</strong></td><td>Creating and editing booking records</td></tr>
-      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records</td></tr>
+      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records; also controls access to Status Board, Pickup RPT/TRK, RFP's, and Contacts</td></tr>
     </table>
 
     <h3>Setting Account Access</h3>
-    <p>Account Access controls which <strong>client organisations</strong> a non-admin user can see across Bookings, Pickup Tracking, and RFPs.</p>
+    <p>Account Access controls which <strong>client organisations</strong> a non-admin user can see across Bookings, Pickup Tracking, RFPs, and the Status Board.</p>
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click the 🏢 buildings button</strong><p>In the Account Access column for the user you want to configure.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Check the accounts this user should see</strong><p>Use the search box to find specific clients. Use Select All / Clear All for bulk changes.</p></div></div>
@@ -1081,7 +1165,7 @@ flowchart LR
 
   <!-- Footer -->
   <div style="border-top:1px solid #e5e9f0;padding-top:24px;margin-top:40px;color:#888;font-size:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-    <span>CPAinc Pipeline — ConferenceDirect · Kristin House Team</span>
+    <span>Conference Planning Associates Inc. — ConferenceDirect · Kristin House Team</span>
     <span>For technical support, contact <strong>Peter Wann</strong></span>
   </div>
 
