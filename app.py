@@ -27,6 +27,7 @@ except Exception:
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'cpainc2026')
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32 MB upload limit
 
 # In production (Railway), DATA_DIR points to the mounted persistent volume.
 # Locally it defaults to the project folder.
