@@ -68,7 +68,7 @@
         {% endif %}
 
         {# ── Contracts ── #}
-        {% if has_perm('pickups_payments') %}
+        {% if has_perm('contracts') %}
         <li class="nav-item"><a class="nav-link {% if request.path.startswith('/contracts') %}active{% endif %}" href="/contracts/templates"><i class="bi bi-file-word me-1"></i>Contracts</a></li>
         {% endif %}
 

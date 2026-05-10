@@ -3065,6 +3065,7 @@ ALL_PERMISSIONS = [
     ('bookings_view',              'View Bookings'),
     ('bookings_edit',              'Add / Edit Bookings'),
     ('pickups_payments',           'Add Pickups / Payments'),
+    ('contracts',                  'Contracts'),
 ]
 
 _SEED_USERS = [
@@ -7760,6 +7761,10 @@ def pickup_debug_file(cid):
 
 @app.route('/contracts/templates')
 def contract_templates():
+    user = get_current_user()
+    if not has_permission(user, 'contracts'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
     db = get_db()
     templates = db.execute(
         "SELECT * FROM contract_template WHERE is_active=1 ORDER BY chain, template_name"
@@ -7773,6 +7778,10 @@ def contract_templates():
 
 @app.route('/contracts/templates/upload', methods=['GET', 'POST'])
 def contract_template_upload():
+    user = get_current_user()
+    if not has_permission(user, 'contracts'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
     from pickup_utils import extract_template_metadata
     if request.method == 'GET':
         return render_template('contract_template_upload.html')
@@ -7804,6 +7813,10 @@ def contract_template_upload():
 
 @app.route('/contracts/templates/<int:tid>/download')
 def contract_template_download(tid):
+    user = get_current_user()
+    if not has_permission(user, 'contracts'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
     import io as _io
     db = get_db()
     tmpl = db.execute("SELECT * FROM contract_template WHERE id=?", (tid,)).fetchone()
@@ -7817,6 +7830,10 @@ def contract_template_download(tid):
 
 @app.route('/contracts/templates/<int:tid>/delete', methods=['POST'])
 def contract_template_delete(tid):
+    user = get_current_user()
+    if not has_permission(user, 'contracts'):
+        flash('Access denied.', 'error')
+        return redirect(url_for('index'))
     db = get_db()
     db.execute("UPDATE contract_template SET is_active=0 WHERE id=?", (tid,))
     db.commit()
