@@ -71,6 +71,31 @@
     </div>
   </div>
 
+  <div class="col-md-4">
+    <div class="card mb-4">
+      <div class="card-header">Date Display Format</div>
+      <div class="card-body">
+        <form method="post">
+          <input type="hidden" name="action" value="save_date_format">
+          <div class="mb-3">
+            <label class="form-label">Date format used throughout the site</label>
+            <select name="date_format" class="form-select" id="date-format-select">
+              {% for pattern, label, example in date_format_options %}
+              <option value="{{ pattern }}" {% if pattern == current_date_fmt %}selected{% endif %}>
+                {{ label }}
+              </option>
+              {% endfor %}
+            </select>
+            <div class="form-text mt-2">
+              Preview: <strong id="date-preview">{{ today_preview }}</strong>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i>Save</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div class="col-md-8">
     <div class="card">
       <div class="card-header">Account-Specific Split Overrides</div>
@@ -143,4 +168,24 @@
   </div>
 
 </div>
+
+{% block scripts %}
+<script>
+// Live date-format preview
+(function() {
+  const examples = {
+    {% for pattern, label, example in date_format_options %}
+    {{ pattern | tojson }}: {{ example | tojson }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  };
+  const sel = document.getElementById('date-format-select');
+  const preview = document.getElementById('date-preview');
+  if (sel && preview) {
+    sel.addEventListener('change', function() {
+      preview.textContent = examples[this.value] || '';
+    });
+  }
+})();
+</script>
+{% endblock %}
 {% endblock %}

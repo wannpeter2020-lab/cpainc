@@ -59,13 +59,12 @@ def fromjson_filter(value):
 
 @app.template_filter('us_date')
 def us_date_filter(value):
-    """Convert YYYY-MM-DD (or datetime) to MM/DD/YYYY for display."""
+    """Convert YYYY-MM-DD (or datetime) to the configured display format."""
     if not value:
         return '—'
     try:
         s = str(value)[:10]
-        from datetime import datetime as _dt
-        return _dt.strptime(s, '%Y-%m-%d').strftime('%m/%d/%Y')
+        return datetime.strptime(s, '%Y-%m-%d').strftime(get_date_format())
     except Exception:
         return value
 
@@ -75,8 +74,7 @@ def fmt_date(val):
         return ''
     try:
         s = str(val)[:10]
-        from datetime import datetime as _dt
-        return _dt.strptime(s, '%Y-%m-%d').strftime('%m/%d/%Y')
+        return datetime.strptime(s, '%Y-%m-%d').strftime(get_date_format())
     except Exception:
         return str(val)[:10]
 
@@ -140,6 +138,34 @@ def get_kristin_cut():
         return float(row[0]) if row else 0.10
     except Exception:
         return 0.10
+
+# Supported display formats: (strftime_pattern, label, example)
+DATE_FORMAT_OPTIONS = [
+    ('%m/%d/%Y',  'MM/DD/YYYY',   'US standard — 05/09/2026'),
+    ('%d/%m/%Y',  'DD/MM/YYYY',   'European — 09/05/2026'),
+    ('%Y-%m-%d',  'YYYY-MM-DD',   'ISO 8601 — 2026-05-09'),
+    ('%d-%m-%Y',  'DD-MM-YYYY',   'European dashes — 09-05-2026'),
+    ('%d.%m.%Y',  'DD.MM.YYYY',   'European dots — 09.05.2026'),
+    ('%b %d, %Y', 'Mon DD, YYYY', 'Abbreviated — May 09, 2026'),
+    ('%d %b %Y',  'DD Mon YYYY',  'International — 09 May 2026'),
+    ('%B %d, %Y', 'Month DD, YYYY','Long — May 09, 2026'),
+]
+
+def get_date_format():
+    """Return the configured strftime date format, cached on flask g per request."""
+    if hasattr(g, '_date_fmt'):
+        return g._date_fmt
+    try:
+        row = get_db().execute('SELECT value FROM Settings WHERE key="date_format"').fetchone()
+        fmt = row[0] if row else '%m/%d/%Y'
+        # Validate it's one of our known patterns
+        known = {o[0] for o in DATE_FORMAT_OPTIONS}
+        if fmt not in known:
+            fmt = '%m/%d/%Y'
+    except Exception:
+        fmt = '%m/%d/%Y'
+    g._date_fmt = fmt
+    return fmt
 
 def split_for_account(account, country, account_splits, default_split):
     if not account:
@@ -2424,17 +2450,32 @@ def settings():
             db.execute('DELETE FROM AccountSplits WHERE id = ?', (acct_id,))
             db.commit()
             flash('Account override removed.', 'success')
+        elif action == 'save_date_format':
+            fmt = request.form.get('date_format', '%m/%d/%Y')
+            known = {o[0] for o in DATE_FORMAT_OPTIONS}
+            if fmt not in known:
+                flash('Unknown date format selected.', 'error')
+            else:
+                db.execute('INSERT OR REPLACE INTO Settings (key, value) VALUES ("date_format", ?)', (fmt,))
+                db.commit()
+                label = next((o[1] for o in DATE_FORMAT_OPTIONS if o[0] == fmt), fmt)
+                flash(f'Date format updated to {label}.', 'success')
         return redirect(url_for('settings'))
 
     current       = get_commission_split()
     tolerance     = get_payment_tolerance()
     kristin_split = get_kristin_split()
     kristin_cut   = get_kristin_cut()
+    current_date_fmt = get_date_format()
+    today_preview    = datetime.today().strftime(current_date_fmt)
     overrides = db.execute('SELECT id, account_name, split_rate, countries FROM AccountSplits ORDER BY account_name').fetchall()
     accounts  = [r[0] for r in db.execute('SELECT DISTINCT AccountName FROM ReportPipeline WHERE AccountName IS NOT NULL ORDER BY AccountName').fetchall()]
     return render_template('settings.html', commission_split=current, tolerance=tolerance,
                            kristin_split=kristin_split, kristin_cut=kristin_cut,
-                           overrides=overrides, accounts=accounts)
+                           overrides=overrides, accounts=accounts,
+                           date_format_options=DATE_FORMAT_OPTIONS,
+                           current_date_fmt=current_date_fmt,
+                           today_preview=today_preview)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
