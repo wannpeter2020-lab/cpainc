@@ -1418,6 +1418,30 @@ flowchart TD
     </div>
     <div class="callout info"><i class="bi bi-info-circle"></i><p>Previously imported Booking IDs are automatically skipped — it's safe to re-import a file you've already imported. Only new records will be added.</p></div>
     {% endif %}
+
+    {% if can_imp_hhr %}
+    <h3>Importing an HHR (Housing History Report) — Step by Step</h3>
+    <p>The Housing History Report is the official final room pickup file sent by the hotel after the event's cutoff date. Import it to record the actual rooms used for the event.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Receive the HHR file from the hotel</strong><p>The hotel sends this as an Excel (.xlsx) file, typically within a few days after the cutoff date. Save it to your Downloads folder.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Go to Import → HHR</strong><p>Click <strong>Import</strong> in the navigation bar and select <strong>HHR</strong>.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Select the event and upload the file</strong><p>Choose the matching event from the dropdown, then select your HHR file. Click <strong>Import</strong>.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Review the summary</strong><p>The system shows the total rooms imported by night. The event's final pickup is now recorded and the booking moves toward commission tracking.</p></div></div>
+    </div>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>After importing the HHR, use <strong>Enter Final History</strong> on the Pickup Event Detail page to confirm the final pickup numbers and mark the event complete.</p></div>
+    {% endif %}
+
+    {% if can_imp_can %}
+    <h3>Importing Cancelled Meetings — Step by Step</h3>
+    <p>Use this import to bulk-update booking statuses to <strong>Cancelled</strong> from a spreadsheet — useful after receiving a cancellation report from ConferenceDirect.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Prepare your file</strong><p>The file must be an Excel (.xlsx) spreadsheet with Booking IDs in the first column. Each ID listed will have its status updated to Cancelled.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Go to Import → Cancelled Meetings</strong><p>Click <strong>Import</strong> in the navigation bar and select <strong>Cancelled Meetings</strong>.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Select your file and click Import</strong><p>The system updates each matching booking's status to Cancelled and shows a summary of how many records were updated.</p></div></div>
+    </div>
+    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>Only Booking IDs already in CPAinc will be updated. IDs not found in the system are skipped and listed in the import summary.</p></div>
+    {% endif %}
+
   </div>
   {% endif %}
 
