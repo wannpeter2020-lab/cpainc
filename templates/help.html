@@ -279,9 +279,10 @@
     {% endif %}
 
     {% if can_pickup %}
-    <div class="section-label">Pickup Tracking and Reporting and Reporting</div>
+    <div class="section-label">Pickup Tracking and Reporting</div>
     <a href="#pickup-dashboard"><i class="bi bi-graph-up"></i> Dashboard</a>
     <a href="#pickup-event"><i class="bi bi-calendar-check"></i> Event Detail</a>
+    {% if can_contracts %}<a href="#pickup-contract"><i class="bi bi-file-earmark-arrow-up"></i> Upload Contract</a>{% endif %}
     <a href="#pickup-weekly"><i class="bi bi-pencil-square"></i> Weekly Reports</a>
     <a href="#pickup-customer-report"><i class="bi bi-file-earmark-spreadsheet"></i> Customer Report</a>
     <a href="#pickup-email"><i class="bi bi-envelope"></i> Email Tools</a>
@@ -898,6 +899,84 @@ flowchart LR
     </ul>
     <div class="callout info"><i class="bi bi-buildings"></i><p><strong>Multi-Hotel Events:</strong> If an event spans multiple hotels, a blue banner appears with a link to the <strong>Combined Event Report</strong> showing pickup across all hotels together.</p></div>
   </div>
+
+  {% if can_contracts %}
+  <div class="section" id="pickup-contract">
+    <div class="section-title"><i class="bi bi-file-earmark-arrow-up"></i> Upload Contract &amp; Extract Data</div>
+    <p>CPAinc can read a hotel contract (PDF or Word) and automatically pull out the key terms — room block, rate, cutoff, attrition, and contacts — so you don't have to type them in manually.</p>
+
+    <div class="callout info"><i class="bi bi-robot"></i><p>Contract data is extracted by <strong>Claude AI</strong>. The review page lets you correct anything before saving, so it's always safe to upload even if a field comes back wrong.</p></div>
+
+    <h3 style="margin-top:20px;">Step by Step</h3>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Open the event in Pickup Tracking &amp; Reporting</strong>
+          <p>Click the event name or <strong>Pickup History</strong> button from the dashboard to open the Event Detail page.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Click "Upload Contract"</strong>
+          <p>The button is in the top-right area of the event page. A file picker will open.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>Select your contract file and click "Extract Contract Data"</strong>
+          <p>Accepts <strong>PDF</strong> or <strong>Word (.docx)</strong> files. The app sends the contract text to Claude, which extracts:</p>
+          <ul style="margin-top:8px;margin-bottom:0;">
+            <li>Night-by-night room block (date → number of rooms)</li>
+            <li>Nightly contracted rate</li>
+            <li>Cut-off date</li>
+            <li>Attrition %</li>
+            <li>Hotel contact name and email</li>
+            <li>Client contact name and email</li>
+          </ul>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <strong>Review and correct on the Review page</strong>
+          <p>All extracted fields are shown before anything is saved. The room block table is editable night-by-night — if Claude misreads a single night you can correct it right here inline before committing.</p>
+          <div style="background:#f8f9fb;border:1px solid #e5e9f0;border-radius:8px;padding:14px 16px;margin-top:10px;">
+            <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#888;margin-bottom:10px;">Review Page — Extracted Fields</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;font-size:.82rem;">
+              <div><span style="color:#888;">Contracted Rate</span><br><strong>$224.81</strong></div>
+              <div><span style="color:#888;">Cut-off Date</span><br><strong>01/15/2026</strong></div>
+              <div><span style="color:#888;">Attrition %</span><br><strong>80%</strong></div>
+              <div><span style="color:#888;">Hotel Contact</span><br><strong>Sarah Miller — sarah@omnifw.com</strong></div>
+              <div><span style="color:#888;">Client Contact</span><br><strong>Jane Doe — jdoe@ieca.org</strong></div>
+            </div>
+            <div style="margin-top:12px;font-size:.78rem;font-weight:700;color:var(--navy);">Room Block (editable)</div>
+            <table class="mock-table" style="margin-top:6px;font-size:.78rem;">
+              <thead><tr><th>Night</th><th>Rooms</th></tr></thead>
+              <tbody>
+                <tr><td>Tue 02/10/2026</td><td><input type="number" value="180" style="width:70px;border:1px solid #cdd;border-radius:4px;padding:2px 6px;font-size:.78rem;"></td></tr>
+                <tr><td>Wed 02/11/2026</td><td><input type="number" value="310" style="width:70px;border:1px solid #cdd;border-radius:4px;padding:2px 6px;font-size:.78rem;"></td></tr>
+                <tr><td>Thu 02/12/2026</td><td><input type="number" value="310" style="width:70px;border:1px solid #cdd;border-radius:4px;padding:2px 6px;font-size:.78rem;"></td></tr>
+                <tr><td>Fri 02/13/2026</td><td><input type="number" value="210" style="width:70px;border:1px solid #cdd;border-radius:4px;padding:2px 6px;font-size:.78rem;"></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <strong>Click "Save Contract Data"</strong>
+          <p>All fields write directly to the pickup record — room block, rate, cutoff, attrition %, and contacts are all updated. The original contract file is also stored and available for download from the event page.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Uploading a contract is the fastest way to set up a new event — it populates all the key fields in one step instead of entering them one by one in Edit.</p></div>
+  </div>
+  {% endif %}
 
   <div class="section" id="pickup-weekly">
     <div class="section-title"><i class="bi bi-pencil-square"></i> Adding Weekly Pickup Reports</div>
