@@ -5,7 +5,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h4 class="mb-0"><i class="bi bi-clipboard2-check me-2"></i>Status Board</h4>
-    <div class="text-muted small mt-1">Action items filtered to your account access — as of {{ today }}</div>
+    <div class="text-muted small mt-1">Action items filtered to your account access — as of {{ today | us_date }}</div>
   </div>
   <a href="{{ url_for('status_board') }}" class="btn btn-sm btn-outline-secondary">
     <i class="bi bi-arrow-clockwise me-1"></i>Refresh
@@ -87,8 +87,8 @@
                 {% endif %}
               </td>
               <td class="small">{{ item.hotel }}</td>
-              <td class="small text-nowrap">{{ item.event_start or '—' }}</td>
-              <td class="small text-nowrap">{{ item.event_end   or '—' }}</td>
+              <td class="small text-nowrap">{{ item.event_start | us_date }}</td>
+              <td class="small text-nowrap">{{ item.event_end   | us_date }}</td>
               <td class="small text-muted">{{ item.detail }}</td>
               <td>
                 <a href="{{ item.fix_url }}" class="btn btn-sm btn-primary">
