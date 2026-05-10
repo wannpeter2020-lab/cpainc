@@ -261,21 +261,21 @@
       {# Sort toggle #}
       <div class="btn-group btn-group-sm" role="group" aria-label="Sort current events">
         <a href="{{ url_for('pickup_dashboard') }}"
-           class="btn {% if sort_mode != 'customer' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+           class="btn {% if sort_mode != 'customer' %}btn-light{% else %}btn-outline-light{% endif %}">
           <i class="bi bi-calendar-date me-1"></i>By Date
         </a>
         <a href="{{ url_for('pickup_dashboard', sort='customer') }}"
-           class="btn {% if sort_mode == 'customer' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+           class="btn {% if sort_mode == 'customer' %}btn-light{% else %}btn-outline-light{% endif %}">
           <i class="bi bi-people me-1"></i>By Customer
         </a>
       </div>
       {# Customer Report — opens selection page #}
       <a href="{{ url_for('pickup_customer_report_select') }}"
-         class="btn btn-sm btn-outline-secondary"
+         class="btn btn-sm btn-outline-light"
          title="Choose customers then download Excel report">
         <i class="bi bi-file-earmark-spreadsheet me-1"></i>Customer Report
       </a>
-      <button class="btn btn-sm btn-outline-secondary" type="button"
+      <button class="btn btn-sm btn-outline-light" type="button"
               data-bs-toggle="collapse" data-bs-target="#collapseCurrent">
         <i class="bi bi-chevron-up"></i>
       </button>
@@ -295,7 +295,7 @@
     <span><i class="bi bi-calendar-event me-2"></i>Future Events
       <span class="badge bg-secondary ms-1">{{ future_rows|length }}</span>
     </span>
-    <button class="btn btn-sm btn-outline-secondary" type="button"
+    <button class="btn btn-sm btn-outline-light" type="button"
             data-bs-toggle="collapse" data-bs-target="#collapseFuture">
       <i class="bi bi-chevron-down"></i>
     </button>
