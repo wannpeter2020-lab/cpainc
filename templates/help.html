@@ -272,6 +272,7 @@
 
     {% if can_rfp %}
     <div class="section-label">RFP Tracking</div>
+    <a href="#cvent-rfp"><i class="bi bi-cloud-download"></i> Cvent RFP Download</a>
     <a href="#rfp-list"><i class="bi bi-clipboard2-check"></i> RFP List</a>
     <a href="#rfp-detail"><i class="bi bi-clipboard2-data"></i> RFP Detail</a>
     {% endif %}
@@ -612,6 +613,86 @@
 
   <!-- ── RFP Tracking ──────────────────────────────────────────── -->
   {% if can_rfp %}
+  <div class="section" id="cvent-rfp">
+    <div class="section-title"><i class="bi bi-cloud-download"></i> Cvent RFP Download</div>
+    <p>Before working with an RFP in CPAinc, you will need to download it from Cvent. There are two documents you may need: the <strong>RFP Word document</strong> (the event requirements) and the <strong>CRF Excel file</strong> (hotel proposals for import).</p>
+
+    <!-- ── Part 1: RFP Word Document ── -->
+    <h3>Part 1 — Download the RFP (Word Document)</h3>
+
+    <div class="step" style="flex-direction:column;gap:10px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Log into Cvent and locate the RFP</strong>
+          <p>Go to <strong>suppliers.app.cvent.com</strong>. On the <em>All RFPs and Bookings</em> screen, find your event in the list and click on it.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/rfp-step1.png" alt="Cvent All RFPs and Bookings list" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <div class="step" style="flex-direction:column;gap:10px;margin-top:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Click Request Details → Download RFP → Word document</strong>
+          <p>In the left sidebar, click <strong>Request Details</strong>. Then click the <strong>Download RFP</strong> button in the top-right and select <strong>Word document</strong> from the dropdown.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/rfp-step2.png" alt="Click Request Details then Download RFP Word document" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <div class="step" style="flex-direction:column;gap:10px;margin-top:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>File downloads to your Downloads folder</strong>
+          <p>The RFP Word document will appear in your browser's download bar and save to your <strong>Downloads</strong> folder. You can now use it or attach it when creating an RFP in CPAinc.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/rfp-step3.png" alt="RFP Word document downloaded" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <!-- ── Part 2: CRF Excel ── -->
+    <h3 style="margin-top:36px;">Part 2 — Download the CRF (Excel)</h3>
+    <p>The CRF (Compete for Revenue Form) is the hotel proposals spreadsheet. Use this when you want to import hotel bids into CPAinc via <strong>Import CRF</strong> on the RFP Detail page.</p>
+
+    <div class="step" style="flex-direction:column;gap:10px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <strong>Click Venues, then select hotels</strong>
+          <p>In the left sidebar, click <strong>Venues</strong>. The Venue Response list appears. Check the hotels you want included in the CRF — you can select a short list, a single hotel, or all available venues using <strong>Select all</strong>.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/crf-step1.png" alt="Click Venues and select hotels" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <div class="step" style="flex-direction:column;gap:10px;margin-top:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <strong>Click Reports → CRF (Excel)</strong>
+          <p>With your hotels selected, click the <strong>Reports</strong> button in the toolbar at the top of the venue list. In the dropdown, select <strong>CRF (Excel)</strong>.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/crf-step2.png" alt="Click Reports then CRF Excel" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <div class="step" style="flex-direction:column;gap:10px;margin-top:14px;">
+      <div style="display:flex;gap:14px;align-items:flex-start;">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <strong>CRF downloads to your Downloads folder</strong>
+          <p>The Excel CRF file will appear in your browser's download bar and save to your <strong>Downloads</strong> folder. You can now use <strong>Import CRF</strong> on the CPAinc RFP Detail page to bring the hotel data in automatically.</p>
+        </div>
+      </div>
+      <img src="/static/manual/cvent/crf-step3.png" alt="CRF Excel file downloaded" style="width:100%;border-radius:8px;border:1px solid #e5e9f0;margin-top:6px;">
+    </div>
+
+    <div class="callout tip" style="margin-top:24px;"><i class="bi bi-lightbulb"></i><p>Once you have the CRF Excel file, go to the <strong>RFP Detail</strong> page in CPAinc and click <strong>Import CRF</strong> to automatically populate all hotel details from the spreadsheet.</p></div>
+  </div>
+
   <div class="section" id="rfp-list">
     <div class="section-title"><i class="bi bi-clipboard2-check"></i> RFP Tracking — List</div>
     <p>Click <strong>RFP's</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events. You will only see RFPs for your assigned accounts.</p>
