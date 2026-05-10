@@ -1,3 +1,22 @@
+{% set can_status   = has_perm('pickups_payments') %}
+{% set can_dash     = has_perm('dashboard') %}
+{% set can_bk       = has_perm('bookings_view') %}
+{% set can_bk_edit  = has_perm('bookings_edit') %}
+{% set can_pickup   = has_perm('pickups_payments') %}
+{% set can_rfp      = has_perm('pickups_payments') %}
+{% set can_rpt_k    = has_perm('reports_commission_kristin') %}
+{% set can_rpt_t    = has_perm('reports_commission_team') %}
+{% set can_rpt_pay  = has_perm('reports_payments') %}
+{% set can_rpt_cust = has_perm('reports_customer_summary') %}
+{% set can_rpt      = can_rpt_k or can_rpt_t or can_rpt_pay or can_rpt_cust %}
+{% set can_contacts = has_perm('pickups_payments') %}
+{% set can_imp_bk   = has_perm('import_bookings') %}
+{% set can_imp_pay  = has_perm('import_payments') %}
+{% set can_imp_hhr  = has_perm('import_hhr') %}
+{% set can_imp_can  = has_perm('import_cancelled') %}
+{% set can_imp      = can_imp_bk or can_imp_pay or can_imp_hhr or can_imp_can %}
+{% set can_admin    = has_perm('admin_panel') %}
+{% set can_contracts = has_perm('contracts') %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -241,14 +260,23 @@
   <nav>
     <a href="#overview"><i class="bi bi-house"></i> Overview</a>
     <a href="#login"><i class="bi bi-box-arrow-in-right"></i> Logging In</a>
-    <a href="#status-board"><i class="bi bi-clipboard2-check"></i> Status Board</a>
-    <a href="#dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
+    {% if can_status %}<a href="#status-board"><i class="bi bi-clipboard2-check"></i> Status Board</a>{% endif %}
+    {% if can_dash %}<a href="#dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>{% endif %}
 
+    {% if can_bk %}
     <div class="section-label">Bookings</div>
     <a href="#bookings-list"><i class="bi bi-list-ul"></i> Bookings List</a>
     <a href="#booking-detail"><i class="bi bi-file-text"></i> Booking Detail</a>
-    <a href="#booking-add"><i class="bi bi-plus-circle"></i> Add / Edit Booking</a>
+    {% if can_bk_edit %}<a href="#booking-add"><i class="bi bi-plus-circle"></i> Add / Edit Booking</a>{% endif %}
+    {% endif %}
 
+    {% if can_rfp %}
+    <div class="section-label">RFP Tracking</div>
+    <a href="#rfp-list"><i class="bi bi-clipboard2-check"></i> RFP List</a>
+    <a href="#rfp-detail"><i class="bi bi-clipboard2-data"></i> RFP Detail</a>
+    {% endif %}
+
+    {% if can_pickup %}
     <div class="section-label">Pickup Tracking</div>
     <a href="#pickup-dashboard"><i class="bi bi-graph-up"></i> Dashboard</a>
     <a href="#pickup-event"><i class="bi bi-calendar-check"></i> Event Detail</a>
@@ -257,21 +285,20 @@
     <a href="#pickup-email"><i class="bi bi-envelope"></i> Email Tools</a>
     <a href="#pickup-rooming"><i class="bi bi-people"></i> Rooming Lists</a>
     <a href="#pickup-flow"><i class="bi bi-diagram-3"></i> Workflow</a>
+    {% endif %}
 
-    <div class="section-label">RFP Tracking</div>
-    <a href="#rfp-list"><i class="bi bi-clipboard2-check"></i> RFP List</a>
-    <a href="#rfp-detail"><i class="bi bi-clipboard2-data"></i> RFP Detail</a>
-
+    {% if can_rpt %}
     <div class="section-label">Reports</div>
-    <a href="#report-missing"><i class="bi bi-exclamation-triangle"></i> Missing Pickup/Comm</a>
-    <a href="#report-payments"><i class="bi bi-cash-stack"></i> Payment Report</a>
-    <a href="#report-customer"><i class="bi bi-bar-chart"></i> Customer Summary</a>
+    {% if can_rpt_k or can_rpt_t %}<a href="#report-missing"><i class="bi bi-exclamation-triangle"></i> Missing Pickup/Comm</a>{% endif %}
+    {% if can_rpt_pay %}<a href="#report-payments"><i class="bi bi-cash-stack"></i> Payment Report</a>{% endif %}
+    {% if can_rpt_cust %}<a href="#report-customer"><i class="bi bi-bar-chart"></i> Customer Summary</a>{% endif %}
+    {% endif %}
 
     <div class="section-label">Tools</div>
-    <a href="#contacts"><i class="bi bi-person-lines-fill"></i> Contacts</a>
-    <a href="#import"><i class="bi bi-upload"></i> Import Tools</a>
-    <a href="#settings"><i class="bi bi-gear"></i> Settings</a>
-    <a href="#admin"><i class="bi bi-shield-lock"></i> User Management</a>
+    {% if can_contacts %}<a href="#contacts"><i class="bi bi-person-lines-fill"></i> Contacts</a>{% endif %}
+    {% if can_imp %}<a href="#import"><i class="bi bi-upload"></i> Import Tools</a>{% endif %}
+    {% if can_admin %}<a href="#settings"><i class="bi bi-gear"></i> Settings</a>{% endif %}
+    {% if can_admin %}<a href="#admin"><i class="bi bi-shield-lock"></i> User Management</a>{% endif %}
   </nav>
   <div class="back-link">
     <a href="/"><i class="bi bi-arrow-left me-1"></i> Back to App</a>
@@ -294,26 +321,41 @@
     <p>CPAinc is a private web application used by the Kristin House team to manage hotel booking commissions, hotel room block pickup tracking, RFPs, and financial reporting. Access is role-based — each user sees only the clients and tools they have been granted access to by an administrator.</p>
 
     <div class="mock-row" style="margin-top:18px;">
+      {% if can_status or can_dash %}
+      <div class="mock-card" style="flex:none;width:160px;text-align:center;">
+        <div style="font-size:2rem;">📋</div>
+        <div style="font-weight:700;font-size:.9rem;margin-top:6px;color:var(--navy)">{% if can_status %}Status Board{% else %}Dashboard{% endif %}</div>
+        <div style="font-size:.75rem;color:#666;margin-top:4px;">{% if can_status %}Your personal action-item dashboard{% else %}Commission snapshot{% endif %}</div>
+      </div>
+      {% endif %}
+      {% if can_bk %}
       <div class="mock-card" style="flex:none;width:160px;text-align:center;">
         <div style="font-size:2rem;">📋</div>
         <div style="font-weight:700;font-size:.9rem;margin-top:6px;color:var(--navy)">Bookings</div>
         <div style="font-size:.75rem;color:#666;margin-top:4px;">Track all hotel bookings and commissions</div>
       </div>
+      {% endif %}
+      {% if can_pickup %}
       <div class="mock-card" style="flex:none;width:160px;text-align:center;">
         <div style="font-size:2rem;">📈</div>
         <div style="font-weight:700;font-size:.9rem;margin-top:6px;color:var(--navy)">Pickup</div>
         <div style="font-size:.75rem;color:#666;margin-top:4px;">Monitor room block pickup pace weekly</div>
       </div>
+      {% endif %}
+      {% if can_rfp %}
       <div class="mock-card" style="flex:none;width:160px;text-align:center;">
         <div style="font-size:2rem;">📄</div>
         <div style="font-weight:700;font-size:.9rem;margin-top:6px;color:var(--navy)">RFPs</div>
         <div style="font-size:.75rem;color:#666;margin-top:4px;">Source and track hotel proposals</div>
       </div>
+      {% endif %}
+      {% if can_rpt %}
       <div class="mock-card" style="flex:none;width:160px;text-align:center;">
         <div style="font-size:2rem;">💰</div>
         <div style="font-weight:700;font-size:.9rem;margin-top:6px;color:var(--navy)">Reports</div>
         <div style="font-size:.75rem;color:#666;margin-top:4px;">Commission and payment reporting</div>
       </div>
+      {% endif %}
     </div>
   </div>
 
@@ -325,12 +367,12 @@
     <div class="screen">
       <div class="screen-bar">
         <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">CPAinc Pipeline — Login</span>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">CPAinc — Login</span>
         <span class="url">cpainc.railway.app/login</span>
       </div>
       <div class="mock-content" style="max-width:360px;margin:30px auto;">
         <div style="text-align:center;margin-bottom:24px;">
-          <div style="font-size:1.6rem;font-weight:700;color:var(--navy);">📋 CPAinc Pipeline</div>
+          <div style="font-size:1.6rem;font-weight:700;color:var(--navy);">📋 Conference Planning Associates Inc.</div>
           <div style="font-size:.85rem;color:#666;margin-top:4px;">ConferenceDirect</div>
         </div>
         <div style="margin-bottom:12px;">
@@ -345,10 +387,11 @@
       </div>
     </div>
 
-    <div class="callout info"><i class="bi bi-info-circle"></i><p>To log out, click your name in the top-right corner of the navigation bar and select <strong>Logout</strong>. If you forget your password, contact Peter Wann to have it reset.</p></div>
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>To log out, click your name in the top-right corner of the navigation bar and select <strong>Sign Out</strong>. If you forget your password, contact Peter Wann to have it reset.</p></div>
   </div>
 
-  <!-- ── 3. Status Board ───────────────────────────────────────────── -->
+  <!-- ── Status Board ───────────────────────────────────────────── -->
+  {% if can_status %}
   <div class="section" id="status-board">
     <div class="section-title"><i class="bi bi-clipboard2-check"></i> Status Board</div>
     <p>Click <strong>Status Board</strong> in the top navigation. This is your personal action-item dashboard — it scans all of your assigned accounts and surfaces bookings that need attention right now. Items are filtered to only the accounts you have access to.</p>
@@ -412,12 +455,14 @@
       <tr><td><strong>Ignore 1 month</strong></td><td>Hides the item for 30 days</td></tr>
       <tr><td><strong>Ignore 2 months</strong></td><td>Hides the item for 60 days</td></tr>
       <tr><td><strong>Custom date…</strong></td><td>A date picker appears — choose any future date to hide until</td></tr>
-      <tr><td><strong>Permanent</strong></td><td>Hides the item indefinitely (requires confirmation prompt)</td></tr>
+      <tr><td><strong>Permanent</strong></td><td>Hides the item indefinitely (requires a confirmation prompt)</td></tr>
     </table>
     <div class="callout info"><i class="bi bi-info-circle"></i><p>Items reappear automatically after the ignore period expires. Permanent ignores suppress an item forever but do not delete any data. Contact your administrator to clear a permanent ignore if needed.</p></div>
   </div>
+  {% endif %}
 
-  <!-- ── 4. Dashboard ────────────────────────────────────────────── -->
+  <!-- ── Dashboard ────────────────────────────────────────────── -->
+  {% if can_dash %}
   <div class="section" id="dashboard">
     <div class="section-title"><i class="bi bi-speedometer2"></i> Dashboard</div>
     <p>The Dashboard shows a financial snapshot of the current year's commission activity. Click <strong>Dashboard</strong> in the top navigation bar to access it.</p>
@@ -468,19 +513,19 @@
       <tr><td><span style="color:var(--danger);font-weight:600;">⛔ No Pickup Yet</span></td><td>Meeting ended, no pickup entered</td><td>Enter pickup data first</td></tr>
       <tr><td><span style="color:var(--navy);font-weight:600;">📅 Future / Unpaid</span></td><td>Meeting upcoming, no payment yet</td><td>Monitor progress</td></tr>
     </table>
-
-    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Click <strong>Kristin — Missing Commission</strong> or <strong>Team — Missing Commission</strong> on the Dashboard to jump directly to the unpaid bookings report.</p></div>
   </div>
+  {% endif %}
 
-  <!-- ── 4. Bookings ─────────────────────────────────────────────── -->
+  <!-- ── Bookings ─────────────────────────────────────────────── -->
+  {% if can_bk %}
   <div class="section" id="bookings-list">
     <div class="section-title"><i class="bi bi-list-ul"></i> Bookings List</div>
-    <p>Click <strong>Bookings</strong> in the top navigation to see all active hotel bookings. Non-admin users only see bookings for accounts assigned to them.</p>
+    <p>Click <strong>Bookings</strong> in the top navigation to see all active hotel bookings. You will only see bookings for accounts assigned to you.</p>
 
     <div class="screen">
       <div class="screen-bar">
         <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Bookings — CPAinc Pipeline</span>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Bookings — CPAinc</span>
         <span class="url">/</span>
       </div>
       <div class="mock-content">
@@ -494,7 +539,6 @@
           <thead><tr><th>Booking ID</th><th>Event Name</th><th>Account</th><th>Hotel</th><th>Associate</th><th>Start Date</th><th>Revenue</th><th>Status</th><th>Kristin's Comm</th></tr></thead>
           <tbody>
             <tr><td><span style="color:#1a3a5c;font-weight:600;">240505</span></td><td>NCSL 2026 Education Policy Forum</td><td>NCSL</td><td>DoubleTree Austin</td><td>Kristin House</td><td>05/31/2026</td><td>$44,620</td><td><span class="badge badge-success">Definite</span></td><td><strong>$2,186</strong></td></tr>
-            <tr><td><span style="color:#1a3a5c;font-weight:600;">240500</span></td><td>NCSL 2026 Roundtable</td><td>NCSL</td><td>AC Hotel Columbus</td><td>Kristin House</td><td>10/14/2026</td><td>$20,840</td><td><span class="badge badge-success">Definite</span></td><td><strong>$1,021</strong></td></tr>
             <tr><td><span style="color:#1a3a5c;font-weight:600;">196621</span></td><td>2026 IECA Annual Conference</td><td>IECA</td><td>Omni Fort Worth</td><td>Kristin House</td><td>02/27/2026</td><td>$403,072</td><td><span class="badge badge-success">Definite</span></td><td><strong>$28,215</strong></td></tr>
           </tbody>
         </table>
@@ -508,7 +552,6 @@
       <li><strong>Associate dropdown</strong> — filter to one associate's bookings</li>
       <li>Click <strong>Filter</strong> to apply, <strong>Clear</strong> to reset</li>
     </ul>
-
     <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Click any row to open the full booking detail page.</p></div>
   </div>
 
@@ -526,7 +569,7 @@
           <div style="color:#fff;font-size:1.1rem;font-weight:700;">NCSL 2026 Education Policy Forum</div>
           <div style="color:rgba(255,255,255,.6);font-size:.78rem;">DoubleTree Suites by Hilton Austin · Booking ID: <strong style="color:#fff">240505</strong></div>
         </div>
-        <div style="display:flex;gap:8px;"><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);">✏ Edit</span></div>
+        {% if can_bk_edit %}<div style="display:flex;gap:8px;"><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);">✏ Edit</span></div>{% endif %}
       </div>
       <div class="mock-content">
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;">
@@ -539,274 +582,39 @@
           <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Revenue</div><div style="font-weight:600;font-size:.85rem;margin-top:3px;">$44,620</div></div>
           <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">USD Commissionable</div><div style="font-weight:600;font-size:.85rem;margin-top:3px;">$3,123.40</div></div>
         </div>
-        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-          <span class="mock-btn outline" style="font-size:.75rem;">📎 Upload Contract</span>
-          <span class="mock-btn outline" style="font-size:.75rem;">+ Add Pickup</span>
-          <span class="mock-btn outline" style="font-size:.75rem;">+ Add Payment</span>
-        </div>
       </div>
     </div>
 
     <h3>What You'll Find on This Page</h3>
     <ul>
       <li><strong>Booking Details</strong> — all fields from the ConferenceDirect pipeline</li>
-      <li><strong>Contracts</strong> — upload and download contract documents</li>
+      {% if can_contracts %}<li><strong>Contracts</strong> — upload and download contract documents</li>{% endif %}
       <li><strong>Pickup Records</strong> — manually entered actual pickup data</li>
       <li><strong>Payments / Checks</strong> — payment history with check numbers and amounts</li>
     </ul>
   </div>
 
+  {% if can_bk_edit %}
   <div class="section" id="booking-add">
     <div class="section-title"><i class="bi bi-plus-circle"></i> Adding & Editing Bookings</div>
     <h3>Add a New Booking</h3>
     <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "New Booking"</strong><p>Found in the top navigation bar.</p></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "New Booking"</strong><p>Found under Bookings in the top navigation.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Fill in the booking fields</strong><p>Booking ID, event name, account, hotel, dates, room rate, commission %, and revenue.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click Save</strong><p>The booking is added and you're taken to the detail page.</p></div></div>
     </div>
     <div class="callout info"><i class="bi bi-info-circle"></i><p>Most bookings are added automatically via the <strong>Import Bookings</strong> tool. Only use New Booking for one-off entries not in the ConferenceDirect export.</p></div>
-
     <h3>Edit a Booking</h3>
     <p>Open the Booking Detail page and click <strong>Edit</strong> (top right). Update any field and save. Cancellation is also available from this button.</p>
   </div>
+  {% endif %}
+  {% endif %}{# end can_bk #}
 
-  <!-- ── 5. Pickup Tracking ──────────────────────────────────────── -->
-  <div class="section" id="pickup-dashboard">
-    <div class="section-title"><i class="bi bi-graph-up"></i> Pickup Tracking — Dashboard</div>
-    <p>Click <strong>Pickup Tracking</strong> in the top navigation. This is the main hub for monitoring hotel room block pickup across all active events.</p>
-
-    <div class="screen">
-      <div class="screen-bar">
-        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Pickup Tracking — CPAinc</span>
-        <span class="url">/pickup</span>
-      </div>
-      <div class="mock-content">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Pickup Tracking</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <span class="mock-btn primary" style="font-size:.74rem;">Fill Missing</span>
-            <span class="mock-btn primary" style="font-size:.74rem;">+ New Event</span>
-          </div>
-        </div>
-        <!-- Current Events header -->
-        <div style="background:var(--navy);color:#fff;padding:10px 14px;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-weight:600;">⚡ Current Events <span style="background:rgba(255,255,255,.2);border-radius:10px;padding:1px 8px;font-size:.78rem;margin-left:6px;">28</span></span>
-          <div style="display:flex;gap:6px;">
-            <span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.73rem;">By Date</span>
-            <span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.73rem;">By Customer</span>
-            <span class="mock-btn success" style="font-size:.73rem;">Customer Report</span>
-          </div>
-        </div>
-        <table class="mock-table" style="border-top:none;">
-          <thead style="background:#eaf0fb;"><tr><th>Booking ID</th><th>Event / Organization</th><th>Hotel</th><th>Start</th><th>Cutoff</th><th>Days Left</th><th>% Block</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            <tr>
-              <td>235042</td>
-              <td><div style="font-weight:600;font-size:.82rem;">NCSL 2026 Spring Task Force</div><div style="font-size:.72rem;color:#888;">National Conference of State Legislatures</div></td>
-              <td>Sheraton Centre Toronto</td><td>05/13/2026</td><td>05/16/2026</td>
-              <td><strong style="color:var(--danger);">7d</strong></td>
-              <td><div>0.7%</div><div class="mock-pace-bar"><div class="fill" style="width:1%;background:var(--danger);"></div></div></td>
-              <td><span class="badge badge-danger">At Risk</span></td>
-              <td><span class="mock-btn primary" style="font-size:.72rem;">Pickup History</span></td>
-            </tr>
-            <tr>
-              <td>238418</td>
-              <td><div style="font-weight:600;font-size:.82rem;">NCSL Forensics Forum</div><div style="font-size:.72rem;color:#888;">National Conference of State Legislatures</div></td>
-              <td>Brickell Arch</td><td>05/26/2026</td><td>05/29/2026</td>
-              <td>20d</td>
-              <td><span style="color:#888;">—</span></td>
-              <td><span class="badge" style="background:#e9ecef;color:#666;">No data</span></td>
-              <td><span class="mock-btn primary" style="font-size:.72rem;">Pickup History</span></td>
-            </tr>
-            <tr>
-              <td>196621</td>
-              <td><div style="font-weight:600;font-size:.82rem;">2026 IECA Annual Conference</div><div style="font-size:.72rem;color:#888;">International Erosion Control Association</div></td>
-              <td>Omni Fort Worth</td><td>02/27/2026</td><td>01/15/2026</td>
-              <td>—</td>
-              <td><div>82.5%</div><div class="mock-pace-bar"><div class="fill" style="width:82%;background:var(--success);"></div></div></td>
-              <td><span class="badge badge-success">On Pace</span></td>
-              <td><span class="mock-btn primary" style="font-size:.72rem;">Pickup History</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <h3>Dashboard Sections</h3>
-    <table class="info-table">
-      <tr><th>Section</th><th>What It Shows</th></tr>
-      <tr><td><strong>⚡ Current Events</strong></td><td>Events starting within the next ~120 days that are actively being tracked</td></tr>
-      <tr><td><strong>Past Events</strong></td><td>Events that have ended or been moved to past manually</td></tr>
-      <tr><td><strong>Future Events</strong></td><td>Events starting more than ~120 days out — visible for planning</td></tr>
-      <tr><td><strong>Archived</strong></td><td>Events fully closed out and archived</td></tr>
-    </table>
-
-    <h3>Pace Status Badges</h3>
-    <div class="pill-grid">
-      <span class="pill" style="background:#d1f0e0;color:var(--success);"><i class="bi bi-check-circle"></i> On Pace — ≥ 80% of block picked up</span>
-      <span class="pill" style="background:#fff3cd;color:#856404;"><i class="bi bi-exclamation-circle"></i> Watch — 60–79% of block</span>
-      <span class="pill" style="background:#f8d7da;color:var(--danger);"><i class="bi bi-x-circle"></i> At Risk — below 60%</span>
-      <span class="pill" style="background:#e9ecef;color:#666;"><i class="bi bi-dash-circle"></i> No Data — no reports yet</span>
-    </div>
-
-    <h3>Toolbar Buttons</h3>
-    <table class="info-table">
-      <tr><th>Button</th><th>What It Does</th></tr>
-      <tr><td><strong>Fill Missing</strong></td><td>Creates placeholder pickup tracking records for Kristin's bookings within your assigned accounts that don't yet have a tracking record — saves you from having to enter them one by one</td></tr>
-      <tr><td><strong>New Event</strong></td><td>Manually create a new pickup tracking record for an event</td></tr>
-    </table>
-
-    <h3>Sticky Column Header</h3>
-    <p>When you scroll down on the Pickup Tracking page, the column header row (Booking ID, Event / Organisation, Hotel, etc.) automatically stays pinned near the top of the screen so you always know which column you're reading. The header follows as you scroll both vertically and horizontally.</p>
-  </div>
-
-  <div class="section" id="pickup-event">
-    <div class="section-title"><i class="bi bi-calendar-check"></i> Pickup Event Detail</div>
-    <p>Click any event name or the <strong>Pickup History</strong> button from the dashboard to open the full event detail page.</p>
-
-    <div class="screen">
-      <div class="screen-bar">
-        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">2026 IECA Annual Conference — Pickup</span>
-        <span class="url">/pickup/12</span>
-      </div>
-      <div style="background:var(--navy);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
-        <div style="color:#fff;font-size:1rem;font-weight:700;">2026 IECA Annual Conference</div>
-        <div style="display:flex;gap:6px;"><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.74rem;">✏ Edit</span><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.74rem;">Archive</span></div>
-      </div>
-      <div class="mock-content">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;">
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Organization</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">International Erosion Control Association</div></div>
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Hotel</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">Omni Fort Worth Hotel</div></div>
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Contracted Rate</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">$224.81</div></div>
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Cutoff Date</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">01/15/2026</div></div>
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Attrition %</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">80% (1,408 rooms required)</div></div>
-          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Hotel Contact</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;color:#1a3a5c;">sarah@omnifw.com</div></div>
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-          <span class="mock-btn primary" style="font-size:.75rem;">+ Add Weekly Entry</span>
-          <span class="mock-btn outline" style="font-size:.75rem;">⬆ Upload Rooming List</span>
-          <span class="mock-btn warning" style="font-size:.75rem;">🏁 Enter Final History</span>
-          <span class="mock-btn outline" style="font-size:.75rem;">📤 Export Row</span>
-          <span style="margin-left:auto;display:flex;gap:6px;">
-            <span class="mock-btn primary" style="font-size:.75rem;">✉ Email Hotel</span>
-            <span class="mock-btn primary" style="font-size:.75rem;">✉ Email Client</span>
-          </span>
-        </div>
-        <div style="background:var(--navy);color:#fff;padding:8px 14px;border-radius:6px 6px 0 0;font-weight:600;font-size:.85rem;">Weekly Pickup History</div>
-        <table class="mock-table" style="border-top:none;">
-          <thead><tr><th>Report Date</th><th>Total Rooms</th><th>% of Block</th><th>% of Attrition</th></tr></thead>
-          <tbody>
-            <tr><td>05/06/2026</td><td>1,438</td><td><strong style="color:var(--success)">81.7%</strong></td><td>102.1%</td></tr>
-            <tr><td>04/29/2026</td><td>1,402</td><td>79.7%</td><td>99.6%</td></tr>
-            <tr><td>04/22/2026</td><td>1,356</td><td>77.0%</td><td>96.3%</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <h3>Page Sections</h3>
-    <ul>
-      <li><strong>Event Info</strong> — hotel, organization, contracted block by night, cutoff, attrition %, rate, contacts</li>
-      <li><strong>Weekly Pickup History</strong> — all weekly reports with total rooms, % of block, % of attrition</li>
-      <li><strong>Pace Chart</strong> — visual graph of pickup over time vs. contracted block</li>
-      <li><strong>Rooming List History</strong> — all uploaded rooming lists</li>
-      <li><strong>Hotel Contact Log</strong> — log of all contact attempts and responses</li>
-    </ul>
-
-    <div class="callout info"><i class="bi bi-buildings"></i><p><strong>Multi-Hotel Events:</strong> If an event spans multiple hotels, a blue banner appears with a link to the <strong>Combined Event Report</strong> showing pickup across all hotels together.</p></div>
-  </div>
-
-  <div class="section" id="pickup-weekly">
-    <div class="section-title"><i class="bi bi-pencil-square"></i> Adding Weekly Pickup Reports</div>
-    <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the Event Detail page</strong><p>Click the event name or Pickup History button from the dashboard.</p></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "+ Add Weekly Entry"</strong><p>Found in the button bar near the top of the page.</p></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Enter the Report Date</strong><p>The date you received or recorded this pickup snapshot.</p></div></div>
-      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Enter pickup by night</strong><p>For each date in the hotel block, enter how many rooms have been picked up. The system calculates the total and % of block automatically.</p></div></div>
-      <div class="step"><div class="step-num">5</div><div class="step-body"><strong>Click Save</strong><p>The report appears in the Weekly Pickup History table.</p></div></div>
-    </div>
-    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>You can also <strong>import pickup directly from Excel</strong> using the Import Excel button on the main dashboard — useful when hotels send pickup reports in spreadsheet format.</p></div>
-  </div>
-
-  <div class="section" id="pickup-customer-report">
-    <div class="section-title"><i class="bi bi-file-earmark-spreadsheet"></i> Customer Report (Excel)</div>
-    <p>Generates a professional multi-tab Excel file to send to customers showing their event pickup pace.</p>
-
-    <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Customer Report"</strong><p>Found in the top-right of the Current Events section on the Pickup dashboard.</p></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Select customers and events</strong><p>Check/uncheck organisations and individual events. Use Select All / Clear All for bulk changes. Search the list to find specific clients.</p></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click "Generate Report"</strong><p>Downloads an Excel file with:<br>• <strong>Tab 1 — Summary</strong> sorted by customer<br>• <strong>One tab per event</strong> in the standard Pick-Up Update format</p></div></div>
-    </div>
-
-    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Sort the Current Events list <strong>By Customer</strong> before generating to see events grouped the same way they'll appear in the report.</p></div>
-  </div>
-
-  <div class="section" id="pickup-email">
-    <div class="section-title"><i class="bi bi-envelope"></i> Email Tools</div>
-    <p>From any Pickup Event Detail page, three email buttons let you generate pre-formatted messages:</p>
-    <table class="info-table">
-      <tr><th>Button</th><th>Sent To</th><th>Purpose</th></tr>
-      <tr><td><strong>Email Hotel</strong></td><td>Hotel contact on file</td><td>Request a pickup report from the hotel</td></tr>
-      <tr><td><strong>Email Client</strong></td><td>Association/client contact</td><td>Send pickup update to the client</td></tr>
-      <tr><td><strong>Email Hotel HHR</strong></td><td>Hotel contact</td><td>Request the Housing History Report after cutoff</td></tr>
-      <tr><td><strong>Post-Report Email</strong></td><td>Client</td><td>Send final summary after cutoff with actual results</td></tr>
-    </table>
-    <p>Each button opens a preview of the email. You can <strong>Launch Outlook</strong> to send directly, or use the <strong>Copy/Paste Instructions</strong> option to manually compose the email.</p>
-  </div>
-
-  <div class="section" id="pickup-rooming">
-    <div class="section-title"><i class="bi bi-people"></i> Rooming Lists</div>
-    <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Upload Rooming List"</strong><p>From the Pickup Event Detail page.</p></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Upload your file</strong><p>Accepts Excel (.xlsx) or CSV formats. You can also enter the rooming list manually.</p></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review the parsed list</strong><p>The system shows you the guest names and room details extracted from the file. Correct any errors.</p></div></div>
-      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Confirm and Download</strong><p>Confirm the rooming list and download a cleaned CSV to send to the hotel.</p></div></div>
-    </div>
-  </div>
-
-  <div class="section" id="pickup-flow">
-    <div class="section-title"><i class="bi bi-diagram-3"></i> Pickup Tracking Workflow</div>
-    <p>Here's how a typical event moves through the pickup tracking process:</p>
-    <div class="flowchart-wrap">
-      <div class="flowchart-title">End-to-End Pickup Workflow</div>
-      <div class="mermaid">
-flowchart TD
-    A([📋 New Booking Confirmed]) --> B[Create Pickup Config\nor Import from Pipeline]
-    B --> C{Has contracted\nblock data?}
-    C -- No --> D[Enter block by night\nin Edit Config]
-    C -- Yes --> E[Event appears in\nCurrent Events dashboard]
-    D --> E
-    E --> F[Weekly: Request pickup\nreport from hotel]
-    F --> G[Enter weekly pickup\nvia Add Weekly Entry\nor Import Excel]
-    G --> H{Check pace status}
-    H -- On Pace ✅ --> I[Continue monitoring]
-    H -- At Risk ⛔ --> J[Contact client\nEmail Client button]
-    I --> K{Cutoff date reached?}
-    J --> K
-    K -- Not yet --> F
-    K -- Yes --> L[Request HHR from hotel\nEmail Hotel HHR button]
-    L --> M[Receive Housing History\nReport from hotel]
-    M --> N[Import HHR\nEnter Final History]
-    N --> O[Event moves to Past Events]
-    O --> P[Commission payment received?]
-    P -- Yes --> Q([✅ Booking Complete\nMark in Payment Report])
-    P -- No --> R[Follow up via\nMissing Pickup/Comm Report]
-    R --> P
-
-    style A fill:#1a3a5c,color:#fff
-    style Q fill:#198754,color:#fff
-    style H fill:#fff3cd,color:#333
-    style K fill:#fff3cd,color:#333
-      </div>
-    </div>
-  </div>
-
-  <!-- ── 6. RFP Tracking ──────────────────────────────────────────── -->
+  <!-- ── RFP Tracking ──────────────────────────────────────────── -->
+  {% if can_rfp %}
   <div class="section" id="rfp-list">
     <div class="section-title"><i class="bi bi-clipboard2-check"></i> RFP Tracking — List</div>
-    <p>Click <strong>RFP Tracking</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events.</p>
+    <p>Click <strong>RFP's</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events. You will only see RFPs for your assigned accounts.</p>
 
     <div class="screen">
       <div class="screen-bar">
@@ -866,21 +674,238 @@ flowchart LR
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Upload the RFP document</strong><p>(Optional) Attach the RFP file for reference.</p></div></div>
       <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Save</strong><p>You're taken to the RFP Detail page to add hotels.</p></div></div>
     </div>
-
     <h3>Adding Hotels to an RFP</h3>
     <p>From the RFP Detail page, click <strong>+ Add Hotel</strong> to add each property being considered. Fill in hotel name, contact details, proposed rate, commission %, attrition %, cutoff days, and F&amp;B minimum.</p>
-
-    <h3>Import CRF</h3>
-    <p>If you have a ConferenceDirect CRF (Compete for Revenue Form), click <strong>Import CRF</strong> to automatically populate hotel details from the document.</p>
-
     <h3>Archiving an RFP</h3>
     <p>When an RFP is complete (won or lost), click <strong>Archive</strong> from the detail page. Archived RFPs are accessible by clicking <strong>Show Archived</strong> on the RFP list.</p>
   </div>
+  {% endif %}{# end can_rfp #}
 
-  <!-- ── 7. Reports ──────────────────────────────────────────────── -->
+  <!-- ── Pickup Tracking ──────────────────────────────────────── -->
+  {% if can_pickup %}
+  <div class="section" id="pickup-dashboard">
+    <div class="section-title"><i class="bi bi-graph-up"></i> Pickup Tracking — Dashboard</div>
+    <p>Click <strong>Pickup RPT/TRK</strong> in the top navigation. This is the main hub for monitoring hotel room block pickup across all active events.</p>
+
+    <div class="screen">
+      <div class="screen-bar">
+        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Pickup Tracking — CPAinc</span>
+        <span class="url">/pickup</span>
+      </div>
+      <div class="mock-content">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Pickup Tracking</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <span class="mock-btn primary" style="font-size:.74rem;">Fill Missing</span>
+            <span class="mock-btn primary" style="font-size:.74rem;">+ New Event</span>
+          </div>
+        </div>
+        <div style="background:var(--navy);color:#fff;padding:10px 14px;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-weight:600;">⚡ Current Events <span style="background:rgba(255,255,255,.2);border-radius:10px;padding:1px 8px;font-size:.78rem;margin-left:6px;">28</span></span>
+          <div style="display:flex;gap:6px;">
+            <span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.73rem;">By Date</span>
+            <span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.73rem;">By Customer</span>
+            <span class="mock-btn primary" style="font-size:.73rem;">Customer Report</span>
+          </div>
+        </div>
+        <table class="mock-table" style="border-top:none;">
+          <thead style="background:#eaf0fb;"><tr><th>Booking ID</th><th>Event / Organization</th><th>Hotel</th><th>Start</th><th>Cutoff</th><th>Days Left</th><th>% Block</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr>
+              <td>235042</td>
+              <td><div style="font-weight:600;font-size:.82rem;">NCSL 2026 Spring Task Force</div><div style="font-size:.72rem;color:#888;">National Conference of State Legislatures</div></td>
+              <td>Sheraton Centre Toronto</td><td>05/13/2026</td><td>05/16/2026</td>
+              <td><strong style="color:var(--danger);">7d</strong></td>
+              <td><div>0.7%</div><div class="mock-pace-bar"><div class="fill" style="width:1%;background:var(--danger);"></div></div></td>
+              <td><span class="badge badge-danger">At Risk</span></td>
+              <td><span class="mock-btn primary" style="font-size:.72rem;">Pickup History</span></td>
+            </tr>
+            <tr>
+              <td>196621</td>
+              <td><div style="font-weight:600;font-size:.82rem;">2026 IECA Annual Conference</div><div style="font-size:.72rem;color:#888;">International Erosion Control Association</div></td>
+              <td>Omni Fort Worth</td><td>02/27/2026</td><td>01/15/2026</td>
+              <td>—</td>
+              <td><div>82.5%</div><div class="mock-pace-bar"><div class="fill" style="width:82%;background:var(--success);"></div></div></td>
+              <td><span class="badge badge-success">On Pace</span></td>
+              <td><span class="mock-btn primary" style="font-size:.72rem;">Pickup History</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h3>Dashboard Sections</h3>
+    <table class="info-table">
+      <tr><th>Section</th><th>What It Shows</th></tr>
+      <tr><td><strong>⚡ Current Events</strong></td><td>Events starting within the next ~120 days that are actively being tracked</td></tr>
+      <tr><td><strong>Past Events</strong></td><td>Events that have ended or been moved to past manually</td></tr>
+      <tr><td><strong>Future Events</strong></td><td>Events starting more than ~120 days out — visible for planning</td></tr>
+      <tr><td><strong>Archived</strong></td><td>Events fully closed out and archived</td></tr>
+    </table>
+
+    <h3>Pace Status Badges</h3>
+    <div class="pill-grid">
+      <span class="pill" style="background:#d1f0e0;color:var(--success);"><i class="bi bi-check-circle"></i> On Pace — ≥ 80% of block picked up</span>
+      <span class="pill" style="background:#fff3cd;color:#856404;"><i class="bi bi-exclamation-circle"></i> Watch — 60–79% of block</span>
+      <span class="pill" style="background:#f8d7da;color:var(--danger);"><i class="bi bi-x-circle"></i> At Risk — below 60%</span>
+      <span class="pill" style="background:#e9ecef;color:#666;"><i class="bi bi-dash-circle"></i> No Data — no reports yet</span>
+    </div>
+
+    <h3>Toolbar Buttons</h3>
+    <table class="info-table">
+      <tr><th>Button</th><th>What It Does</th></tr>
+      <tr><td><strong>Fill Missing</strong></td><td>Creates placeholder pickup tracking records for Kristin's bookings within your assigned accounts that don't yet have a tracking record</td></tr>
+      <tr><td><strong>New Event</strong></td><td>Manually create a new pickup tracking record for an event</td></tr>
+    </table>
+
+    <h3>Sticky Column Header</h3>
+    <p>When you scroll down on the Pickup Tracking page, the column header row automatically stays pinned near the top of the screen. The header follows as you scroll both vertically and horizontally so you always know which column you're reading.</p>
+  </div>
+
+  <div class="section" id="pickup-event">
+    <div class="section-title"><i class="bi bi-calendar-check"></i> Pickup Event Detail</div>
+    <p>Click any event name or the <strong>Pickup History</strong> button from the dashboard to open the full event detail page.</p>
+
+    <div class="screen">
+      <div class="screen-bar">
+        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">2026 IECA Annual Conference — Pickup</span>
+        <span class="url">/pickup/12</span>
+      </div>
+      <div style="background:var(--navy);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="color:#fff;font-size:1rem;font-weight:700;">2026 IECA Annual Conference</div>
+        <div style="display:flex;gap:6px;"><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.74rem;">✏ Edit</span><span class="mock-btn outline" style="color:#fff;border-color:rgba(255,255,255,.4);font-size:.74rem;">Archive</span></div>
+      </div>
+      <div class="mock-content">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;">
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Organization</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">International Erosion Control Association</div></div>
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Hotel</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">Omni Fort Worth Hotel</div></div>
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Contracted Rate</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">$224.81</div></div>
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Cutoff Date</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">01/15/2026</div></div>
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Attrition %</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;">80% (1,408 rooms required)</div></div>
+          <div><div style="font-size:.65rem;color:#888;text-transform:uppercase;">Hotel Contact</div><div style="font-weight:600;font-size:.82rem;margin-top:3px;color:#1a3a5c;">sarah@omnifw.com</div></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+          <span class="mock-btn primary" style="font-size:.75rem;">+ Add Weekly Entry</span>
+          <span class="mock-btn outline" style="font-size:.75rem;">⬆ Upload Rooming List</span>
+          <span class="mock-btn warning" style="font-size:.75rem;">🏁 Enter Final History</span>
+          <span style="margin-left:auto;display:flex;gap:6px;">
+            <span class="mock-btn primary" style="font-size:.75rem;">✉ Email Hotel</span>
+            <span class="mock-btn primary" style="font-size:.75rem;">✉ Email Client</span>
+          </span>
+        </div>
+        <div style="background:var(--navy);color:#fff;padding:8px 14px;border-radius:6px 6px 0 0;font-weight:600;font-size:.85rem;">Weekly Pickup History</div>
+        <table class="mock-table" style="border-top:none;">
+          <thead><tr><th>Report Date</th><th>Total Rooms</th><th>% of Block</th><th>% of Attrition</th></tr></thead>
+          <tbody>
+            <tr><td>05/06/2026</td><td>1,438</td><td><strong style="color:var(--success)">81.7%</strong></td><td>102.1%</td></tr>
+            <tr><td>04/29/2026</td><td>1,402</td><td>79.7%</td><td>99.6%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <h3>Page Sections</h3>
+    <ul>
+      <li><strong>Event Info</strong> — hotel, organization, contracted block by night, cutoff, attrition %, rate, contacts</li>
+      <li><strong>Weekly Pickup History</strong> — all weekly reports with total rooms, % of block, % of attrition</li>
+      <li><strong>Pace Chart</strong> — visual graph of pickup over time vs. contracted block</li>
+      <li><strong>Rooming List History</strong> — all uploaded rooming lists</li>
+      <li><strong>Hotel Contact Log</strong> — log of all contact attempts and responses</li>
+    </ul>
+    <div class="callout info"><i class="bi bi-buildings"></i><p><strong>Multi-Hotel Events:</strong> If an event spans multiple hotels, a blue banner appears with a link to the <strong>Combined Event Report</strong> showing pickup across all hotels together.</p></div>
+  </div>
+
+  <div class="section" id="pickup-weekly">
+    <div class="section-title"><i class="bi bi-pencil-square"></i> Adding Weekly Pickup Reports</div>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the Event Detail page</strong><p>Click the event name or Pickup History button from the dashboard.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "+ Add Weekly Entry"</strong><p>Found in the button bar near the top of the page.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Enter the Report Date</strong><p>The date you received or recorded this pickup snapshot.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Enter pickup by night</strong><p>For each date in the hotel block, enter how many rooms have been picked up. The system calculates the total and % of block automatically.</p></div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-body"><strong>Click Save</strong><p>The report appears in the Weekly Pickup History table.</p></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="pickup-customer-report">
+    <div class="section-title"><i class="bi bi-file-earmark-spreadsheet"></i> Customer Report (Excel)</div>
+    <p>Generates a professional multi-tab Excel file to send to customers showing their event pickup pace.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Customer Report"</strong><p>Found in the top-right of the Current Events section on the Pickup dashboard.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Select customers and events</strong><p>Check/uncheck organisations and individual events. Use Select All / Clear All for bulk changes.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click "Generate Report"</strong><p>Downloads an Excel file with Tab 1 (Summary sorted by customer) plus one tab per event in the standard Pick-Up Update format.</p></div></div>
+    </div>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Sort the Current Events list <strong>By Customer</strong> before generating to see events grouped the same way they'll appear in the report.</p></div>
+  </div>
+
+  <div class="section" id="pickup-email">
+    <div class="section-title"><i class="bi bi-envelope"></i> Email Tools</div>
+    <p>From any Pickup Event Detail page, email buttons let you generate pre-formatted messages:</p>
+    <table class="info-table">
+      <tr><th>Button</th><th>Sent To</th><th>Purpose</th></tr>
+      <tr><td><strong>Email Hotel</strong></td><td>Hotel contact on file</td><td>Request a pickup report from the hotel</td></tr>
+      <tr><td><strong>Email Client</strong></td><td>Association/client contact</td><td>Send pickup update to the client</td></tr>
+      <tr><td><strong>Email Hotel HHR</strong></td><td>Hotel contact</td><td>Request the Housing History Report after cutoff</td></tr>
+      <tr><td><strong>Post-Report Email</strong></td><td>Client</td><td>Send final summary after cutoff with actual results</td></tr>
+    </table>
+    <p>Each button opens a preview of the email. You can <strong>Launch Outlook</strong> to send directly, or copy/paste the text manually.</p>
+  </div>
+
+  <div class="section" id="pickup-rooming">
+    <div class="section-title"><i class="bi bi-people"></i> Rooming Lists</div>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Upload Rooming List"</strong><p>From the Pickup Event Detail page.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Upload your file</strong><p>Accepts Excel (.xlsx) or CSV formats. You can also enter the rooming list manually.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review the parsed list</strong><p>The system shows you the guest names and room details extracted from the file.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Confirm and Download</strong><p>Confirm the rooming list and download a cleaned CSV to send to the hotel.</p></div></div>
+    </div>
+  </div>
+
+  <div class="section" id="pickup-flow">
+    <div class="section-title"><i class="bi bi-diagram-3"></i> Pickup Tracking Workflow</div>
+    <p>Here's how a typical event moves through the pickup tracking process:</p>
+    <div class="flowchart-wrap">
+      <div class="flowchart-title">End-to-End Pickup Workflow</div>
+      <div class="mermaid">
+flowchart TD
+    A([📋 New Booking Confirmed]) --> B[Create Pickup Config\nor Use Fill Missing]
+    B --> C{Has contracted\nblock data?}
+    C -- No --> D[Enter block by night\nin Edit Config]
+    C -- Yes --> E[Event appears in\nCurrent Events dashboard]
+    D --> E
+    E --> F[Weekly: Request pickup\nreport from hotel]
+    F --> G[Enter weekly pickup\nvia Add Weekly Entry]
+    G --> H{Check pace status}
+    H -- On Pace ✅ --> I[Continue monitoring]
+    H -- At Risk ⛔ --> J[Contact client\nEmail Client button]
+    I --> K{Cutoff date reached?}
+    J --> K
+    K -- Not yet --> F
+    K -- Yes --> L[Request HHR from hotel\nEmail Hotel HHR button]
+    L --> M[Receive Housing History\nReport from hotel]
+    M --> N[Enter Final History]
+    N --> O[Event moves to Past Events]
+    O --> P[Commission payment received?]
+    P -- Yes --> Q([✅ Booking Complete])
+    P -- No --> R[Follow up via\nMissing Pickup/Comm Report]
+    R --> P
+
+    style A fill:#1a3a5c,color:#fff
+    style Q fill:#198754,color:#fff
+    style H fill:#fff3cd,color:#333
+    style K fill:#fff3cd,color:#333
+      </div>
+    </div>
+  </div>
+  {% endif %}{# end can_pickup #}
+
+  <!-- ── Reports ──────────────────────────────────────────────── -->
+  {% if can_rpt %}
+  {% if can_rpt_k or can_rpt_t %}
   <div class="section" id="report-missing">
     <div class="section-title"><i class="bi bi-exclamation-triangle"></i> Missing Pickup / Comm Report</div>
-    <p>Found under <strong>Reports → Missing Commission</strong>. Shows bookings within a date range that have not received a commission payment — either because pickup data is missing or the check hasn't arrived.</p>
+    <p>Found under <strong>Reports</strong> in the navigation. Shows bookings within a date range that have not received a commission payment.</p>
 
     <div class="screen">
       <div class="screen-bar">
@@ -889,7 +914,7 @@ flowchart LR
         <span class="url">/reports/commission</span>
       </div>
       <div class="mock-content">
-        <div style="font-size:1.1rem;font-weight:700;color:var(--navy);margin-bottom:12px;">Kristin House — Missing Commission</div>
+        <div style="font-size:1.1rem;font-weight:700;color:var(--navy);margin-bottom:12px;">{% if can_rpt_k %}Kristin House{% else %}Team{% endif %} — Missing Commission</div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
           <div><label style="font-size:.75rem;color:#666;display:block;">Start Date From</label><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.8rem;">01/01/2026</div></div>
           <div><label style="font-size:.75rem;color:#666;display:block;">Start Date To</label><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.8rem;">12/31/2026</div></div>
@@ -898,22 +923,22 @@ flowchart LR
         <div class="mock-row">
           <div class="mock-card"><div class="label">Bookings</div><div class="value">79</div></div>
           <div class="mock-card"><div class="label">Unpaid</div><div class="value red">71</div></div>
-          <div class="mock-card"><div class="label">Paid / Future</div><div class="value orange">8</div></div>
           <div class="mock-card"><div class="label">Est. Commission</div><div class="value" style="font-size:1rem;">$403,912</div></div>
           <div class="mock-card"><div class="label">Actual Commission</div><div class="value green" style="font-size:1rem;">$49,004</div></div>
         </div>
       </div>
     </div>
 
-    <h3>How to Use</h3>
     <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Select Kristin or Team</strong><p>Via the URL: <code>?who=kristin</code> or <code>?who=team</code>, or use the links on the Dashboard.</p></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>{% if can_rpt_k and can_rpt_t %}Select Kristin or Team view{% elif can_rpt_k %}Access Kristin's report{% else %}Access Team report{% endif %}</strong><p>Use the link from the Reports menu.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Enter a date range</strong><p>These are meeting <em>start dates</em> — enter the range of meetings you want to review.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click "Run Report"</strong><p>The table shows each unpaid booking with estimated and actual commission.</p></div></div>
       <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Export to Excel</strong><p>Click <strong>Export XLSX</strong> to download the full report for sharing or follow-up.</p></div></div>
     </div>
   </div>
+  {% endif %}
 
+  {% if can_rpt_pay %}
   <div class="section" id="report-payments">
     <div class="section-title"><i class="bi bi-cash-stack"></i> Payment Report</div>
     <p>Shows all commission checks received within a date range. Found under <strong>Reports → Payment Report</strong>.</p>
@@ -927,7 +952,6 @@ flowchart LR
       <div class="mock-content">
         <div class="mock-row" style="margin-bottom:8px;">
           <div class="mock-card"><div class="label">Payments</div><div class="value">192</div></div>
-          <div class="mock-card"><div class="label">Future Meetings</div><div class="value orange">17</div></div>
           <div class="mock-card"><div class="label">Out of Tolerance</div><div class="value red">56</div></div>
           <div class="mock-card"><div class="label">Total Payments</div><div class="value green" style="font-size:1rem;">$251,026</div></div>
           <div class="mock-card"><div class="label">Actual Commission</div><div class="value" style="font-size:1rem;">$357,470</div></div>
@@ -940,22 +964,25 @@ flowchart LR
       </div>
     </div>
 
-    <h3>Reading the Report</h3>
     <table class="info-table">
       <tr><th>Highlight</th><th>Meaning</th></tr>
-      <tr><td><span style="background:#fff3cd;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:600;">Future Meeting</span></td><td>Payment received but the meeting hasn't happened yet (incentive/advance payment)</td></tr>
+      <tr><td><span style="background:#fff3cd;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:600;">Future Meeting</span></td><td>Payment received but the meeting hasn't happened yet (advance/incentive payment)</td></tr>
       <tr><td><span style="background:#f8d7da;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:600;color:var(--danger)">Underpaid</span></td><td>Payment received is more than the tolerance % below the calculated actual commission — follow up needed</td></tr>
-      <tr><td><strong>Difference column in red</strong></td><td>The gap between what was paid and what the commission should be</td></tr>
     </table>
-    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>The <strong>payment tolerance</strong> threshold (currently 2%) is set in <a href="#settings">Settings</a>. Payments within this % of actual commission are considered correct and not flagged.</p></div>
+    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>The <strong>payment tolerance</strong> threshold is set in Settings. Payments within this % of actual commission are considered correct and not flagged.</p></div>
   </div>
+  {% endif %}
 
+  {% if can_rpt_cust %}
   <div class="section" id="report-customer">
     <div class="section-title"><i class="bi bi-bar-chart"></i> Customer Summary Report</div>
     <p>Found under <strong>Reports → Customer Summary</strong>. Provides a high-level view of activity grouped by client organisation — showing total bookings, revenue, and commission estimates by account. Useful for quarterly reviews.</p>
   </div>
+  {% endif %}
+  {% endif %}{# end can_rpt #}
 
-  <!-- ── 8. Contacts ─────────────────────────────────────────────── -->
+  <!-- ── Contacts ─────────────────────────────────────────────── -->
+  {% if can_contacts %}
   <div class="section" id="contacts">
     <div class="section-title"><i class="bi bi-person-lines-fill"></i> Contacts</div>
     <p>Click <strong>Contacts</strong> in the navigation to manage two directories used throughout the app for auto-filling email and contact fields.</p>
@@ -987,40 +1014,25 @@ flowchart LR
       <tr><td><strong>Hotel Contacts</strong></td><td>Hotel sales and catering managers</td><td>Hotel emails and pickup requests</td></tr>
     </table>
   </div>
+  {% endif %}
 
-  <!-- ── 9. Import Tools ─────────────────────────────────────────── -->
+  <!-- ── Import Tools ─────────────────────────────────────────── -->
+  {% if can_imp %}
   <div class="section" id="import">
     <div class="section-title"><i class="bi bi-upload"></i> Import Tools</div>
     <p>All import tools are found under the <strong>Import</strong> menu in the navigation. Imports add or update records — they do not delete existing data.</p>
 
-    <div class="screen">
-      <div class="screen-bar">
-        <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Import Bookings — CPAinc</span>
-        <span class="url">/import</span>
-      </div>
-      <div class="mock-content" style="max-width:440px;">
-        <div style="font-size:1rem;font-weight:700;color:var(--navy);margin-bottom:14px;">Import Bookings</div>
-        <div style="background:var(--navy);color:#fff;padding:10px 14px;border-radius:6px 6px 0 0;font-weight:600;font-size:.85rem;">Upload Event Bookings File</div>
-        <div style="border:1px solid #dee2e6;border-top:none;border-radius:0 0 6px 6px;padding:16px;">
-          <div style="font-size:.8rem;color:#666;margin-bottom:12px;">Supports the standard Event Bookings Report format (.xls, .xlsx, or .csv). Duplicate Booking IDs will be skipped automatically.</div>
-          <div style="border:1px solid #ccc;border-radius:5px;padding:9px 12px;font-size:.8rem;color:#999;margin-bottom:12px;">No file chosen</div>
-          <div style="font-size:.73rem;color:#888;margin-bottom:12px;">Accepted formats: .xls, .xlsx, .csv</div>
-          <div style="display:flex;gap:8px;"><span class="mock-btn primary">⬆ Import</span><span class="mock-btn outline">Cancel</span></div>
-        </div>
-      </div>
-    </div>
-
-    <h3>Import Types</h3>
+    <h3>Available Import Types</h3>
     <table class="info-table">
       <tr><th>Import</th><th>Menu Location</th><th>File Format</th><th>What It Does</th></tr>
-      <tr><td><strong>Bookings</strong></td><td>Import → Bookings</td><td>.xls, .xlsx, .csv</td><td>Adds/updates bookings from the ConferenceDirect Pipeline Report export</td></tr>
-      <tr><td><strong>Payments</strong></td><td>Import → Payments</td><td>.xlsx</td><td>Records commission checks received, matched by Booking ID</td></tr>
-      <tr><td><strong>Cancelled Meetings</strong></td><td>Import → Cancelled Meetings</td><td>.xlsx</td><td>Updates booking statuses to Cancelled</td></tr>
-      <tr><td><strong>HHR</strong></td><td>Import → HHR</td><td>.xlsx</td><td>Imports Housing History Report data after an event's cutoff date</td></tr>
-      <tr><td><strong>Voucher</strong></td><td>Import → Voucher</td><td>.xlsx</td><td>Imports voucher/commission payment data</td></tr>
+      {% if can_imp_bk %}<tr><td><strong>Bookings</strong></td><td>Import → Bookings</td><td>.xls, .xlsx, .csv</td><td>Adds/updates bookings from the ConferenceDirect Pipeline Report export</td></tr>{% endif %}
+      {% if can_imp_pay %}<tr><td><strong>Payments</strong></td><td>Import → Payments</td><td>.xlsx</td><td>Records commission checks received, matched by Booking ID</td></tr>{% endif %}
+      {% if can_imp_pay %}<tr><td><strong>Voucher</strong></td><td>Import → Voucher</td><td>.pdf</td><td>Imports voucher/commission payment data from a PDF</td></tr>{% endif %}
+      {% if can_imp_can %}<tr><td><strong>Cancelled Meetings</strong></td><td>Import → Cancelled Meetings</td><td>.xlsx</td><td>Updates booking statuses to Cancelled</td></tr>{% endif %}
+      {% if can_imp_hhr %}<tr><td><strong>HHR</strong></td><td>Import → HHR</td><td>.xlsx</td><td>Imports Housing History Report data after an event's cutoff date</td></tr>{% endif %}
     </table>
 
+    {% if can_imp_bk %}
     <h3>Importing Bookings — Step by Step</h3>
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Export from ConferenceDirect</strong><p>Run the Event Bookings Report and save as .xlsx or .csv.</p></div></div>
@@ -1028,12 +1040,15 @@ flowchart LR
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Choose your file and click Import</strong><p>The system processes the file and shows a summary of records added, updated, and skipped.</p></div></div>
     </div>
     <div class="callout info"><i class="bi bi-info-circle"></i><p>Duplicate Booking IDs are automatically skipped — it's safe to re-import a file you've already imported. Only new records will be added.</p></div>
+    {% endif %}
   </div>
+  {% endif %}
 
-  <!-- ── 10. Settings ─────────────────────────────────────────────── -->
+  <!-- ── Settings ─────────────────────────────────────────────── -->
+  {% if can_admin %}
   <div class="section" id="settings">
     <div class="section-title"><i class="bi bi-gear"></i> Settings</div>
-    <p>Click <strong>Settings</strong> in the navigation (admin only). Controls commission split percentages and payment tolerance.</p>
+    <p>Click <strong>Settings</strong> in the navigation, then <strong>Settings</strong>. Controls commission splits, payment tolerance, date format, and account-level overrides.</p>
 
     <div class="screen">
       <div class="screen-bar">
@@ -1046,15 +1061,16 @@ flowchart LR
           <div style="flex:1;border:1px solid #e5e9f0;border-radius:8px;overflow:hidden;">
             <div style="background:var(--navy);color:#fff;padding:9px 14px;font-weight:600;font-size:.85rem;">Kristin House Commission Structure</div>
             <div style="padding:14px;">
-              <div style="margin-bottom:10px;"><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Kristin House split</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">70</div><span style="color:#888;">%</span></div><div style="font-size:.72rem;color:#888;margin-top:3px;">Kristin always receives this percentage.</div></div>
-              <div><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Kristin's cut from team</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">10</div><span style="color:#888;">%</span></div><div style="font-size:.72rem;color:#888;margin-top:3px;">Deducted from each team member's gross split.</div></div>
+              <div style="margin-bottom:10px;"><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Kristin House split</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">70</div><span style="color:#888;">%</span></div></div>
+              <div><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Kristin's cut from team</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">10</div><span style="color:#888;">%</span></div></div>
             </div>
           </div>
           <div style="flex:1;border:1px solid #e5e9f0;border-radius:8px;overflow:hidden;">
-            <div style="background:var(--navy);color:#fff;padding:9px 14px;font-weight:600;font-size:.85rem;">Default Commission Split</div>
+            <div style="background:var(--navy);color:#fff;padding:9px 14px;font-weight:600;font-size:.85rem;">Date Display Format</div>
             <div style="padding:14px;">
-              <div style="margin-bottom:10px;"><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Your share of the commission</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">60.0</div><span style="color:#888;">%</span></div><div style="font-size:.72rem;color:#888;margin-top:3px;">Applied to all accounts unless overridden below.</div></div>
-              <div><div style="font-size:.8rem;color:#444;margin-bottom:4px;">Payment Tolerance</div><div style="display:flex;align-items:center;gap:6px;"><div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;width:80px;">2.0</div><span style="color:#888;">%</span></div><div style="font-size:.72rem;color:#888;margin-top:3px;">Payments within this % of Actual Commission are considered correct.</div></div>
+              <div style="font-size:.8rem;color:#444;margin-bottom:8px;">Date format used throughout the site</div>
+              <div style="border:1px solid #ccc;border-radius:5px;padding:6px 10px;font-size:.85rem;color:#555;">MM/DD/YYYY ▾</div>
+              <div style="font-size:.75rem;color:#888;margin-top:6px;">Preview: <strong>05/10/2026</strong></div>
             </div>
           </div>
         </div>
@@ -1066,13 +1082,13 @@ flowchart LR
       <tr><td><strong>Kristin House Split</strong></td><td>Kristin's personal share of her own bookings (e.g., 70%)</td></tr>
       <tr><td><strong>Kristin's Cut from Team</strong></td><td>Kristin's override percentage on team associate bookings (e.g., 10%)</td></tr>
       <tr><td><strong>Default Commission Split</strong></td><td>The standard share applied to all bookings unless a per-account override is set</td></tr>
-      <tr><td><strong>Payment Tolerance</strong></td><td>Payments within this % of the actual commission are not flagged as "out of tolerance" on the Payment Report</td></tr>
-      <tr><td><strong>Date Display Format</strong></td><td>Controls how dates appear throughout the entire site — dashboards, reports, pickup tracking, and the status board</td></tr>
-      <tr><td><strong>Account-Specific Overrides</strong></td><td>Some clients have a negotiated split — add them here with account name, split %, and optionally specific countries</td></tr>
+      <tr><td><strong>Payment Tolerance</strong></td><td>Payments within this % of actual commission are not flagged on the Payment Report</td></tr>
+      <tr><td><strong>Date Display Format</strong></td><td>Controls how dates appear throughout the entire site</td></tr>
+      <tr><td><strong>Account-Specific Overrides</strong></td><td>Per-client negotiated splits — add by account name, split %, and optionally specific countries</td></tr>
     </table>
 
     <h3>Date Display Format</h3>
-    <p>Choose your preferred date format from the dropdown in the <strong>Date Display Format</strong> card. A live preview updates instantly so you can see how the format will look before saving.</p>
+    <p>Choose your preferred date format from the dropdown. A live preview updates instantly so you can see the format before saving.</p>
     <table class="info-table">
       <tr><th>Format</th><th>Example</th></tr>
       <tr><td>MM/DD/YYYY</td><td>05/10/2026</td></tr>
@@ -1084,13 +1100,13 @@ flowchart LR
       <tr><td>Month DD, YYYY</td><td>May 10, 2026</td></tr>
       <tr><td>Weekday, Month DD, YYYY</td><td>Sunday, May 10, 2026</td></tr>
     </table>
-    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>The selected format applies site-wide immediately after saving — every date on every page changes to match your preference.</p></div>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>The selected format applies site-wide immediately after saving — every date on every page changes to match.</p></div>
   </div>
 
-  <!-- ── 11. Admin / User Management ────────────────────────────── -->
+  <!-- ── User Management ────────────────────────────────────────── -->
   <div class="section" id="admin">
     <div class="section-title"><i class="bi bi-shield-lock"></i> User Management <span style="font-size:.75rem;font-weight:400;color:#888;">(Admin Only)</span></div>
-    <p>Click <strong>Users</strong> in the navigation bar. Only admins (Peter and Kristin) can access this page.</p>
+    <p>Click <strong>Settings</strong> in the navigation bar, then <strong>Users</strong>. Only admins can access this page.</p>
 
     <div class="screen">
       <div class="screen-bar">
@@ -1102,14 +1118,14 @@ flowchart LR
         <div style="background:var(--navy);color:#fff;padding:9px 14px;border-radius:6px;font-weight:600;font-size:.85rem;margin-bottom:10px;">🛡 Permissions &amp; Account Access</div>
         <div style="overflow-x:auto;">
           <table class="mock-table" style="min-width:700px;font-size:.75rem;">
-            <thead><tr><th>User</th><th>Active</th><th>Dashboard</th><th>Import Books</th><th>HHR</th><th>Missing Comm (K)</th><th>Missing Comm (T)</th><th>View Bookings</th><th>Add/Edit</th><th>Account Access</th></tr></thead>
+            <thead><tr><th>User</th><th>Active</th><th>Dashboard</th><th>Contracts</th><th>Import Books</th><th>Missing Comm (K)</th><th>Missing Comm (T)</th><th>View Bookings</th><th>Add/Edit</th><th>Account Access</th></tr></thead>
             <tbody>
               <tr>
                 <td><div style="font-weight:600;">Ashleigh Buhr</div><div style="font-size:.7rem;color:#888;">user</div></td>
                 <td><span style="color:var(--success)">●</span></td>
                 <td><span style="color:var(--success)">●</span></td>
                 <td><span style="color:#ccc">○</span></td>
-                <td><span style="color:var(--success)">●</span></td>
+                <td><span style="color:#ccc">○</span></td>
                 <td><span style="color:var(--success)">●</span></td>
                 <td><span style="color:#ccc">○</span></td>
                 <td><span style="color:var(--success)">●</span></td>
@@ -1131,10 +1147,10 @@ flowchart LR
     <table class="info-table">
       <tr><th>Permission</th><th>Grants Access To</th></tr>
       <tr><td><strong>Dashboard</strong></td><td>The commission dashboard page</td></tr>
-      <tr><td><strong>Admin Panel</strong></td><td>User management page</td></tr>
+      <tr><td><strong>Admin Panel</strong></td><td>User management page and admin tools</td></tr>
       <tr><td><strong>Contracts</strong></td><td>The Contracts nav link and contract template pages</td></tr>
       <tr><td><strong>Import → Bookings</strong></td><td>Booking import tool</td></tr>
-      <tr><td><strong>Import → Payments</strong></td><td>Payment import tool</td></tr>
+      <tr><td><strong>Import → Payments</strong></td><td>Payment import tool and voucher import</td></tr>
       <tr><td><strong>Import → HHR</strong></td><td>Housing History Report import</td></tr>
       <tr><td><strong>Import → Cancelled Meetings</strong></td><td>Cancelled meetings import</td></tr>
       <tr><td><strong>Missing Pickup/Comm Report (Kristin)</strong></td><td>Kristin's missing commission report</td></tr>
@@ -1143,7 +1159,7 @@ flowchart LR
       <tr><td><strong>Reports → Customer Summary</strong></td><td>Customer summary report</td></tr>
       <tr><td><strong>View Bookings</strong></td><td>Bookings list and detail pages</td></tr>
       <tr><td><strong>Add / Edit Bookings</strong></td><td>Creating and editing booking records</td></tr>
-      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records; also controls access to Status Board, Pickup RPT/TRK, RFP's, and Contacts</td></tr>
+      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records; also gates access to Status Board, Pickup RPT/TRK, RFP's, and Contacts</td></tr>
     </table>
 
     <h3>Setting Account Access</h3>
@@ -1153,7 +1169,7 @@ flowchart LR
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Check the accounts this user should see</strong><p>Use the search box to find specific clients. Use Select All / Clear All for bulk changes.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click "Save Access"</strong><p>The user immediately sees only their assigned accounts on next page load.</p></div></div>
     </div>
-    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>If a user has <strong>no accounts assigned</strong>, they will see <strong>no records</strong> anywhere in the app. Admins always see everything regardless of account access settings.</p></div>
+    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>If a user has <strong>no accounts assigned</strong>, they will see <strong>no records</strong> anywhere in the app. Admins always see everything.</p></div>
 
     <h3>Resetting a Password</h3>
     <div class="steps">
@@ -1162,6 +1178,7 @@ flowchart LR
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click Reset</strong><p>The user can now log in with the new password.</p></div></div>
     </div>
   </div>
+  {% endif %}{# end can_admin #}
 
   <!-- Footer -->
   <div style="border-top:1px solid #e5e9f0;padding-top:24px;margin-top:40px;color:#888;font-size:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
