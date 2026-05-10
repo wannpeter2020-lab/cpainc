@@ -12,8 +12,8 @@
 3. [Status Board](#3-status-board)
 4. [Dashboard](#4-dashboard)
 5. [Bookings](#5-bookings)
-6. [Pickup Tracking](#6-pickup-tracking)
-7. [RFP Tracking](#7-rfp-tracking)
+6. [Pickup Tracking and Reporting](#6-pickup-tracking)
+7. [RFP Process](#7-rfp-tracking)
 8. [Reports](#8-reports)
 9. [Contacts](#9-contacts)
 10. [Import Tools](#10-import-tools)
@@ -35,8 +35,8 @@ The top navigation bar is labelled **Conference Planning Associates Inc.** and c
 | **Status Board** | Action item dashboard for your accounts |
 | **Dashboard** | Commission snapshot |
 | **Bookings ▾** | Bookings list; New Booking |
-| **RFP's** | RFP tracking |
-| **Pickup RPT/TRK** | Pickup reporting and tracking |
+| **RFP Process** | RFP tracking |
+| **Pickup Tracking & Reporting** | Pickup reporting and tracking |
 | **Contracts** | Contract templates |
 | **Reports ▾** | Commission and payment reports |
 | **Contacts** | Client and hotel contact list |
@@ -196,9 +196,9 @@ Contract templates can also be managed from the **Contracts** link in the top na
 
 ---
 
-## 6. Pickup Tracking
+## 6. Pickup Tracking and Reporting
 
-**Navigation:** Click **Pickup RPT/TRK** in the top menu.
+**Navigation:** Click **Pickup Tracking & Reporting** in the top menu.
 
 This is the core tool for tracking hotel room block pickup for each event. It shows three sections: **Current Events**, **Past Events**, and **Future Events**.
 
@@ -215,7 +215,7 @@ The toolbar at the top of the page contains the following buttons:
 
 #### Sticky Header
 
-When you scroll down on the Pickup Tracking page, the column header row (Booking ID, Event / Organisation, Hotel, etc.) automatically stays pinned near the top of the screen so you always know which column you are reading. The header follows you as you scroll both vertically and horizontally.
+When you scroll down on the Pickup Tracking and Reporting page, the column header row (Booking ID, Event / Organisation, Hotel, etc.) automatically stays pinned near the top of the screen so you always know which column you are reading. The header follows you as you scroll both vertically and horizontally.
 
 #### Current Events
 
@@ -312,9 +312,9 @@ From the Event Report page, click **Download XLSX** to export the full combined 
 
 ---
 
-## 7. RFP Tracking
+## 7. RFP Process
 
-**Navigation:** Click **RFP's** in the top menu.
+**Navigation:** Click **RFP Process** in the top menu.
 
 Manages the Request for Proposal process for new events.
 
@@ -544,13 +544,13 @@ Each user has a set of permissions that control what they can access. Toggle per
 | **Reports → Customer Summary** | Customer summary report |
 | **View Bookings** | Bookings list and detail pages |
 | **Add / Edit Bookings** | Creating and editing booking records |
-| **Add Pickups / Payments** | Adding pickup/payment records; access to Status Board, Pickup Tracking, RFP's, and Contacts |
+| **Add Pickups / Payments** | Adding pickup/payment records; access to Status Board, Pickup Tracking and Reporting, RFP's, and Contacts |
 
 Admins automatically have all permissions.
 
 ### 12.2 Account Access
 
-Controls **which client accounts** a non-admin user can see across Bookings, Pickup Tracking, RFPs, and the Status Board.
+Controls **which client accounts** a non-admin user can see across Bookings, Pickup Tracking and Reporting, RFPs, and the Status Board.
 
 **To set account access:**
 1. Click the **buildings icon** button in the Account Access column for a user.

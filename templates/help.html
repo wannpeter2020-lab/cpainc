@@ -271,14 +271,14 @@
     {% endif %}
 
     {% if can_rfp %}
-    <div class="section-label">RFP Tracking</div>
+    <div class="section-label">RFP Process</div>
     <a href="#cvent-rfp"><i class="bi bi-cloud-download"></i> Cvent RFP Download</a>
     <a href="#rfp-list"><i class="bi bi-clipboard2-check"></i> RFP List</a>
     <a href="#rfp-detail"><i class="bi bi-clipboard2-data"></i> RFP Detail</a>
     {% endif %}
 
     {% if can_pickup %}
-    <div class="section-label">Pickup Tracking</div>
+    <div class="section-label">Pickup Tracking and Reporting and Reporting</div>
     <a href="#pickup-dashboard"><i class="bi bi-graph-up"></i> Dashboard</a>
     <a href="#pickup-event"><i class="bi bi-calendar-check"></i> Event Detail</a>
     <a href="#pickup-weekly"><i class="bi bi-pencil-square"></i> Weekly Reports</a>
@@ -611,7 +611,7 @@
   {% endif %}
   {% endif %}{# end can_bk #}
 
-  <!-- ── RFP Tracking ──────────────────────────────────────────── -->
+  <!-- ── RFP Process ──────────────────────────────────────────── -->
   {% if can_rfp %}
   <div class="section" id="cvent-rfp">
     <div class="section-title"><i class="bi bi-cloud-download"></i> Cvent RFP Download</div>
@@ -694,18 +694,18 @@
   </div>
 
   <div class="section" id="rfp-list">
-    <div class="section-title"><i class="bi bi-clipboard2-check"></i> RFP Tracking — List</div>
-    <p>Click <strong>RFP's</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events. You will only see RFPs for your assigned accounts.</p>
+    <div class="section-title"><i class="bi bi-clipboard2-check"></i> RFP Process — List</div>
+    <p>Click <strong>RFP Process</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events. You will only see RFPs for your assigned accounts.</p>
 
     <div class="screen">
       <div class="screen-bar">
         <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">RFP Tracking — CPAinc</span>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">RFP Process — CPAinc</span>
         <span class="url">/rfp</span>
       </div>
       <div class="mock-content">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">RFP Tracking</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">RFP Process</div>
           <div style="display:flex;gap:8px;">
             <span class="mock-btn outline" style="font-size:.78rem;">Archived</span>
             <span class="mock-btn primary" style="font-size:.78rem;">+ New RFP</span>
@@ -762,21 +762,21 @@ flowchart LR
   </div>
   {% endif %}{# end can_rfp #}
 
-  <!-- ── Pickup Tracking ──────────────────────────────────────── -->
+  <!-- ── Pickup Tracking and Reporting ──────────────────────────────────────── -->
   {% if can_pickup %}
   <div class="section" id="pickup-dashboard">
-    <div class="section-title"><i class="bi bi-graph-up"></i> Pickup Tracking — Dashboard</div>
-    <p>Click <strong>Pickup RPT/TRK</strong> in the top navigation. This is the main hub for monitoring hotel room block pickup across all active events.</p>
+    <div class="section-title"><i class="bi bi-graph-up"></i> Pickup Tracking and Reporting — Dashboard</div>
+    <p>Click <strong>Pickup Tracking & Reporting</strong> in the top navigation. This is the main hub for monitoring hotel room block pickup across all active events.</p>
 
     <div class="screen">
       <div class="screen-bar">
         <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Pickup Tracking — CPAinc</span>
+        <span style="color:rgba(255,255,255,.6);font-size:.78rem;">Pickup Tracking and Reporting — CPAinc</span>
         <span class="url">/pickup</span>
       </div>
       <div class="mock-content">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
-          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Pickup Tracking</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">Pickup Tracking and Reporting</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <span class="mock-btn primary" style="font-size:.74rem;">Fill Missing</span>
             <span class="mock-btn primary" style="font-size:.74rem;">+ New Event</span>
@@ -841,7 +841,7 @@ flowchart LR
     </table>
 
     <h3>Sticky Column Header</h3>
-    <p>When you scroll down on the Pickup Tracking page, the column header row automatically stays pinned near the top of the screen. The header follows as you scroll both vertically and horizontally so you always know which column you're reading.</p>
+    <p>When you scroll down on the Pickup Tracking and Reporting page, the column header row automatically stays pinned near the top of the screen. The header follows as you scroll both vertically and horizontally so you always know which column you're reading.</p>
   </div>
 
   <div class="section" id="pickup-event">
@@ -944,7 +944,7 @@ flowchart LR
   </div>
 
   <div class="section" id="pickup-flow">
-    <div class="section-title"><i class="bi bi-diagram-3"></i> Pickup Tracking Workflow</div>
+    <div class="section-title"><i class="bi bi-diagram-3"></i> Pickup Tracking and Reporting Workflow</div>
     <p>Here's how a typical event moves through the pickup tracking process:</p>
     <div class="flowchart-wrap">
       <div class="flowchart-title">End-to-End Pickup Workflow</div>
@@ -1091,7 +1091,7 @@ flowchart TD
 
     <table class="info-table">
       <tr><th>Tab</th><th>Who It Contains</th><th>Used For</th></tr>
-      <tr><td><strong>Clients</strong></td><td>Association and organisation contacts</td><td>Client emails in Pickup Tracking</td></tr>
+      <tr><td><strong>Clients</strong></td><td>Association and organisation contacts</td><td>Client emails in Pickup Tracking and Reporting</td></tr>
       <tr><td><strong>Hotel Contacts</strong></td><td>Hotel sales and catering managers</td><td>Hotel emails and pickup requests</td></tr>
     </table>
   </div>
@@ -1240,11 +1240,11 @@ flowchart TD
       <tr><td><strong>Reports → Customer Summary</strong></td><td>Customer summary report</td></tr>
       <tr><td><strong>View Bookings</strong></td><td>Bookings list and detail pages</td></tr>
       <tr><td><strong>Add / Edit Bookings</strong></td><td>Creating and editing booking records</td></tr>
-      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records; also gates access to Status Board, Pickup RPT/TRK, RFP's, and Contacts</td></tr>
+      <tr><td><strong>Add Pickups / Payments</strong></td><td>Adding pickup data and payment records; also gates access to Status Board, Pickup Tracking & Reporting, RFP Process, and Contacts</td></tr>
     </table>
 
     <h3>Setting Account Access</h3>
-    <p>Account Access controls which <strong>client organisations</strong> a non-admin user can see across Bookings, Pickup Tracking, RFPs, and the Status Board.</p>
+    <p>Account Access controls which <strong>client organisations</strong> a non-admin user can see across Bookings, Pickup Tracking and Reporting, RFPs, and the Status Board.</p>
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click the 🏢 buildings button</strong><p>In the Account Access column for the user you want to configure.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Check the accounts this user should see</strong><p>Use the search box to find specific clients. Use Select All / Clear All for bulk changes.</p></div></div>

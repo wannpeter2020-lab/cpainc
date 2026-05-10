@@ -59,12 +59,12 @@
 
         {# ── RFPs ── #}
         {% if has_perm('pickups_payments') %}
-        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/rfp') %}active{% endif %}" href="/rfp"><i class="bi bi-file-earmark-text me-1"></i>RFP's</a></li>
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/rfp') %}active{% endif %}" href="/rfp"><i class="bi bi-file-earmark-text me-1"></i>RFP Process</a></li>
         {% endif %}
 
         {# ── Pickup RPT/TRK ── #}
         {% if has_perm('pickups_payments') %}
-        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/pickup') %}active{% endif %}" href="/pickup"><i class="bi bi-calendar-check me-1"></i>Pickup RPT/TRK</a></li>
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/pickup') %}active{% endif %}" href="/pickup"><i class="bi bi-calendar-check me-1"></i>Pickup Tracking & Reporting</a></li>
         {% endif %}
 
         {# ── Contracts ── #}
