@@ -488,13 +488,12 @@ def booking_contract_upload(booking_id):
         ).fetchall()
         if len(configs) == 1:
             # Auto-parse and go straight to review
+            # file_b64 left empty — file already stored in booking_contract, no need to round-trip it
             extracted = parse_contract_document(last_bytes, filename=last_name)
             if not extracted.get('error'):
-                import base64
                 return render_template('pickup_contract_review.html',
                                        config=configs[0], extracted=extracted,
-                                       filename=last_name,
-                                       file_b64=base64.b64encode(last_bytes).decode())
+                                       filename=last_name, file_b64='')
             else:
                 flash(f'Contract saved. Auto-extract failed: {extracted["error"]}', 'warning')
         elif len(configs) > 1:
@@ -546,10 +545,10 @@ def booking_contract_parse_for_pickup(booking_id, bcid, cid):
     if extracted.get('error'):
         flash(f'Could not parse contract: {extracted["error"]}', 'error')
         return redirect(url_for('booking_detail', booking_id=booking_id))
+    # file_b64 left empty — file already stored in booking_contract, no need to round-trip it
     return render_template('pickup_contract_review.html',
                            config=config, extracted=extracted,
-                           filename=bc['filename'],
-                           file_b64=base64.b64encode(bc['file_data']).decode())
+                           filename=bc['filename'], file_b64='')
 
 @app.route('/booking/<booking_id>/contract/<int:cid>/download')
 def booking_contract_download(booking_id, cid):
