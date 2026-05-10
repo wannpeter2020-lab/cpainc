@@ -3583,6 +3583,38 @@ def admin_fix_asa_dates():
     return html
 
 
+# ── One-time: export production pickup_config for diagnosis ───────────────────
+@app.route('/admin/export-pickup-config')
+def admin_export_pickup_config():
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden', 403
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, booking_id, event_name, hotel, status, "
+        "hotel_contact_email, group_contact_email, cutoff_date, contracted_block "
+        "FROM pickup_config ORDER BY id"
+    ).fetchall()
+    import json as _json
+    out = []
+    for r in rows:
+        block = {}
+        try: block = _json.loads(r['contracted_block'] or '{}')
+        except: pass
+        vals = list(block.values())
+        uniform = len(vals) > 1 and len(set(vals)) == 1 and vals[0] > 0
+        out.append({
+            'id': r['id'], 'booking_id': r['booking_id'],
+            'event_name': r['event_name'], 'hotel': r['hotel'],
+            'status': r['status'],
+            'has_hotel_email': bool((r['hotel_contact_email'] or '').strip()),
+            'has_group_email': bool((r['group_contact_email'] or '').strip()),
+            'has_cutoff': bool((r['cutoff_date'] or '').strip()),
+            'block_nights': len(block),
+            'uniform_block': uniform,
+        })
+    return _json.dumps(out, indent=2), 200, {'Content-Type': 'application/json'}
+
 
 # ── Status Board ──────────────────────────────────────────────────────────────
 
