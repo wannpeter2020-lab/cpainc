@@ -295,10 +295,17 @@
     <span><i class="bi bi-calendar-event me-2"></i>Future Events
       <span class="badge bg-secondary ms-1">{{ future_rows|length }}</span>
     </span>
-    <button class="btn btn-sm btn-outline-light" type="button"
-            data-bs-toggle="collapse" data-bs-target="#collapseFuture">
-      <i class="bi bi-chevron-down"></i>
-    </button>
+    <div class="d-flex gap-2 align-items-center">
+      <a href="{{ url_for('pickup_customer_report_select') }}"
+         class="btn btn-sm btn-outline-light"
+         title="Choose customers then download Excel report">
+        <i class="bi bi-file-earmark-spreadsheet me-1"></i>Customer Report
+      </a>
+      <button class="btn btn-sm btn-outline-light" type="button"
+              data-bs-toggle="collapse" data-bs-target="#collapseFuture">
+        <i class="bi bi-chevron-down"></i>
+      </button>
+    </div>
   </div>
   <div id="collapseFuture" class="collapse">
     {{ event_table(future_rows, future_groups, future_group_order, table_id='tbl-future', section='future') }}
