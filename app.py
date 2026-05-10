@@ -3582,8 +3582,26 @@ def admin_fix_asa_dates():
     html += '<p><a href="/pickup">Go to Pickup Tracking</a></p>'
     return html
 
-    html += '<p><a href="/pickup">Go to Pickup Tracking</a></p>'
-    return html
+
+# ── One-time: archive cancelled pickup_config record 25 on production ──────────
+@app.route('/admin/archive-cancelled-pickups')
+def admin_archive_cancelled_pickups():
+    """One-time: archive pickup_config records whose booking is Cancelled in ReportPipeline."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+    db = get_db()
+    result = db.execute(
+        """UPDATE pickup_config SET status='archived'
+           WHERE status != 'archived'
+           AND booking_id IN (
+               SELECT BookingId FROM ReportPipeline WHERE BookingStatus='Cancelled'
+           )"""
+    )
+    db.commit()
+    return (f'<h3>Done — {result.rowcount} pickup_config record(s) archived '
+            f'(linked to cancelled bookings).</h3>'
+            f'<p><a href="/pickup">Go to Pickup Tracking</a></p>')
 
 
 # ── Status Board ──────────────────────────────────────────────────────────────
@@ -3610,7 +3628,10 @@ def status_board():
         ignored.add((row['config_id'], row['issue_type']))
 
     # --- Load all non-archived pickup_config with account filter ---
-    base_sql = "SELECT * FROM pickup_config WHERE status != 'archived'"
+    # Also exclude records whose booking is Cancelled in ReportPipeline
+    base_sql = ("SELECT * FROM pickup_config WHERE status != 'archived' "
+                "AND (booking_id IS NULL OR booking_id NOT IN "
+                "  (SELECT BookingId FROM ReportPipeline WHERE BookingStatus='Cancelled'))")
     params   = []
     if acct_filter is None:
         pass
