@@ -2630,3 +2630,206 @@ def strip_hhr_commission_rows(file_bytes):
     wb.save(out)
     out.seek(0)
     return out.read()
+
+
+# ── Contract Document Parser ──────────────────────────────────────────────────
+
+def _extract_text_from_contract(file_bytes, filename=''):
+    """Extract plain text from a PDF or Word contract file."""
+    fname = (filename or '').lower()
+
+    if fname.endswith('.pdf'):
+        try:
+            import pdfplumber
+            text_parts = []
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        text_parts.append(t)
+            return '\n'.join(text_parts)
+        except ImportError:
+            return None
+
+    if fname.endswith('.docx'):
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(file_bytes))
+            parts = [p.text for p in doc.paragraphs if p.text.strip()]
+            # Also grab table cells
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        t = cell.text.strip()
+                        if t:
+                            parts.append(t)
+            return '\n'.join(parts)
+        except ImportError:
+            return None
+
+    if fname.endswith('.doc'):
+        import subprocess, tempfile, os
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.doc', delete=False) as tmp:
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
+            result = subprocess.run(
+                ['textutil', '-convert', 'txt', '-stdout', tmp_path],
+                capture_output=True, text=True, timeout=30
+            )
+            os.unlink(tmp_path)
+            return result.stdout if result.returncode == 0 else None
+        except Exception:
+            return None
+
+    return None
+
+
+def _ai_parse_contract(text):
+    """
+    Send contract text to Claude and extract structured hotel contract data.
+    Returns a dict with keys: contracted_block, contracted_rate, cutoff_date,
+    attrition_pct, hotel, hotel_contact, hotel_contact_email,
+    group_contact, group_contact_email, error.
+    """
+    api_key = ''
+    try:
+        import importlib, sys
+        if 'config' in sys.modules:
+            importlib.reload(sys.modules['config'])
+        else:
+            import config as _cfg
+            sys.modules['config'] = _cfg
+        api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        import os
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return {'error': 'Anthropic API key not configured'}
+
+    try:
+        import anthropic
+    except ImportError:
+        return {'error': 'anthropic package not installed'}
+
+    prompt = """You are extracting structured data from a hotel group sales contract.
+
+Return ONLY a valid JSON object — no markdown fences, no explanation, nothing else.
+
+The JSON object must have exactly these keys:
+  contracted_rate       — nightly room rate as a number (e.g. 219.00), or null if not found
+  cutoff_date           — room block cutoff/release date in YYYY-MM-DD format, or null
+  attrition_pct         — attrition percentage as a decimal 0–1 (e.g. 0.80 for 80%), or null
+  hotel                 — hotel name as it appears in the contract, or null
+  hotel_contact         — hotel contact person's full name, or null
+  hotel_contact_email   — hotel contact email address, or null
+  group_contact         — client/group contact person's full name, or null
+  group_contact_email   — client/group contact email address, or null
+  contracted_block      — object mapping each night's date (YYYY-MM-DD) to the number of rooms
+                          blocked for that night (integer). Only include nights with a room
+                          count > 0. Example: {"2026-10-31": 200, "2026-11-01": 350}
+
+Rules:
+- For contracted_block, look for a night-by-night room schedule or block grid. Dates are
+  typically check-in dates (the night starting on that date).
+- If the contract shows a flat block (same rooms every night) without per-night breakdown,
+  generate one entry per night of the block period, each with that room count.
+- Cutoff date may be labeled "cutoff", "release date", "cut-off date", "room block deadline", etc.
+- Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
+- Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
+- Group contact is the client or meeting planner who signed or is listed as the customer.
+- If a field genuinely cannot be found, use null (not empty string, not 0).
+
+Contract text:
+""" + text[:15000]
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=2048,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        raw = message.content[0].text.strip()
+        raw = re.sub(r'^```[a-z]*\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        data = json.loads(raw)
+
+        # Normalise contracted_block: ensure all values are ints, keys are YYYY-MM-DD
+        block_raw = data.get('contracted_block') or {}
+        block = {}
+        for k, v in block_raw.items():
+            try:
+                # Validate date format
+                datetime.strptime(str(k).strip(), '%Y-%m-%d')
+                rooms = int(v)
+                if rooms > 0:
+                    block[str(k).strip()] = rooms
+            except Exception:
+                continue
+        data['contracted_block'] = block
+
+        # Normalise attrition
+        atr = data.get('attrition_pct')
+        if atr is not None:
+            try:
+                atr = float(atr)
+                # If someone passed 80 instead of 0.80, fix it
+                if atr > 1:
+                    atr = atr / 100
+                data['attrition_pct'] = round(atr, 4)
+            except Exception:
+                data['attrition_pct'] = None
+
+        # Normalise rate
+        rate = data.get('contracted_rate')
+        if rate is not None:
+            try:
+                data['contracted_rate'] = round(float(rate), 2)
+            except Exception:
+                data['contracted_rate'] = None
+
+        data.setdefault('error', None)
+        return data
+
+    except Exception as e:
+        return {'error': str(e), 'contracted_block': {}}
+
+
+def parse_contract_document(file_bytes, filename=''):
+    """
+    Parse a hotel contract PDF or Word file and return extracted data.
+
+    Returns a dict:
+      contracted_block      — {YYYY-MM-DD: rooms, ...}
+      contracted_rate       — float or None
+      cutoff_date           — 'YYYY-MM-DD' or None
+      attrition_pct         — float 0-1 or None
+      hotel                 — str or None
+      hotel_contact         — str or None
+      hotel_contact_email   — str or None
+      group_contact         — str or None
+      group_contact_email   — str or None
+      error                 — str or None (None = success)
+    """
+    empty = {
+        'contracted_block': {}, 'contracted_rate': None, 'cutoff_date': None,
+        'attrition_pct': None, 'hotel': None, 'hotel_contact': None,
+        'hotel_contact_email': None, 'group_contact': None, 'group_contact_email': None,
+        'error': None,
+    }
+
+    text = _extract_text_from_contract(file_bytes, filename)
+    if not text or not text.strip():
+        return {**empty, 'error': 'Could not extract text from file — is it a scanned image PDF?'}
+
+    result = _ai_parse_contract(text)
+
+    # Merge into empty so all keys are always present
+    for k in empty:
+        if k not in result:
+            result[k] = empty[k]
+
+    return result
