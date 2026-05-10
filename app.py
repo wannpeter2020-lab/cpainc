@@ -3724,7 +3724,7 @@ def pickup_fill_missing():
     db    = get_db()
     today = datetime.today().strftime('%Y-%m-%d')
 
-    # All future non-cancelled bookings without a pickup_config entry
+    # Future non-cancelled Kristin House bookings without a pickup_config entry
     missing = db.execute('''
         SELECT r.BookingId, r.BookingName, r.EventName, r.AccountName,
                r.Customer, r.StartDate, r.EndDate, r.PeakRooms, r.RoomRate,
@@ -3732,6 +3732,7 @@ def pickup_fill_missing():
         FROM ReportPipeline r
         WHERE (r.BookingStatus IS NULL OR r.BookingStatus NOT LIKE '%Cancel%')
           AND r.EndDate >= ?
+          AND r.BookingAssociate = 'Kristin House'
           AND NOT EXISTS (
               SELECT 1 FROM pickup_config p WHERE p.booking_id = CAST(r.BookingId AS TEXT)
           )
