@@ -245,6 +245,9 @@
       #main { margin-left: 0; padding: 24px 18px; }
     }
 
+    /* ── Flowchart print note — hidden on screen, shown in print ── */
+    .flowchart-print-note { display: none; }
+
     /* ── Print button (screen only) ── */
     #print-btn {
       position: fixed; bottom: 28px; right: 28px; z-index: 200;
@@ -402,8 +405,17 @@
       .badge-warning { background: #fff3cd !important; color: #856404 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .badge-danger  { background: #f8d7da !important; color: #dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-      /* Flowcharts — keep if rendered, hide if not */
-      .flowchart-wrap { border: 1px solid #dde !important; box-shadow: none !important; }
+      /* Flowcharts — hide in print, show replacement note */
+      .flowchart-wrap { display: none !important; }
+      .flowchart-print-note {
+        display: flex !important;
+        align-items: center; gap: 10pt;
+        border: 1pt solid #b0bec5; border-radius: 6pt;
+        background: #f5f7fb; padding: 10pt 14pt;
+        font-size: 9pt; color: #555;
+        margin: 10pt 0;
+      }
+      .flowchart-print-note i { font-size: 14pt; color: #1a3a5c; flex-shrink: 0; }
 
       /* Footer */
       #main > div:last-child {
@@ -915,6 +927,10 @@ flowchart LR
     style G fill:#dc3545,color:#fff
       </div>
     </div>
+    <div class="flowchart-print-note">
+      <i class="bi bi-diagram-3"></i>
+      <span>The <strong>RFP Status Progression</strong> workflow diagram is available in the online help guide at <strong>cpainc.railway.app/help</strong></span>
+    </div>
   </div>
 
   <div class="section" id="rfp-detail">
@@ -1226,6 +1242,10 @@ flowchart TD
     style H fill:#fff3cd,color:#333
     style K fill:#fff3cd,color:#333
       </div>
+    </div>
+    <div class="flowchart-print-note">
+      <i class="bi bi-diagram-3"></i>
+      <span>The <strong>End-to-End Pickup Workflow</strong> diagram is available in the online help guide at <strong>cpainc.railway.app/help</strong></span>
     </div>
   </div>
   {% endif %}{# end can_pickup #}
