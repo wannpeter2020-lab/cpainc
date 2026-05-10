@@ -140,6 +140,10 @@
         <span class="text-muted small ms-2">{{ c['upload_date'] | us_date if c['upload_date'] else '' }}</span>
       </span>
       <div class="d-flex gap-2">
+        <a href="{{ url_for('booking_contract_extract', booking_id=booking.BookingId, bcid=c['id']) }}"
+           class="btn btn-sm btn-outline-success" title="Extract room block, rate & contacts into Pickup">
+          <i class="bi bi-magic me-1"></i>Extract to Pickup
+        </a>
         <a href="/booking/{{ booking.BookingId }}/contract/{{ c['id'] }}/download"
            class="btn btn-sm btn-outline-primary">
           <i class="bi bi-download me-1"></i>Download
