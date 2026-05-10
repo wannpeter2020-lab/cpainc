@@ -3063,6 +3063,14 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add contract storage + block_is_estimated columns to pickup_config
+    for _col, _typ in [('contract_filename', 'TEXT'), ('contract_data', 'BLOB'),
+                       ('block_is_estimated', 'INTEGER DEFAULT 0')]:
+        try:
+            db.execute(f'ALTER TABLE pickup_config ADD COLUMN {_col} {_typ}')
+            db.commit()
+        except Exception:
+            pass
     # Add CRF columns to rfp and rfp_hotel if not present
     for _tbl, _col, _typ in [
         ('rfp',       'crf_filename', 'TEXT'),
@@ -6327,7 +6335,7 @@ def pickup_upload_contract(cid):
 
         if extracted.get('error'):
             flash(f'Could not parse contract: {extracted["error"]}', 'error')
-            return redirect(url_for('pickup_upload_contract', cid=cid))
+            return redirect(url_for('pickup_event', cid=cid))
 
         import base64
         file_b64 = base64.b64encode(file_bytes).decode('utf-8')
