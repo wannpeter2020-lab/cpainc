@@ -150,9 +150,9 @@
 {# ── Macro: render a table of rows with grouping support ── #}
 {% macro event_table(rows, groups, group_order, show_history=false, table_id='evt-table', section='') %}
 {% if rows %}
-<div class="table-responsive" style="max-height:calc(100vh - 220px);overflow-y:auto;">
+<div class="table-responsive">
   <table class="table table-hover mb-0 align-middle sortable-table" id="{{ table_id }}">
-    <thead style="position:sticky;top:0;z-index:3;">
+    <thead>
       <tr>
         <th>Booking ID</th>
         <th>Event / Organization</th>
@@ -179,7 +179,7 @@
         <th>OTA Rate</th>
         <th>Status</th>
         {% if show_history %}<th>History</th>{% endif %}
-        <th style="position:sticky;right:0;background:#eaf0fb;z-index:5;"></th>
+        <th style="position:sticky;right:0;background:#eaf0fb;z-index:2;"></th>
       </tr>
     </thead>
     <tbody>
@@ -494,5 +494,86 @@ function quickRespond(cid, action) {
     })
     .catch(() => { window.location.reload(); });
 }
+
+// ── Viewport-pinned sticky header (works inside overflow-x containers) ─────────
+(function () {
+  const NAVBAR_H = document.querySelector('.navbar.sticky-top')
+                     ? document.querySelector('.navbar.sticky-top').offsetHeight
+                     : 57;
+
+  document.querySelectorAll('.sortable-table').forEach(function (table) {
+    const thead     = table.querySelector('thead');
+    const container = table.closest('.table-responsive');
+    if (!thead || !container) return;
+
+    // Build a fixed-position ghost header
+    const ghost = document.createElement('div');
+    ghost.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:' + NAVBAR_H + 'px',
+      'z-index:1029',
+      'display:none',
+      'overflow:hidden',
+      'box-shadow:0 3px 6px rgba(0,0,0,.18)'
+    ].join(';');
+
+    const ghostTable = table.cloneNode(false);  // shallow clone — same classes
+    ghostTable.style.cssText = 'margin:0;table-layout:fixed;';
+    ghostTable.appendChild(thead.cloneNode(true));
+    ghost.appendChild(ghostTable);
+    document.body.appendChild(ghost);
+
+    // Forward clicks on ghost ths → real ths (keeps sort & reset-responded working)
+    ghost.querySelectorAll('th').forEach(function (gth, i) {
+      gth.style.pointerEvents = 'auto';
+      gth.style.cursor = 'default';
+      gth.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const real = thead.querySelectorAll('th')[i];
+        if (real) real.click();
+      });
+    });
+
+    function syncAndShow() {
+      const cr = container.getBoundingClientRect();
+      const tr = thead.getBoundingClientRect();
+
+      // Show when real thead has scrolled above the navbar but table still visible
+      const visible = tr.bottom < NAVBAR_H && cr.bottom > NAVBAR_H + thead.offsetHeight;
+      ghost.style.display = visible ? 'block' : 'none';
+      if (!visible) return;
+
+      // Match position and width to the scrolling container
+      ghost.style.left  = cr.left + 'px';
+      ghost.style.width = cr.width + 'px';
+      ghostTable.style.width = table.offsetWidth + 'px';
+
+      // Sync individual column widths so ghost columns line up with real data
+      const realThs  = thead.querySelectorAll('th');
+      const ghostThs = ghost.querySelectorAll('th');
+      realThs.forEach(function (th, i) {
+        if (ghostThs[i]) {
+          const w = th.getBoundingClientRect().width + 'px';
+          ghostThs[i].style.width    = w;
+          ghostThs[i].style.maxWidth = w;
+        }
+      });
+
+      // Track horizontal scroll of the container
+      ghostTable.style.marginLeft = (-container.scrollLeft) + 'px';
+    }
+
+    window.addEventListener('scroll',  syncAndShow, { passive: true });
+    window.addEventListener('resize',  syncAndShow, { passive: true });
+    container.addEventListener('scroll', syncAndShow, { passive: true });
+
+    // Re-sync when a section collapses/expands (changes table position)
+    document.querySelectorAll('.collapse').forEach(function (col) {
+      col.addEventListener('shown.bs.collapse',  syncAndShow);
+      col.addEventListener('hidden.bs.collapse', syncAndShow);
+    });
+  });
+})();
 </script>
 {% endblock %}
