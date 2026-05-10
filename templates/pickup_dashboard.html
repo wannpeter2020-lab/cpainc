@@ -150,9 +150,9 @@
 {# ── Macro: render a table of rows with grouping support ── #}
 {% macro event_table(rows, groups, group_order, show_history=false, table_id='evt-table', section='') %}
 {% if rows %}
-<div class="table-responsive">
+<div class="table-responsive" style="max-height:calc(100vh - 220px);overflow-y:auto;">
   <table class="table table-hover mb-0 align-middle sortable-table" id="{{ table_id }}">
-    <thead style="position:sticky;top:57px;z-index:3;">
+    <thead style="position:sticky;top:0;z-index:3;">
       <tr>
         <th>Booking ID</th>
         <th>Event / Organization</th>
@@ -179,7 +179,7 @@
         <th>OTA Rate</th>
         <th>Status</th>
         {% if show_history %}<th>History</th>{% endif %}
-        <th style="position:sticky;right:0;background:#eaf0fb;z-index:4;"></th>
+        <th style="position:sticky;right:0;background:#eaf0fb;z-index:5;"></th>
       </tr>
     </thead>
     <tbody>
