@@ -24,21 +24,49 @@
 <body>
 <nav class="navbar navbar-expand-lg mb-4 sticky-top">
   <div class="container-fluid">
-    <a class="navbar-brand fw-bold" href="/"><i class="bi bi-building"></i> CPAinc Pipeline</a>
+    <a class="navbar-brand fw-bold" href="/"><i class="bi bi-building"></i> Conference Planning Associates Inc.</a>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
+
+        {# ── Dashboard ── #}
         {% if has_perm('dashboard') %}
-        <li class="nav-item"><a class="nav-link" href="/dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link {% if request.path == '/dashboard' %}active{% endif %}" href="/dashboard"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
         {% endif %}
+
+        {# ── Bookings (dropdown) ── #}
         {% if has_perm('bookings_view') %}
-        <li class="nav-item"><a class="nav-link" href="/"><i class="bi bi-list-ul"></i> Bookings</a></li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.path == '/' or request.path.startswith('/booking') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-list-ul me-1"></i>Bookings
+          </a>
+          <ul class="dropdown-menu">
+            <li><a class="dropdown-item" href="/"><i class="bi bi-list-ul me-2"></i>Bookings</a></li>
+            {% if has_perm('bookings_edit') %}
+            <li><a class="dropdown-item" href="/booking/new"><i class="bi bi-plus-circle me-2"></i>New Booking</a></li>
+            {% endif %}
+          </ul>
+        </li>
         {% endif %}
-        {% if has_perm('bookings_edit') %}
-        <li class="nav-item"><a class="nav-link" href="/booking/new"><i class="bi bi-plus-circle"></i> New Booking</a></li>
+
+        {# ── RFPs ── #}
+        {% if has_perm('pickups_payments') %}
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/rfp') %}active{% endif %}" href="/rfp"><i class="bi bi-file-earmark-text me-1"></i>RFP's</a></li>
         {% endif %}
+
+        {# ── Pickup RPT/TRK ── #}
+        {% if has_perm('pickups_payments') %}
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/pickup') %}active{% endif %}" href="/pickup"><i class="bi bi-calendar-check me-1"></i>Pickup RPT/TRK</a></li>
+        {% endif %}
+
+        {# ── Contracts ── #}
+        {% if has_perm('pickups_payments') %}
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/contracts') %}active{% endif %}" href="/contracts/templates"><i class="bi bi-file-word me-1"></i>Contracts</a></li>
+        {% endif %}
+
+        {# ── Reports (dropdown) ── #}
         {% if has_perm('reports_commission_kristin') or has_perm('reports_commission_team') or has_perm('reports_payments') or has_perm('reports_customer_summary') %}
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="bi bi-bar-chart"></i> Reports</a>
+          <a class="nav-link dropdown-toggle {% if request.path.startswith('/reports') %}active{% endif %}" href="#" data-bs-toggle="dropdown"><i class="bi bi-bar-chart me-1"></i>Reports</a>
           <ul class="dropdown-menu">
             {% if has_perm('reports_commission_kristin') %}
             <li><a class="dropdown-item" href="/reports/commission?who=kristin"><i class="bi bi-person-circle me-2"></i>Kristin — Missing Commission</a></li>
@@ -56,15 +84,16 @@
           </ul>
         </li>
         {% endif %}
+
+        {# ── Contacts ── #}
         {% if has_perm('pickups_payments') %}
-        <li class="nav-item"><a class="nav-link" href="/pickup"><i class="bi bi-calendar-check"></i> Pickup Tracking</a></li>
-        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/rfp') %}active{% endif %}" href="/rfp"><i class="bi bi-file-earmark-text me-1"></i> RFP Tracking</a></li>
-        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/contracts') %}active{% endif %}" href="/contracts/templates"><i class="bi bi-file-word me-1"></i> Contracts</a></li>
-        <li class="nav-item"><a class="nav-link" href="/contacts"><i class="bi bi-person-lines-fill"></i> Contacts</a></li>
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/contacts') %}active{% endif %}" href="/contacts"><i class="bi bi-person-lines-fill me-1"></i>Contacts</a></li>
         {% endif %}
+
+        {# ── Outlook (dropdown) ── #}
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle {% if request.path.startswith('/outlook') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
-            <i class="bi bi-microsoft"></i> Outlook
+            <i class="bi bi-microsoft me-1"></i>Outlook
           </a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item" href="/outlook/inbox"><i class="bi bi-envelope me-2"></i>Inbox</a></li>
@@ -73,14 +102,35 @@
             <li><a class="dropdown-item" href="/outlook/status"><i class="bi bi-plug me-2"></i>Connection Settings</a></li>
           </ul>
         </li>
-        <li class="nav-item"><a class="nav-link fw-semibold" href="/assistant" style="background:rgba(255,255,255,.15);border-radius:6px;padding:.4rem .75rem;"><i class="bi bi-robot me-1"></i>Assistant</a></li>
-        <li class="nav-item"><a class="nav-link" href="/help" target="_blank"><i class="bi bi-question-circle"></i> Help</a></li>
+
+        {# ── Help (dropdown: Assistant + Help) ── #}
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.path.startswith('/assistant') or request.path.startswith('/help') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-question-circle me-1"></i>Help
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="/assistant"><i class="bi bi-robot me-2"></i>Assistant</a></li>
+            <li><a class="dropdown-item" href="/help" target="_blank"><i class="bi bi-book me-2"></i>Help Guide</a></li>
+          </ul>
+        </li>
+
+        {# ── Settings (dropdown: Settings + Users) ── #}
         {% if has_perm('admin_panel') %}
-        <li class="nav-item"><a class="nav-link" href="/settings"><i class="bi bi-gear"></i> Settings</a></li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if request.path.startswith('/settings') or request.path.startswith('/admin') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-gear me-1"></i>Settings
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="/settings"><i class="bi bi-sliders me-2"></i>Settings</a></li>
+            <li><a class="dropdown-item" href="/admin/users"><i class="bi bi-people me-2"></i>Users</a></li>
+          </ul>
+        </li>
         {% endif %}
+
+        {# ── Import (dropdown) ── #}
         {% if has_perm('import_bookings') or has_perm('import_payments') or has_perm('import_hhr') or has_perm('import_cancelled') %}
         <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown"><i class="bi bi-upload"></i> Import</a>
+          <a class="nav-link dropdown-toggle {% if request.path.startswith('/import') %}active{% endif %}" href="#" data-bs-toggle="dropdown"><i class="bi bi-upload me-1"></i>Import</a>
           <ul class="dropdown-menu dropdown-menu-end">
             {% if has_perm('import_bookings') %}<li><a class="dropdown-item" href="/import"><i class="bi bi-calendar-event me-2"></i>Import Bookings</a></li>{% endif %}
             {% if has_perm('import_payments') %}
@@ -92,10 +142,8 @@
           </ul>
         </li>
         {% endif %}
-        {% if has_perm('admin_panel') %}
-        <li class="nav-item"><a class="nav-link" href="/admin/users"><i class="bi bi-people"></i> Users</a></li>
-        {% endif %}
-        {# User / logout #}
+
+        {# ── User / logout ── #}
         {% if current_user %}
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
@@ -110,6 +158,7 @@
           </ul>
         </li>
         {% endif %}
+
       </ul>
     </div>
   </div>
