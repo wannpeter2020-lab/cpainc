@@ -3583,17 +3583,6 @@ def admin_fix_asa_dates():
     return html
 
 
-# ── One-time: clear bogus Test@None email on production ───────────────────────
-@app.route('/admin/fix-bogus-emails')
-def admin_fix_bogus_emails():
-    user = get_current_user()
-    if not user or not has_permission(user, 'admin_panel'):
-        return 'Forbidden', 403
-    db = get_db()
-    r = db.execute("UPDATE pickup_config SET group_contact_email=NULL WHERE group_contact_email='Test@None'")
-    db.commit()
-    return f'<h3>Done — {r.rowcount} record(s) fixed.</h3><p><a href="/pickup">Go to Pickup</a></p>'
-
 
 # ── Status Board ──────────────────────────────────────────────────────────────
 
