@@ -3295,6 +3295,12 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+    # Add EventID to ReportPipeline if not present
+    try:
+        db.execute('ALTER TABLE ReportPipeline ADD COLUMN EventID TEXT')
+        db.commit()
+    except Exception:
+        pass
 
 
 try:
