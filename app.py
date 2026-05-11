@@ -3678,7 +3678,17 @@ def _log_activity(response):
             return
 
         uid      = session.get('user_id')
-        username = session.get('username') or 'unknown'
+        username = session.get('username')
+        if not username and uid:
+            # Fall back to DB lookup for sessions that predate the username cache
+            try:
+                row = get_db().execute('SELECT name FROM Users WHERE id=?', (uid,)).fetchone()
+                if row:
+                    username = row['name']
+                    session['username'] = username  # cache it going forward
+            except Exception:
+                pass
+        username = username or 'unknown'
         path     = request.path
 
         # Build human-readable description
@@ -3752,7 +3762,9 @@ def login():
         ).fetchone()
         if user and check_password_hash(user['password_hash'], password):
             session.clear()
-            session['user_id'] = user['id']
+            session['user_id']   = user['id']
+            session['username']  = user['name']
+            session['user_role'] = user['role']
             next_page = request.form.get('next') or request.args.get('next') or url_for('index')
             return redirect(next_page)
         error = 'Invalid username or password.'

@@ -25,7 +25,11 @@
 <nav class="navbar navbar-expand-lg mb-4 sticky-top">
   <div class="container-fluid">
     <a class="navbar-brand fw-bold" href="/"><i class="bi bi-building"></i> Conference Planning Associates Inc.</a>
-    <div class="collapse navbar-collapse">
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+            aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span style="color:#fff;font-size:1.4rem;"><i class="bi bi-list"></i></span>
+    </button>
+    <div class="collapse navbar-collapse" id="mainNav">
       <ul class="navbar-nav ms-auto">
 
         {# ── Status Board ── #}
@@ -123,15 +127,20 @@
           </ul>
         </li>
 
-        {# ── Settings (dropdown: Settings + Users) ── #}
+        {# ── Settings (dropdown: Settings + Admin) ── #}
         {% if has_perm('admin_panel') %}
         <li class="nav-item dropdown">
           <a class="nav-link dropdown-toggle {% if request.path.startswith('/settings') or request.path.startswith('/admin') %}active{% endif %}" href="#" data-bs-toggle="dropdown">
-            <i class="bi bi-gear me-1"></i>Settings
+            <i class="bi bi-gear me-1"></i>Admin
           </a>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item" href="/settings"><i class="bi bi-sliders me-2"></i>Settings</a></li>
-            <li><a class="dropdown-item" href="/admin/users"><i class="bi bi-people me-2"></i>Users</a></li>
+            <li><a class="dropdown-item" href="/admin/users"><i class="bi bi-people me-2"></i>User Management</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="/admin/activity-log"><i class="bi bi-clock-history me-2"></i>Activity Log</a></li>
+            <li><a class="dropdown-item" href="/admin/change-log"><i class="bi bi-pencil-square me-2"></i>Change Log</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item" href="/admin/download-db"><i class="bi bi-download me-2"></i>Download Database</a></li>
           </ul>
         </li>
         {% endif %}
