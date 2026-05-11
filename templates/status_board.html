@@ -58,14 +58,22 @@
         </span>
       </div>
       <div class="card-body p-0">
-        <table class="table table-hover table-sm mb-0 align-middle">
+        <table class="table table-hover table-sm mb-0 align-middle sb-sortable">
           <thead>
             <tr>
-              <th>Booking ID</th>
-              <th>Event / Organization</th>
+              <th class="sb-sort-th" data-col="0" style="cursor:pointer;white-space:nowrap">
+                Booking ID <span class="sb-sort-icon text-muted small"></span>
+              </th>
+              <th class="sb-sort-th" data-col="1" style="cursor:pointer;white-space:nowrap">
+                Event / Organization <span class="sb-sort-icon text-muted small"></span>
+              </th>
               <th>Hotel</th>
-              <th>Start</th>
-              <th>End</th>
+              <th class="sb-sort-th" data-col="3" style="cursor:pointer;white-space:nowrap">
+                Start <span class="sb-sort-icon text-muted small">▲</span>
+              </th>
+              <th class="sb-sort-th" data-col="4" style="cursor:pointer;white-space:nowrap">
+                End <span class="sb-sort-icon text-muted small"></span>
+              </th>
               <th>Issue</th>
               <th style="min-width:90px"></th>
               <th style="min-width:160px"></th>
@@ -74,21 +82,21 @@
           <tbody>
             {% for item in items %}
             <tr id="row-{{ itype }}-{{ item.config_id }}">
-              <td class="font-monospace small">
+              <td class="font-monospace small" data-sort="{{ item.booking_id or '0' }}">
                 {% if item.booking_id %}
                   <a href="{{ url_for('booking_detail', booking_id=item.booking_id) }}"
                      class="text-decoration-none" title="Open booking">{{ item.booking_id }}</a>
                 {% else %}—{% endif %}
               </td>
-              <td>
+              <td data-sort="{{ item.event_name | lower }}">
                 <div class="fw-semibold">{{ item.event_name }}</div>
                 {% if item.organization and item.organization != item.event_name %}
                 <div class="text-muted small">{{ item.organization }}</div>
                 {% endif %}
               </td>
               <td class="small">{{ item.hotel }}</td>
-              <td class="small text-nowrap">{{ item.event_start | us_date }}</td>
-              <td class="small text-nowrap">{{ item.event_end   | us_date }}</td>
+              <td class="small text-nowrap" data-sort="{{ item.event_start or '9999' }}">{{ item.event_start | us_date }}</td>
+              <td class="small text-nowrap" data-sort="{{ item.event_end or '9999' }}">{{ item.event_end | us_date }}</td>
               <td class="small text-muted">{{ item.detail }}</td>
               <td>
                 <a href="{{ item.fix_url }}" class="btn btn-sm btn-primary">
@@ -214,5 +222,53 @@ document.querySelectorAll('.ignore-btn').forEach(function(btn) {
     });
   });
 });
+
+// ── Table sorting ────────────────────────────────────────────────────────────
+(function() {
+  // Track sort state per table: { col, asc }
+  const state = new WeakMap();
+
+  function sortTable(table, col, asc) {
+    const tbody = table.querySelector('tbody');
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {
+      const av = (a.cells[col] ? a.cells[col].dataset.sort || a.cells[col].textContent.trim() : '');
+      const bv = (b.cells[col] ? b.cells[col].dataset.sort || b.cells[col].textContent.trim() : '');
+      return asc ? av.localeCompare(bv, undefined, {numeric: true})
+                 : bv.localeCompare(av, undefined, {numeric: true});
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+
+    // Update header icons
+    table.querySelectorAll('.sb-sort-th').forEach(function(th) {
+      const icon = th.querySelector('.sb-sort-icon');
+      if (!icon) return;
+      if (parseInt(th.dataset.col) === col) {
+        icon.textContent = asc ? '▲' : '▼';
+        th.style.color = '';
+      } else {
+        icon.textContent = '';
+      }
+    });
+  }
+
+  // Apply default sort (Start = col 3, asc) to every table on load
+  document.querySelectorAll('.sb-sortable').forEach(function(table) {
+    state.set(table, {col: 3, asc: true});
+    sortTable(table, 3, true);
+  });
+
+  // Click handler
+  document.querySelectorAll('.sb-sort-th').forEach(function(th) {
+    th.addEventListener('click', function() {
+      const table = th.closest('table');
+      const col   = parseInt(th.dataset.col);
+      const cur   = state.get(table) || {col: 3, asc: true};
+      const asc   = (cur.col === col) ? !cur.asc : true;
+      state.set(table, {col, asc});
+      sortTable(table, col, asc);
+    });
+  });
+})();
 </script>
 {% endblock %}
