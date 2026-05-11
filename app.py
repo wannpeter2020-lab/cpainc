@@ -3959,8 +3959,8 @@ def status_board():
                            f'Last report was {days_since} days ago ({last_rpt}).',
                            url_for('pickup_event', cid=cid))
 
-        # 2. Past cutoff with no pickup history
-        if cutoff and cutoff < today and cid not in has_history:
+        # 2. Past cutoff with no pickup history (only while event is still ongoing)
+        if cutoff and cutoff < today and cid not in has_history and not is_ended:
             _issue('past_cutoff_no_history',
                    f'Cutoff was {cutoff} — no pickup history entered yet.',
                    url_for('pickup_event', cid=cid))
