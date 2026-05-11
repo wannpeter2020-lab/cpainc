@@ -3762,20 +3762,32 @@ def admin_fix_wrong_year_blocks():
             except Exception:
                 pass
 
-            block_years = set(int(k[:4]) for k in block if len(k) >= 4)
-            wrong_year  = bool(block_years and correct_year and correct_year not in block_years)
+            stray_keys  = [k for k in block if len(k) >= 4 and correct_year and int(k[:4]) != correct_year]
+            good_keys   = [k for k in block if k not in stray_keys]
             need_unarch = row['status'] == 'archived'
 
-            if wrong_year or need_unarch:
-                new_block = '{}' if wrong_year else row['contracted_block']
+            if stray_keys or need_unarch:
+                if stray_keys and not good_keys:
+                    # All keys are wrong-year → wipe entire block
+                    new_block = '{}'
+                    block_note = f"cleared entire block (stray dates: {stray_keys})"
+                elif stray_keys:
+                    # Mixed: remove only the stray keys, keep the correct ones
+                    clean = {k: v for k, v in block.items() if k not in stray_keys}
+                    new_block = json.dumps(clean)
+                    block_note = f"removed stray date(s): {stray_keys}"
+                else:
+                    new_block = row['contracted_block']
+                    block_note = None
+
                 db.execute(
                     "UPDATE pickup_config SET contracted_block=?, status='active' WHERE id=?",
                     (new_block, cid)
                 )
                 msg = f"BID {bid} CID {cid} ({row['hotel']}): "
                 parts = []
-                if wrong_year:
-                    parts.append(f"cleared block (had year(s) {block_years}, expected {correct_year})")
+                if block_note:
+                    parts.append(block_note)
                 if need_unarch:
                     parts.append("unarchived")
                 results.append(msg + '; '.join(parts))
