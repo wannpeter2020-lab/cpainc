@@ -2758,9 +2758,40 @@ def parse_pickup_report(filepath):
                             pass
                 if len(nums) >= 2:
                     result['total_revenue'] = nums[1]
+                elif len(nums) == 1 and nums[0] > 10000:
+                    # Some formats put only the commission total here; skip — use fallback below
+                    pass
                 if len(nums) >= 3:
                     result['avg_rate'] = nums[2]
                 break
+
+        # Fallback: scan for "Total Actualized Pickup Revenue" (Renaissance-style HHR format)
+        # This row contains the actual room revenue when the commission row doesn't have it.
+        if not result['total_revenue']:
+            for idx, row in df.iterrows():
+                row_str_joined = ' '.join(str(v) for v in row.values if pd.notna(v)).upper()
+                if 'TOTAL ACTUALIZED PICKUP REVENUE' in row_str_joined or \
+                   ('ACTUALIZED' in row_str_joined and 'REVENUE' in row_str_joined and 'PICKUP' in row_str_joined):
+                    rev_nums = []
+                    for v in row.values:
+                        if pd.notna(v):
+                            try:
+                                f = float(v)
+                                if not pd.isna(f) and f > 0:
+                                    rev_nums.append(f)
+                            except Exception:
+                                pass
+                    if rev_nums:
+                        # Take the largest number as the revenue figure
+                        result['total_revenue'] = max(rev_nums)
+                    break
+
+        # Fallback: derive avg_rate from revenue ÷ actual_pickup when not directly found
+        if result['total_revenue'] and result['actual_pickup'] and not result['avg_rate']:
+            try:
+                result['avg_rate'] = round(float(result['total_revenue']) / float(result['actual_pickup']), 2)
+            except Exception:
+                pass
 
         # Currency conversion: if not USD, fetch live rate and convert revenue to USD
         if result['currency_code'] != 'USD' and result['total_revenue']:
