@@ -13,6 +13,62 @@
   </div>
 </div>
 
+{# ── KPI Cards ── #}
+{% if kpis %}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100 border-primary">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-primary">{{ kpis.active_events }}</div>
+        <div class="small text-muted">Active Events</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100 border-info">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-info">{{ kpis.future_events }}</div>
+        <div class="small text-muted">Future Events</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold">{{ kpis.contracted_rn | int | format_number }}</div>
+        <div class="small text-muted">Contracted Room Nights</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100 border-success">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold text-success">{{ kpis.current_pickup | int | format_number }}</div>
+        <div class="small text-muted">Current Pickup RN</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100 {% if kpis.pickup_pct and kpis.pickup_pct >= 80 %}border-success{% elif kpis.pickup_pct and kpis.pickup_pct >= 60 %}border-warning{% elif kpis.pickup_pct %}border-danger{% endif %}">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold {% if kpis.pickup_pct and kpis.pickup_pct >= 80 %}text-success{% elif kpis.pickup_pct and kpis.pickup_pct >= 60 %}text-warning{% elif kpis.pickup_pct %}text-danger{% endif %}">
+          {% if kpis.pickup_pct is not none %}{{ kpis.pickup_pct }}%{% else %}—{% endif %}
+        </div>
+        <div class="small text-muted">Avg Pickup %</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="card text-center h-100 {% if kpis.missing_hhr > 0 %}border-danger{% endif %}">
+      <div class="card-body py-3">
+        <div class="fs-2 fw-bold {% if kpis.missing_hhr > 0 %}text-danger{% endif %}">{{ kpis.missing_hhr }}</div>
+        <div class="small text-muted">Missing HHR</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── Helper macro: render a single hotel row ── #}
 {% macro hotel_row(r, show_history=false, section='', indent=false) %}
 <tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}">

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Change Log — CPAinc{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Change Log</h4>
+    <div class="text-muted small mt-1">{{ total }} change(s) recorded</div>
+  </div>
+  <a href="{{ url_for('admin_activity_log') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-clock-history me-1"></i>Activity Log
+  </a>
+</div>
+
+{# ── Filters ── #}
+<form method="get" class="card card-body mb-3 p-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-auto">
+      <label class="form-label small mb-1">User</label>
+      <select name="user" class="form-select form-select-sm" style="min-width:140px;">
+        <option value="">All Users</option>
+        {% for u in all_users %}
+        <option value="{{ u }}" {% if u == filter_user %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-1">Date</label>
+      <input type="date" name="date" class="form-control form-control-sm"
+             value="{{ filter_date }}" style="min-width:145px;">
+    </div>
+    <div class="col-auto">
+      <label class="form-label small mb-1">Config ID</label>
+      <input type="number" name="cid" class="form-control form-control-sm"
+             value="{{ filter_cid }}" style="width:90px;" placeholder="e.g. 21">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-sm btn-primary">
+        <i class="bi bi-funnel me-1"></i>Filter
+      </button>
+      <a href="{{ url_for('admin_change_log') }}" class="btn btn-sm btn-outline-secondary ms-1">Clear</a>
+    </div>
+  </div>
+</form>
+
+{% if logs %}
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0 align-middle" style="font-size:.85rem;">
+        <thead class="table-light">
+          <tr>
+            <th style="white-space:nowrap;min-width:145px;">Date &amp; Time</th>
+            <th style="min-width:100px;">User</th>
+            <th style="min-width:120px;">Event</th>
+            <th style="min-width:80px;">Action</th>
+            <th style="min-width:130px;">Field</th>
+            <th>Old Value</th>
+            <th>New Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set ns = namespace(prev_date='') %}
+          {% for log in logs %}
+            {% set log_date = log.timestamp[:10] if log.timestamp else '' %}
+            {% if log_date != ns.prev_date %}
+              {% set ns.prev_date = log_date %}
+              <tr class="table-secondary">
+                <td colspan="7" class="fw-semibold py-1 px-3" style="font-size:.8rem;">
+                  <i class="bi bi-calendar3 me-1"></i>{{ log_date | us_date }}
+                </td>
+              </tr>
+            {% endif %}
+            <tr>
+              <td class="text-nowrap font-monospace text-muted" style="font-size:.78rem;">
+                {{ log.timestamp[11:16] if log.timestamp else '—' }}
+              </td>
+              <td><span class="badge bg-secondary">{{ log.username or '—' }}</span></td>
+              <td class="small">
+                {% if log.event_name %}
+                  <a href="{{ url_for('pickup_event', cid=log.config_id) }}"
+                     class="text-decoration-none">{{ log.event_name[:40] }}</a>
+                {% else %}
+                  <span class="text-muted">Config #{{ log.config_id }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge
+                  {% if log.action == 'edit_event' %}bg-primary
+                  {% elif log.action == 'add_report' %}bg-success
+                  {% elif log.action == 'edit_report' %}bg-warning text-dark
+                  {% elif log.action == 'delete_report' %}bg-danger
+                  {% else %}bg-secondary{% endif %}">
+                  {{ log.action | replace('_',' ') | title }}
+                </span>
+              </td>
+              <td class="small text-muted">{{ log.field or '—' }}</td>
+              <td class="small">
+                {% if log.old_value and log.old_value|length > 80 %}
+                  <span class="text-muted" title="{{ log.old_value }}">{{ log.old_value[:80] }}…</span>
+                {% else %}
+                  <span class="text-muted">{{ log.old_value or '—' }}</span>
+                {% endif %}
+              </td>
+              <td class="small">
+                {% if log.new_value and log.new_value|length > 80 %}
+                  <span title="{{ log.new_value }}">{{ log.new_value[:80] }}…</span>
+                {% else %}
+                  {{ log.new_value or '—' }}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% if total_pages > 1 %}
+<nav class="mt-3">
+  <ul class="pagination pagination-sm">
+    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+      <a class="page-link" href="?page={{ page-1 }}&user={{ filter_user }}&date={{ filter_date }}&cid={{ filter_cid }}">
+        &laquo; Prev
+      </a>
+    </li>
+    {% for p in range(1, total_pages+1) %}
+      {% if p == page or p == 1 or p == total_pages or (p >= page-2 and p <= page+2) %}
+        {% if loop.previtem is defined and p - loop.previtem > 1 %}
+          <li class="page-item disabled"><span class="page-link">…</span></li>
+        {% endif %}
+        <li class="page-item {% if p == page %}active{% endif %}">
+          <a class="page-link" href="?page={{ p }}&user={{ filter_user }}&date={{ filter_date }}&cid={{ filter_cid }}">{{ p }}</a>
+        </li>
+      {% endif %}
+    {% endfor %}
+    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+      <a class="page-link" href="?page={{ page+1 }}&user={{ filter_user }}&date={{ filter_date }}&cid={{ filter_cid }}">
+        Next &raquo;
+      </a>
+    </li>
+  </ul>
+</nav>
+{% endif %}
+
+{% else %}
+<div class="card">
+  <div class="card-body text-center text-muted py-5">
+    <i class="bi bi-inbox" style="font-size:2rem;"></i>
+    <p class="mt-2 mb-0">No changes found for the selected filters.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -34,6 +34,53 @@ _DATA_DIR = os.environ.get('DATA_DIR', os.path.dirname(__file__))
 os.makedirs(_DATA_DIR, exist_ok=True)
 DATABASE = os.path.join(_DATA_DIR, 'CPAinc.sqlite')
 
+# ── Email configuration (set these as Railway environment variables) ──────────
+MAIL_SERVER   = os.environ.get('MAIL_SERVER',   'smtp.gmail.com')
+MAIL_PORT     = int(os.environ.get('MAIL_PORT', '587'))
+MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
+MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
+MAIL_FROM     = os.environ.get('MAIL_FROM',     MAIL_USERNAME)
+MAIL_TO       = os.environ.get('MAIL_TO',       '')   # comma-separated alert recipients
+DAILY_TASK_KEY= os.environ.get('DAILY_TASK_KEY','')   # secret key for /admin/run-daily-tasks
+
+SESSION_TIMEOUT_SECONDS = 3600  # 1 hour
+
+
+def send_email(to_addrs, subject, body_html, attachments=None):
+    """Send an email via SMTP. to_addrs can be a string or list. Returns (ok, error)."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text      import MIMEText
+    from email.mime.base      import MIMEBase
+    from email                import encoders as _enc
+    if not MAIL_USERNAME or not MAIL_PASSWORD:
+        return False, 'Email not configured (MAIL_USERNAME / MAIL_PASSWORD missing)'
+    if isinstance(to_addrs, str):
+        to_addrs = [a.strip() for a in to_addrs.split(',') if a.strip()]
+    if not to_addrs:
+        return False, 'No recipients'
+    try:
+        msg = MIMEMultipart('mixed')
+        msg['From']    = MAIL_FROM or MAIL_USERNAME
+        msg['To']      = ', '.join(to_addrs)
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body_html, 'html'))
+        if attachments:
+            for fname, data in attachments:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(data)
+                _enc.encode_base64(part)
+                part.add_header('Content-Disposition', f'attachment; filename="{fname}"')
+                msg.attach(part)
+        with smtplib.SMTP(MAIL_SERVER, MAIL_PORT, timeout=15) as s:
+            s.ehlo()
+            s.starttls()
+            s.login(MAIL_USERNAME, MAIL_PASSWORD)
+            s.sendmail(msg['From'], to_addrs, msg.as_string())
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
 def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DATABASE)
@@ -95,6 +142,13 @@ def fmt_pct(val):
         return f'{float(val)*100:.1f}%'
     except Exception:
         return str(val)
+
+@app.template_filter('format_number')
+def format_number(val):
+    try:
+        return f'{int(val):,}'
+    except Exception:
+        return str(val) if val is not None else '—'
 
 # ── Settings helpers ──────────────────────────────────────────────────────────
 
@@ -3283,6 +3337,17 @@ def ensure_auth_tables():
             detail      TEXT,
             ip_address  TEXT
         );
+        CREATE TABLE IF NOT EXISTS pickup_change_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id   INTEGER REFERENCES pickup_config(id) ON DELETE CASCADE,
+            user_id     INTEGER,
+            username    TEXT,
+            timestamp   TEXT DEFAULT (datetime('now','localtime')),
+            action      TEXT,
+            field       TEXT,
+            old_value   TEXT,
+            new_value   TEXT
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -3369,10 +3434,44 @@ def require_login():
         if request.headers.get('X-Requested-With') == 'fetch' or request.is_json:
             return jsonify({'ok': False, 'error': 'Not authenticated'}), 401
         return redirect(url_for('login', next=request.path))
+    # ── Session timeout (1 hour of inactivity) ──
+    last_active = session.get('last_activity')
+    now_ts = datetime.utcnow()
+    if last_active:
+        try:
+            elapsed = (now_ts - datetime.fromisoformat(last_active)).total_seconds()
+            if elapsed > SESSION_TIMEOUT_SECONDS:
+                session.clear()
+                if request.headers.get('X-Requested-With') == 'fetch' or request.is_json:
+                    return jsonify({'ok': False, 'error': 'Session expired'}), 401
+                flash('Your session expired after 1 hour of inactivity. Please log in again.', 'warning')
+                return redirect(url_for('login', next=request.path))
+        except Exception:
+            pass
+    session['last_activity'] = now_ts.isoformat()
     user = get_db().execute('SELECT id, active FROM Users WHERE id = ?', (uid,)).fetchone()
     if not user or not user['active']:
         session.clear()
         return redirect(url_for('login'))
+
+
+# ── Change log helper ────────────────────────────────────────────────────────
+
+def _log_change(db, config_id, action, changes):
+    """Record field-level changes to a pickup_config record.
+    changes = list of (field, old_value, new_value) tuples.
+    Only logs entries where old != new."""
+    uid      = session.get('user_id')
+    username = session.get('username') or 'unknown'
+    for field, old_val, new_val in changes:
+        old_s = str(old_val) if old_val is not None else ''
+        new_s = str(new_val) if new_val is not None else ''
+        if old_s != new_s:
+            db.execute(
+                '''INSERT INTO pickup_change_log (config_id, user_id, username, action, field, old_value, new_value)
+                   VALUES (?,?,?,?,?,?,?)''',
+                (config_id, uid, username, action, field, old_s or None, new_s or None)
+            )
 
 
 # ── Activity logging ──────────────────────────────────────────────────────────
@@ -5068,13 +5167,53 @@ def pickup_dashboard():
     future_groups,  future_group_order  = _build_groups(future_rows)
     past_groups,    past_group_order    = _build_groups(past_rows)
 
+    # ── KPI metrics ──────────────────────────────────────────────────────────
+    def _sum_block(rows):
+        t = 0
+        for r in rows:
+            try:
+                t += sum(json.loads(r['config']['contracted_block'] or '{}').values())
+            except Exception:
+                pass
+        return t
+
+    kpi_active_events      = len(current_rows)
+    kpi_future_events      = len(future_rows)
+    kpi_contracted_rn      = _sum_block(current_rows) + _sum_block(future_rows)
+    kpi_current_pickup     = sum((r['last_total'] or 0) for r in current_rows)
+    kpi_contracted_rn_cur  = _sum_block(current_rows)
+    kpi_pickup_pct         = round(kpi_current_pickup / kpi_contracted_rn_cur * 100, 1) if kpi_contracted_rn_cur else None
+
+    # Status board open items — count from issues_by_type logic (quick query)
+    kpi_status_items = db.execute(
+        "SELECT COUNT(*) FROM pickup_config WHERE status='active'"
+    ).fetchone()[0]  # placeholder — actual count needs status board logic; show total active
+
+    # Events missing HHR (ended with no HHR)
+    has_hhr_bids = {str(r[0]) for r in db.execute(
+        "SELECT DISTINCT booking_id FROM housing_history_files WHERE booking_id IS NOT NULL"
+    ).fetchall()}
+    kpi_missing_hhr = sum(
+        1 for r in past_rows
+        if str(r['config']['booking_id'] or '') not in has_hhr_bids
+    )
+
+    kpis = {
+        'active_events':   kpi_active_events,
+        'future_events':   kpi_future_events,
+        'contracted_rn':   kpi_contracted_rn,
+        'current_pickup':  kpi_current_pickup,
+        'pickup_pct':      kpi_pickup_pct,
+        'missing_hhr':     kpi_missing_hhr,
+    }
+
     return render_template('pickup_dashboard.html',
                            past_rows=past_rows, current_rows=current_rows,
                            future_rows=future_rows, archived_rows=archived_rows,
                            current_groups=current_groups, current_group_order=current_group_order,
                            future_groups=future_groups,   future_group_order=future_group_order,
                            past_groups=past_groups,       past_group_order=past_group_order,
-                           today=today_str, sort_mode=sort_mode)
+                           today=today_str, sort_mode=sort_mode, kpis=kpis)
 
 
 # ── Import pickup data from Excel (NCSL-style master spreadsheet) ─────────────
@@ -7117,6 +7256,20 @@ def pickup_edit_event(cid):
         for n, e in zip(f.getlist('cc_name[]'), f.getlist('cc_email[]')):
             if n.strip() or e.strip():
                 cc_emails.append({'name': n.strip(), 'email': e.strip()})
+        _changes = [
+            ('organization',       config['organization'],       f['organization']),
+            ('event_name',         config['event_name'],         f.get('event_name')),
+            ('hotel',              config['hotel'],              f.get('hotel')),
+            ('cutoff_date',        config['cutoff_date'],        f.get('cutoff_date')),
+            ('contracted_rate',    config['contracted_rate'],    f.get('contracted_rate')),
+            ('attrition_pct',      config['attrition_pct'],      attrition),
+            ('contracted_block',   config['contracted_block'],   json.dumps(contracted_block)),
+            ('hotel_contact',      config['hotel_contact'],      hc_name),
+            ('hotel_contact_email',config['hotel_contact_email'],hc_email),
+            ('group_contact',      config['group_contact'],      gc_name),
+            ('group_contact_email',config['group_contact_email'],gc_email),
+            ('notes',              config['notes'],              f.get('notes')),
+        ]
         db.execute('''
             UPDATE pickup_config SET
             booking_id=?, tab_name=?, organization=?, event_name=?, hotel=?,
@@ -7135,6 +7288,7 @@ def pickup_edit_event(cid):
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
             f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails), cid
         ))
+        _log_change(db, cid, 'edit_event', _changes)
         db.commit()
         _upsert_contacts(db, hotel_contacts, f.get('hotel', ''), cc_emails, f['organization'])
         db.commit()
@@ -7192,6 +7346,11 @@ def pickup_weekly_new(cid):
         ''', (cid, f['report_date'], json.dumps(pickup_by_night), total_rooms,
               change_from_last, pct_of_block, pct_of_attrition, ota_rate,
               f.get('label'), f.get('notes')))
+        _log_change(db, cid, 'add_report', [
+            ('report_date', None, f['report_date']),
+            ('total_rooms', last['total_rooms'] if last else None, total_rooms),
+            ('pct_of_block', last['pct_of_block'] if last else None, pct_of_block),
+        ])
         db.commit()
         flash('Weekly entry saved.', 'success')
         return redirect(url_for('pickup_event', cid=cid))
@@ -9326,6 +9485,188 @@ def profile():
     ).fetchone()
     return render_template('profile.html', user=user, ms_token=ms_row)
 
+
+
+@app.route('/admin/change-log')
+def admin_change_log():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('Admin access required.', 'error')
+        return redirect(url_for('index'))
+    db = get_db()
+    filter_cid  = request.args.get('cid', '').strip()
+    filter_user = request.args.get('user', '').strip()
+    filter_date = request.args.get('date', '').strip()
+    page     = max(1, int(request.args.get('page', 1)))
+    per_page = 100
+    where, params = [], []
+    if filter_cid:
+        where.append('cl.config_id = ?'); params.append(filter_cid)
+    if filter_user:
+        where.append('cl.username = ?'); params.append(filter_user)
+    if filter_date:
+        where.append("DATE(cl.timestamp) = ?"); params.append(filter_date)
+    where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
+    total = db.execute(f'SELECT COUNT(*) FROM pickup_change_log cl {where_sql}', params).fetchone()[0]
+    logs  = db.execute(
+        f'''SELECT cl.*, pc.event_name, pc.hotel
+            FROM pickup_change_log cl
+            LEFT JOIN pickup_config pc ON pc.id = cl.config_id
+            {where_sql}
+            ORDER BY cl.id DESC LIMIT ? OFFSET ?''',
+        params + [per_page, (page-1)*per_page]
+    ).fetchall()
+    all_users = [r[0] for r in db.execute(
+        "SELECT DISTINCT username FROM pickup_change_log WHERE username IS NOT NULL ORDER BY username"
+    ).fetchall()]
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return render_template('change_log.html', logs=logs, total=total, page=page,
+                           total_pages=total_pages, per_page=per_page,
+                           filter_cid=filter_cid, filter_user=filter_user,
+                           filter_date=filter_date, all_users=all_users)
+
+
+@app.route('/admin/run-daily-tasks')
+def admin_run_daily_tasks():
+    """Called by an external cron service daily. Protected by DAILY_TASK_KEY.
+    Sends alert emails for overdue items and a DB backup every Sunday."""
+    key = request.args.get('key', '')
+    if DAILY_TASK_KEY and key != DAILY_TASK_KEY:
+        return 'Forbidden', 403
+    if not MAIL_TO:
+        return jsonify({'ok': False, 'error': 'MAIL_TO not configured'}), 500
+
+    db      = get_db()
+    today   = datetime.today().strftime('%Y-%m-%d')
+    log     = []
+
+    # ── 1. Build alert summary ────────────────────────────────────────────────
+    configs = db.execute(
+        "SELECT * FROM pickup_config WHERE status='active'"
+    ).fetchall()
+    has_hhr = {str(r[0]) for r in db.execute(
+        "SELECT DISTINCT booking_id FROM housing_history_files WHERE booking_id IS NOT NULL"
+    ).fetchall()}
+    has_history = {r[0] for r in db.execute(
+        "SELECT DISTINCT config_id FROM pickup_weekly"
+    ).fetchall()}
+    latest_pickup = {r[0]: r[1] for r in db.execute(
+        "SELECT config_id, MAX(report_date) FROM pickup_weekly GROUP BY config_id"
+    ).fetchall()}
+
+    alerts = {'overdue': [], 'cutoff_soon': [], 'ended_no_hhr': []}
+
+    for cfg in configs:
+        cid   = cfg['id']
+        block = {}
+        try:
+            block = json.loads(cfg['contracted_block'] or '{}')
+        except Exception:
+            pass
+        dates       = sorted(block.keys())
+        event_start = dates[0]  if dates else None
+        event_end   = dates[-1] if dates else None
+        cutoff      = (cfg['cutoff_date'] or '').strip()
+        is_started  = event_start and event_start <= today
+        is_ended    = event_end   and event_end   <  today
+        is_current  = is_started and not is_ended
+
+        if is_current:
+            last_rpt = latest_pickup.get(cid)
+            if not last_rpt:
+                alerts['overdue'].append(f"  • {cfg['event_name']} @ {cfg['hotel']} — no reports yet")
+            else:
+                days_since = (datetime.strptime(today, '%Y-%m-%d') -
+                              datetime.strptime(last_rpt, '%Y-%m-%d')).days
+                if days_since >= 7:
+                    alerts['overdue'].append(
+                        f"  • {cfg['event_name']} @ {cfg['hotel']} — last report {days_since} days ago ({last_rpt})"
+                    )
+            if cutoff:
+                try:
+                    days_to = (datetime.strptime(cutoff, '%Y-%m-%d') -
+                               datetime.strptime(today, '%Y-%m-%d')).days
+                    if 0 <= days_to <= 7:
+                        alerts['cutoff_soon'].append(
+                            f"  • {cfg['event_name']} @ {cfg['hotel']} — cutoff in {days_to} day(s) ({cutoff})"
+                        )
+                except Exception:
+                    pass
+
+        if is_ended and str(cfg['booking_id'] or '') not in has_hhr:
+            alerts['ended_no_hhr'].append(
+                f"  • {cfg['event_name']} @ {cfg['hotel']} — ended {event_end}"
+            )
+
+    # ── 2. Build email body ───────────────────────────────────────────────────
+    sections = []
+    if alerts['overdue']:
+        sections.append('<h3 style="color:#c0392b">⚠️ Overdue Pickup Reports</h3><pre style="background:#fdf2f2;padding:12px">'
+                        + '\n'.join(alerts['overdue']) + '</pre>')
+    if alerts['cutoff_soon']:
+        sections.append('<h3 style="color:#e67e22">📅 Cutoff Approaching (within 7 days)</h3><pre style="background:#fef9e7;padding:12px">'
+                        + '\n'.join(alerts['cutoff_soon']) + '</pre>')
+    if alerts['ended_no_hhr']:
+        sections.append('<h3 style="color:#8e44ad">📂 Events Ended — No HHR Uploaded</h3><pre style="background:#f5eef8;padding:12px">'
+                        + '\n'.join(alerts['ended_no_hhr']) + '</pre>')
+
+    sent_alert = False
+    if sections:
+        body = (f'<p>CPAinc daily alert — {today}</p>'
+                + ''.join(sections)
+                + '<p style="color:#888;font-size:.85em">Sent automatically by CPAinc. '
+                  'View the <a href="https://cpainc.up.railway.app/status-board">Status Board</a>.</p>')
+        ok, err = send_email(MAIL_TO, f'CPAinc Alerts — {today}', body)
+        sent_alert = ok
+        log.append(f"Alert email: {'sent' if ok else 'FAILED — ' + str(err)}")
+    else:
+        log.append('No alerts to send today.')
+
+    # ── 3. Sunday DB backup ───────────────────────────────────────────────────
+    import sqlite3 as _sq3, tempfile as _tmp
+    sent_backup = False
+    if datetime.today().weekday() == 6:   # 6 = Sunday
+        try:
+            with _tmp.NamedTemporaryFile(suffix='.sqlite', delete=False) as tf:
+                tmp_path = tf.name
+            src = _sq3.connect(DATABASE)
+            dst = _sq3.connect(tmp_path)
+            src.backup(dst); src.close(); dst.close()
+            with open(tmp_path, 'rb') as f:
+                db_bytes = f.read()
+            os.unlink(tmp_path)
+            backup_name = f'CPAinc_backup_{today}.sqlite'
+            ok, err = send_email(
+                MAIL_TO,
+                f'CPAinc Weekly DB Backup — {today}',
+                f'<p>Automated weekly database backup attached ({len(db_bytes)//1024} KB).</p>',
+                attachments=[(backup_name, db_bytes)]
+            )
+            sent_backup = ok
+            log.append(f"DB backup email: {'sent' if ok else 'FAILED — ' + str(err)}")
+        except Exception as e:
+            log.append(f'DB backup error: {e}')
+    else:
+        log.append('DB backup skipped (not Sunday).')
+
+    return jsonify({'ok': True, 'date': today, 'log': log,
+                    'alerts_sent': sent_alert, 'backup_sent': sent_backup})
+
+
+@app.route('/admin/test-email')
+def admin_test_email():
+    """Send a test email to verify MAIL_* settings are correct."""
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        return 'Forbidden', 403
+    to = request.args.get('to') or MAIL_TO
+    if not to:
+        return 'No recipient — set MAIL_TO env var or pass ?to=email@example.com', 400
+    ok, err = send_email(to, 'CPAinc — Test Email',
+                         '<p>Your CPAinc email alerts are configured correctly!</p>')
+    if ok:
+        return f'Test email sent to {to} ✓'
+    return f'Failed: {err}', 500
 
 
 if __name__ == '__main__':
