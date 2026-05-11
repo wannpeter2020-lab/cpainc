@@ -456,6 +456,56 @@
   {% endif %}
 </div>
 
+{# Recently deleted weekly reports (restorable within 90 days) #}
+{% if deleted_weekly %}
+<div class="card mb-3 border-secondary">
+  <div class="card-header bg-light text-muted d-flex justify-content-between align-items-center"
+       style="cursor:pointer;" data-bs-toggle="collapse" data-bs-target="#deletedWeekly">
+    <span><i class="bi bi-trash me-2"></i>Recently Deleted Reports
+      <span class="badge bg-secondary ms-1">{{ deleted_weekly|length }}</span>
+    </span>
+    <i class="bi bi-chevron-down small"></i>
+  </div>
+  <div class="collapse" id="deletedWeekly">
+    <div class="table-responsive">
+      <table class="table table-sm mb-0 align-middle" style="font-size:.85rem;">
+        <thead class="table-light">
+          <tr>
+            <th>Report Date</th>
+            <th class="text-end">Total Rooms</th>
+            <th class="text-end">% of Block</th>
+            <th>Deleted</th>
+            <th>Deleted By</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in deleted_weekly %}
+          <tr class="text-muted">
+            <td>{{ d.report_date | us_date }}</td>
+            <td class="text-end">{{ d.total_rooms or '—' }}</td>
+            <td class="text-end">{{ '%.1f%%'|format(d.pct_of_block) if d.pct_of_block else '—' }}</td>
+            <td class="small">{{ d.deleted_at[:16] if d.deleted_at else '—' }}</td>
+            <td class="small">{{ d.deleted_by or '—' }}</td>
+            <td>
+              <form method="post"
+                    action="{{ url_for('pickup_weekly_restore', cid=config['id'], did=d['id']) }}">
+                <button type="submit" class="btn btn-sm btn-outline-success"
+                        title="Restore this report">
+                  <i class="bi bi-arrow-counterclockwise me-1"></i>Restore
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-footer text-muted small">Deleted reports are kept for 90 days.</div>
+  </div>
+</div>
+{% endif %}
+
 {# Rooming list history #}
 <div class="card mb-3">
   <div class="card-header">Rooming List History</div>

@@ -231,8 +231,26 @@
   </div>
 </div>
 
+{% if duplicate_warnings %}
+<div class="alert alert-warning border-warning mb-3" role="alert">
+  <h6 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>Possible Duplicate Detected</h6>
+  <ul class="mb-2">
+    {% for w in duplicate_warnings %}
+    <li>{{ w | safe }}</li>
+    {% endfor %}
+  </ul>
+  <div class="form-check mt-2">
+    <input class="form-check-input" type="checkbox" name="confirm_duplicate" id="confirmDuplicate" value="1">
+    <label class="form-check-label fw-semibold" for="confirmDuplicate">
+      I understand this may be a duplicate — create it anyway
+    </label>
+  </div>
+</div>
+{% endif %}
+
 <div class="d-flex gap-2">
-  <button type="submit" class="btn btn-primary">
+  <button type="submit" class="btn btn-primary"
+    {% if duplicate_warnings %}id="submitBtn" disabled{% endif %}>
     <i class="bi bi-check-lg me-1"></i>Save Event
   </button>
   <a href="{{ cancel_url or url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
@@ -366,5 +384,14 @@ document.getElementById('blockBody').addEventListener('click', function(e) {
     if (document.querySelectorAll('#blockBody tr').length > 1) row.remove();
   }
 });
+
+// Duplicate confirm checkbox → enable submit
+const dupCheck = document.getElementById('confirmDuplicate');
+const submitBtn = document.getElementById('submitBtn');
+if (dupCheck && submitBtn) {
+  dupCheck.addEventListener('change', function() {
+    submitBtn.disabled = !this.checked;
+  });
+}
 </script>
 {% endblock %}

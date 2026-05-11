@@ -3337,6 +3337,22 @@ def ensure_auth_tables():
             detail      TEXT,
             ip_address  TEXT
         );
+        CREATE TABLE IF NOT EXISTS pickup_weekly_deleted (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_id     INTEGER,
+            config_id       INTEGER,
+            report_date     TEXT,
+            pickup_by_night TEXT,
+            total_rooms     INTEGER,
+            change_from_last INTEGER,
+            pct_of_block    REAL,
+            pct_of_attrition REAL,
+            ota_rate        REAL,
+            label           TEXT,
+            notes           TEXT,
+            deleted_at      TEXT DEFAULT (datetime('now','localtime')),
+            deleted_by      TEXT
+        );
         CREATE TABLE IF NOT EXISTS pickup_change_log (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             config_id   INTEGER REFERENCES pickup_config(id) ON DELETE CASCADE,
@@ -5386,6 +5402,60 @@ def pickup_new_event():
             if n.strip() or e.strip():
                 cc_emails.append({'name': n.strip(), 'email': e.strip()})
         db = get_db()
+
+        # ── Duplicate detection ──────────────────────────────────────────────
+        new_bid   = (f.get('booking_id') or '').strip()
+        new_event = (f.get('event_name') or '').strip().lower()
+        new_hotel = (f.get('hotel') or '').strip().lower()
+        duplicates = []
+        if new_bid:
+            bid_dups = db.execute(
+                "SELECT id, event_name, hotel, status FROM pickup_config "
+                "WHERE CAST(booking_id AS TEXT)=CAST(? AS TEXT)",
+                (new_bid,)
+            ).fetchall()
+            for d in bid_dups:
+                duplicates.append(
+                    f"Booking ID {new_bid} already exists: "
+                    f"<strong>{d['event_name']}</strong> @ {d['hotel']} "
+                    f"({'archived' if d['status']=='archived' else 'active'}) — "
+                    f"<a href=\"{url_for('pickup_event', cid=d['id'])}\">View</a>"
+                )
+        if new_event and new_hotel:
+            name_dups = db.execute(
+                "SELECT id, event_name, hotel, status FROM pickup_config "
+                "WHERE LOWER(TRIM(event_name))=? AND LOWER(TRIM(hotel))=? "
+                "AND (? = '' OR CAST(booking_id AS TEXT) != ?)",
+                (new_event, new_hotel, new_bid, new_bid)
+            ).fetchall()
+            for d in name_dups:
+                duplicates.append(
+                    f"Same event name + hotel already exists: "
+                    f"<strong>{d['event_name']}</strong> @ {d['hotel']} "
+                    f"({'archived' if d['status']=='archived' else 'active'}) — "
+                    f"<a href=\"{url_for('pickup_event', cid=d['id'])}\">View</a>"
+                )
+        if duplicates and not f.get('confirm_duplicate'):
+            # Re-render the form with warnings — user must tick confirm to proceed
+            pipeline_rate = pipeline_org = pipeline_event = None
+            if new_bid:
+                row = db.execute(
+                    'SELECT RoomRate, AccountName, EventName FROM ReportPipeline WHERE CAST(BookingId AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',
+                    (new_bid,)
+                ).fetchone()
+                if row:
+                    pipeline_rate  = round(float(row['RoomRate']), 2) if row['RoomRate'] else None
+                    pipeline_org   = row['AccountName'] or None
+                    pipeline_event = row['EventName'] or None
+            return render_template('pickup_config_form.html', config=None,
+                                   action=url_for('pickup_new_event'),
+                                   cancel_url=url_for('pickup_dashboard'),
+                                   pipeline_rate=pipeline_rate,
+                                   pipeline_org=pipeline_org,
+                                   pipeline_event=pipeline_event,
+                                   duplicate_warnings=duplicates,
+                                   form_data=f)
+
         db.execute('''
             INSERT INTO pickup_config
             (booking_id, tab_name, organization, event_name, hotel, hotel_contact,
@@ -5602,6 +5672,15 @@ def pickup_event(cid):
     else:
         primary_cid_for_report = None
 
+    # Recently deleted weekly reports (kept 90 days, restorable)
+    deleted_weekly = db.execute(
+        """SELECT * FROM pickup_weekly_deleted
+           WHERE config_id=?
+             AND deleted_at >= datetime('now','-90 days','localtime')
+           ORDER BY deleted_at DESC""",
+        (cid,)
+    ).fetchall()
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -5612,7 +5691,8 @@ def pickup_event(cid):
                            past_cutoff=past_cutoff, has_final_history=has_final_history,
                            has_hhr=has_hhr, today=_date.today().isoformat(),
                            is_multi_hotel=is_multi_hotel,
-                           primary_cid_for_report=primary_cid_for_report)
+                           primary_cid_for_report=primary_cid_for_report,
+                           deleted_weekly=deleted_weekly)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -7425,9 +7505,51 @@ def pickup_weekly_edit(cid, wid):
 @app.route('/pickup/<int:cid>/weekly/<int:wid>/delete', methods=['POST'])
 def pickup_weekly_delete(cid, wid):
     db = get_db()
-    db.execute("DELETE FROM pickup_weekly WHERE id=? AND config_id=?", (wid, cid))
+    row = db.execute("SELECT * FROM pickup_weekly WHERE id=? AND config_id=?", (wid, cid)).fetchone()
+    if row:
+        username = session.get('username') or 'unknown'
+        db.execute('''
+            INSERT INTO pickup_weekly_deleted
+            (original_id, config_id, report_date, pickup_by_night, total_rooms,
+             change_from_last, pct_of_block, pct_of_attrition, ota_rate, label, notes, deleted_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ''', (row['id'], row['config_id'], row['report_date'], row['pickup_by_night'],
+              row['total_rooms'], row['change_from_last'], row['pct_of_block'],
+              row['pct_of_attrition'], row['ota_rate'], row['label'], row['notes'], username))
+        db.execute("DELETE FROM pickup_weekly WHERE id=? AND config_id=?", (wid, cid))
+        _log_change(db, cid, 'delete_report', [
+            ('report_date', row['report_date'], None),
+            ('total_rooms', row['total_rooms'], None),
+        ])
     db.commit()
-    flash('Weekly entry deleted.', 'success')
+    flash('Weekly entry deleted. You can restore it within 90 days from the pickup event page.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/weekly/deleted/<int:did>/restore', methods=['POST'])
+def pickup_weekly_restore(cid, did):
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM pickup_weekly_deleted WHERE id=? AND config_id=?", (did, cid)
+    ).fetchone()
+    if row:
+        db.execute('''
+            INSERT INTO pickup_weekly
+            (config_id, report_date, pickup_by_night, total_rooms, change_from_last,
+             pct_of_block, pct_of_attrition, ota_rate, label, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        ''', (row['config_id'], row['report_date'], row['pickup_by_night'], row['total_rooms'],
+              row['change_from_last'], row['pct_of_block'], row['pct_of_attrition'],
+              row['ota_rate'], row['label'], row['notes']))
+        db.execute("DELETE FROM pickup_weekly_deleted WHERE id=?", (did,))
+        _log_change(db, cid, 'restore_report', [
+            ('report_date', None, row['report_date']),
+            ('total_rooms', None, row['total_rooms']),
+        ])
+        db.commit()
+        flash(f'Report for {row["report_date"]} restored.', 'success')
+    else:
+        flash('Deleted entry not found.', 'error')
     return redirect(url_for('pickup_event', cid=cid))
 
 
