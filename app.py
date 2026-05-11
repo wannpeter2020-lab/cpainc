@@ -3506,6 +3506,36 @@ def admin_reset_password(uid):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/download-db')
+def admin_download_db():
+    """Stream a consistent snapshot of the live SQLite database (admin only)."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+    import sqlite3 as _sq3, tempfile, os as _os
+    from flask import Response
+    with tempfile.NamedTemporaryFile(suffix='.sqlite', delete=False) as tf:
+        tmp_path = tf.name
+    try:
+        src = _sq3.connect(DATABASE)
+        dst = _sq3.connect(tmp_path)
+        src.backup(dst)          # atomic consistent copy
+        src.close()
+        dst.close()
+        with open(tmp_path, 'rb') as f:
+            db_bytes = f.read()
+    finally:
+        try:
+            _os.unlink(tmp_path)
+        except Exception:
+            pass
+    return Response(
+        db_bytes,
+        mimetype='application/octet-stream',
+        headers={'Content-Disposition': 'attachment; filename="CPAinc.sqlite"'}
+    )
+
+
 @app.route('/admin/export-pickup-data')
 def admin_export_pickup_data():
     """Export all pickup_weekly rows as JSON keyed by booking_id (safe to share)."""
