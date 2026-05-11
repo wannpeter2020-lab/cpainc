@@ -700,13 +700,35 @@ def import_bookings():
             if ext == 'csv':
                 df = pd.read_csv(tmp_path, dtype=str, encoding='utf-8-sig')
                 # Normalise column names immediately — no header-row scan needed
-                header_row = 0
                 df.columns = [str(c).strip() for c in df.columns]
+            elif ext == 'xls':
+                # ConferenceDirect exports .xls files that are sometimes HTML tables.
+                # Try xlrd first; fall back to HTML parsing when xlrd rejects it.
+                try:
+                    df = pd.read_excel(tmp_path, engine='xlrd', header=None)
+                except Exception:
+                    tables = pd.read_html(tmp_path)
+                    if not tables:
+                        raise ValueError('No table found in file.')
+                    df = tables[0].astype(str).replace('nan', '')
+                    # read_html already parses <th> as column headers — check if
+                    # we still need to find the header row or if columns are correct.
+                if not any(str(v).strip().lower() == 'booking id' for v in df.columns):
+                    header_row = None
+                    for i, row in df.iterrows():
+                        if any(str(v).strip().lower() == 'booking id' for v in row.values):
+                            header_row = i
+                            break
+                    if header_row is None:
+                        flash('Could not find header row with "Booking Id" in the file.', 'error')
+                        return redirect(url_for('import_bookings'))
+                    df.columns = df.iloc[header_row]
+                    df = df.iloc[header_row + 1:].reset_index(drop=True)
             else:
-                df = pd.read_excel(tmp_path, engine='xlrd' if ext == 'xls' else 'openpyxl', header=None)
+                df = pd.read_excel(tmp_path, engine='openpyxl', header=None)
                 header_row = None
                 for i, row in df.iterrows():
-                    if any(str(v).strip() in ('Booking Id', 'Booking ID') for v in row.values):
+                    if any(str(v).strip().lower() == 'booking id' for v in row.values):
                         header_row = i
                         break
                 if header_row is None:
@@ -717,23 +739,32 @@ def import_bookings():
             # ── Normalise column names from CSV/Excel exports ───────────────
             col_map = {
                 'booking id':                               'Booking Id',
+                # Event ID (parent event)
+                'event: event id':                          'Event ID',
+                # Associate
                 'booking associate: full name':             'Booking Associate',
                 'booking associate':                        'Booking Associate',
+                # Event name
                 'event: event name':                        'Event Name',
                 'event: event  name':                       'Event Name',
                 'booking name':                             'Booking Name',
+                # Account / Customer
                 'account name: account name':               'Account Name',
                 'account name':                             'Account Name',
+                'customer account name':                    'Account Name',
                 'entity to invoice: account name':          'Customer',
                 'entity to invoice':                        'Customer',
+                # Address
                 'entity to invoice: billing street':        'Address',
                 'entity to invoice: billing city':          'City',
                 'entity to invoice: billing state/province': 'State',
                 'entity to invoice: billing country':       'Country',
+                # Status & type
                 'status':                                   'Booking Status',
                 'type':                                     'Booking Type',
                 'subtype':                                  'Booking Type',
                 'addendum submitted':                       'Addendum',
+                # Financial
                 'total room revenue':                       'Revenue',
                 'total room nights':                        'Total Room Nights',
                 'peak rooms':                               'Peak Rooms',
@@ -768,7 +799,7 @@ def import_bookings():
             currency_fields = {'Contracted Amount', 'Room Rate', 'Revenue', 'Other Revenue', 'USD Commissionable Amount'}
 
             fields = [
-                'Booking Id', 'Booking Name', 'Booking Associate', 'Share Type', 'Booking Type', 'Booking Status',
+                'Booking Id', 'Event ID', 'Booking Name', 'Booking Associate', 'Share Type', 'Booking Type', 'Booking Status',
                 'Addendum', 'Booked Date', 'Start Date', 'End Date', 'Account Name', 'Event Name',
                 'Customer', 'Address', 'City', 'State', 'Country', 'Brand', 'Chain', 'Currency',
                 'Exchange Rate', 'Advance', 'Contracted Amount', 'Peak Rooms', 'Total Room Nights',
@@ -789,6 +820,10 @@ def import_bookings():
                         values.append(None)
                         continue
                     val = str(v).strip()
+                    # Treat '-' as blank (CD uses '-' for empty fields like Event ID)
+                    if val == '-':
+                        values.append(None)
+                        continue
                     if f in currency_fields:
                         val = val.replace('USD', '').replace('$', '').replace(',', '').strip()
                     # Normalise Commission Percent: "10.00%" → "0.10"
@@ -801,7 +836,8 @@ def import_bookings():
 
                 # Map from display field names to DB column names
                 db_map = {
-                    'Booking Id': 'BookingId', 'Booking Name': 'BookingName',
+                    'Booking Id': 'BookingId', 'Event ID': 'EventID',
+                    'Booking Name': 'BookingName',
                     'Booking Associate': 'BookingAssociate', 'Share Type': 'ShareType',
                     'Booking Type': 'BookingType', 'Booking Status': 'BookingStatus',
                     'Addendum': 'Addendum', 'Booked Date': 'BookedDate',
@@ -822,15 +858,26 @@ def import_bookings():
 
                 exists = db.execute('SELECT 1 FROM ReportPipeline WHERE BookingId = ?', (bid,)).fetchone()
                 if exists:
-                    # Update Commission Percent if previously missing
-                    comm_idx = fields.index('Commission Percent')
+                    # Update Commission Percent and Event ID if previously missing
+                    comm_idx    = fields.index('Commission Percent')
+                    eventid_idx = fields.index('Event ID')
+                    changed = False
                     if values[comm_idx] is not None:
                         db.execute(
                             'UPDATE ReportPipeline SET CommissionPercent = ? WHERE BookingId = ? AND (CommissionPercent IS NULL OR CommissionPercent = "")',
                             (values[comm_idx], bid)
                         )
                         if db.execute('SELECT changes()').fetchone()[0]:
-                            updated += 1
+                            changed = True
+                    if values[eventid_idx] is not None:
+                        db.execute(
+                            'UPDATE ReportPipeline SET EventID = ? WHERE BookingId = ? AND (EventID IS NULL OR EventID = "")',
+                            (values[eventid_idx], bid)
+                        )
+                        if db.execute('SELECT changes()').fetchone()[0]:
+                            changed = True
+                    if changed:
+                        updated += 1
                     skipped += 1
                     continue
 
@@ -853,7 +900,10 @@ def import_bookings():
                 )
 
             db.commit()
-            flash(f'Import complete: {added} added, {updated} commission % updated, {skipped} already existed (skipped).', 'success')
+            msg = f'Import complete: {added} added, {skipped} already existed (skipped).'
+            if updated:
+                msg += f' {updated} existing record{"s" if updated != 1 else ""} updated with missing commission % or Event ID.'
+            flash(msg, 'success')
         except Exception as e:
             flash(f'Import error: {e}', 'error')
         return redirect(url_for('index'))
