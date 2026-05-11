@@ -3805,6 +3805,88 @@ def admin_fix_wrong_year_blocks():
     return html
 
 
+@app.route('/admin/fix-stray-block-dates')
+def admin_fix_stray_block_dates():
+    """Remove individual contracted_block date keys that fall outside a booking's
+    ReportPipeline start/end window (catches same-year stray dates missed by fix-wrong-year-blocks)."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+
+    db      = get_db()
+    results = []
+
+    # Load all active pickup_configs that have a booking_id and a non-empty block
+    rows = db.execute(
+        "SELECT id, booking_id, hotel, event_name, contracted_block "
+        "FROM pickup_config WHERE status != 'archived' AND booking_id IS NOT NULL "
+        "AND contracted_block IS NOT NULL AND contracted_block != '{}'"
+    ).fetchall()
+
+    # Fetch ReportPipeline start/end for all relevant booking_ids
+    bid_list = list({str(r['booking_id']) for r in rows})
+    pipeline = {}
+    if bid_list:
+        ph = ','.join('?' * len(bid_list))
+        for pr in db.execute(
+            f"SELECT BookingId, StartDate, EndDate FROM ReportPipeline WHERE BookingId IN ({ph})",
+            bid_list
+        ).fetchall():
+            s = str(pr['StartDate'] or '')[:10]
+            e = str(pr['EndDate']   or '')[:10]
+            if len(s) == 10:
+                pipeline[str(pr['BookingId'])] = {'start': s, 'end': e}
+
+    for row in rows:
+        bid   = str(row['booking_id'])
+        pdates = pipeline.get(bid)
+        if not pdates:
+            continue
+
+        try:
+            block = json.loads(row['contracted_block'])
+        except Exception:
+            continue
+
+        p_start = pdates['start']
+        p_end   = pdates['end']
+
+        # Keep only dates that fall within [start - 7 days, end + 7 days] of the pipeline window
+        # (small buffer for pre/post dates that are legitimately just outside the window)
+        from datetime import datetime as _dt, timedelta as _td
+        try:
+            window_start = (_dt.strptime(p_start, '%Y-%m-%d') - _td(days=7)).strftime('%Y-%m-%d')
+            window_end   = (_dt.strptime(p_end,   '%Y-%m-%d') + _td(days=7)).strftime('%Y-%m-%d')
+        except Exception:
+            continue
+
+        stray  = [k for k in block if k < window_start or k > window_end]
+        if not stray:
+            continue
+
+        clean     = {k: v for k, v in block.items() if k not in stray}
+        new_block = json.dumps(clean)
+        db.execute(
+            "UPDATE pickup_config SET contracted_block=? WHERE id=?",
+            (new_block, row['id'])
+        )
+        results.append(
+            f"BID {bid} CID {row['id']} ({row['hotel']}): "
+            f"removed stray date(s) {stray} — kept {sorted(clean.keys())}"
+        )
+
+    db.commit()
+
+    html = '<h3>Stray Block Date Fix — Results</h3>'
+    if results:
+        html += '<ul>' + ''.join(f'<li>{r}</li>' for r in results) + '</ul>'
+        html += f'<p><strong>{len(results)} record(s) updated.</strong></p>'
+    else:
+        html += '<p>No stray dates found — all blocks look clean.</p>'
+    html += '<p><a href="/status-board">Go to Status Board</a></p>'
+    return html
+
+
 # ── Status Board ──────────────────────────────────────────────────────────────
 
 @app.route('/status-board')
