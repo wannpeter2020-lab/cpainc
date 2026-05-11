@@ -3337,6 +3337,28 @@ def ensure_auth_tables():
             detail      TEXT,
             ip_address  TEXT
         );
+        CREATE TABLE IF NOT EXISTS pickup_tasks (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id           INTEGER REFERENCES pickup_config(id) ON DELETE CASCADE,
+            title               TEXT NOT NULL,
+            due_date            TEXT,
+            assigned_to_user_id INTEGER REFERENCES Users(id),
+            assigned_to_name    TEXT,
+            created_by_user_id  INTEGER,
+            created_by_name     TEXT,
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            completed_at        TEXT,
+            completed_by        TEXT,
+            task_notes          TEXT
+        );
+        CREATE TABLE IF NOT EXISTS pickup_event_notes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id   INTEGER REFERENCES pickup_config(id) ON DELETE CASCADE,
+            user_id     INTEGER,
+            username    TEXT,
+            note_text   TEXT NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        );
         CREATE TABLE IF NOT EXISTS pickup_weekly_deleted (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             original_id     INTEGER,
@@ -4329,6 +4351,7 @@ def status_board():
         'past_cutoff_no_history':('danger',  'Past Cutoff',                                   'bi-exclamation-triangle-fill'),
         'event_ended_no_hhr':    ('danger',  'Event Ended — No HHR Uploaded',                 'bi-file-earmark-x-fill'),
         'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',                  'bi-telephone-x-fill'),
+        'cutoff_approaching':    ('warning', 'Cutoff Approaching — Block Not Verified',        'bi-alarm-fill'),
         'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)','bi-grid-fill'),
         'empty_block':           ('warning', 'No Contracted Block Entered',                    'bi-calendar-x-fill'),
         'missing_hotel_email':   ('info',    'Missing Hotel Contact Email',                    'bi-envelope-x-fill'),
@@ -4446,6 +4469,21 @@ def status_board():
         if not cutoff:
             _issue('missing_cutoff', 'No cutoff date has been set.')
 
+        # 8b. Cutoff approaching (≤30 days) but block not yet verified
+        if cutoff and cutoff >= today and not is_ended:
+            try:
+                days_to_cutoff = (datetime.strptime(cutoff, '%Y-%m-%d') -
+                                  datetime.strptime(today, '%Y-%m-%d')).days
+                block_unverified = (not block or total_block == 0 or
+                                    (len(block) > 1 and len(set(block_vals)) == 1))
+                if days_to_cutoff <= 30 and block_unverified:
+                    _issue('cutoff_approaching',
+                           f'Cutoff is in {days_to_cutoff} day(s) ({cutoff}) — '
+                           f'contracted block has not been verified.',
+                           url_for('pickup_edit_event', cid=cid))
+            except Exception:
+                pass
+
         # 9. Missing room rate
         if not cfg['contracted_rate'] or cfg['contracted_rate'] == 0:
             _issue('missing_rate', 'No contracted room rate entered.')
@@ -4497,6 +4535,142 @@ def status_board_ignore():
     db.commit()
     label = 'permanently' if ignore_until is None else f'until {ignore_until}'
     return jsonify({'ok': True, 'label': label})
+
+
+@app.route('/status-board/ignore-bulk', methods=['POST'])
+def status_board_ignore_bulk():
+    """Bulk-ignore multiple status board items in one call."""
+    user = get_current_user()
+    if not has_permission(user, 'pickups_payments'):
+        return jsonify({'ok': False, 'error': 'Access denied'}), 403
+    data    = request.get_json(silent=True) or {}
+    items   = data.get('items', [])   # list of {config_id, issue_type}
+    mode    = data.get('mode', '1month')
+    custom_dt = data.get('custom_date', '')
+    if not items:
+        return jsonify({'ok': False, 'error': 'No items provided'}), 400
+    today = datetime.today()
+    if mode == 'permanent':
+        ignore_until = None
+    elif mode == '2months':
+        ignore_until = (today + timedelta(days=60)).strftime('%Y-%m-%d')
+    elif mode == 'custom' and custom_dt:
+        ignore_until = custom_dt
+    else:
+        ignore_until = (today + timedelta(days=30)).strftime('%Y-%m-%d')
+    db = get_db()
+    count = 0
+    for item in items:
+        cid = int(item.get('config_id', 0))
+        itype = item.get('issue_type', '')
+        if not cid or not itype:
+            continue
+        db.execute(
+            '''INSERT INTO status_board_ignore (user_id, config_id, issue_type, ignore_until)
+               VALUES (?,?,?,?)
+               ON CONFLICT(user_id, config_id, issue_type)
+               DO UPDATE SET ignore_until=excluded.ignore_until, created_at=datetime('now')''',
+            (user['id'], cid, itype, ignore_until)
+        )
+        count += 1
+    db.commit()
+    return jsonify({'ok': True, 'ignored': count})
+
+
+# ── Tasks ────────────────────────────────────────────────────────────────────
+
+@app.route('/pickup/<int:cid>/tasks/new', methods=['POST'])
+def pickup_task_new(cid):
+    db   = get_db()
+    user = get_current_user()
+    f    = request.form
+    title    = f.get('title', '').strip()
+    due_date = f.get('due_date', '').strip() or None
+    assigned_uid   = f.get('assigned_to_user_id', '').strip() or None
+    assigned_name  = f.get('assigned_to_name', '').strip() or None
+    task_notes     = f.get('task_notes', '').strip() or None
+    if not title:
+        flash('Task title is required.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    if assigned_uid:
+        row = db.execute("SELECT name FROM Users WHERE id=?", (assigned_uid,)).fetchone()
+        if row:
+            assigned_name = row['name']
+    db.execute(
+        '''INSERT INTO pickup_tasks
+           (config_id, title, due_date, assigned_to_user_id, assigned_to_name,
+            created_by_user_id, created_by_name, task_notes)
+           VALUES (?,?,?,?,?,?,?,?)''',
+        (cid, title, due_date, assigned_uid, assigned_name,
+         user['id'] if user else None, user['name'] if user else None, task_notes)
+    )
+    db.commit()
+    flash('Task added.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/tasks/<int:tid>/complete', methods=['POST'])
+def pickup_task_complete(cid, tid):
+    db   = get_db()
+    user = get_current_user()
+    db.execute(
+        "UPDATE pickup_tasks SET completed_at=datetime('now','localtime'), completed_by=? "
+        "WHERE id=? AND config_id=?",
+        (user['name'] if user else 'unknown', tid, cid)
+    )
+    db.commit()
+    flash('Task marked complete.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/tasks/<int:tid>/reopen', methods=['POST'])
+def pickup_task_reopen(cid, tid):
+    db = get_db()
+    db.execute("UPDATE pickup_tasks SET completed_at=NULL, completed_by=NULL WHERE id=? AND config_id=?", (tid, cid))
+    db.commit()
+    flash('Task reopened.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/tasks/<int:tid>/delete', methods=['POST'])
+def pickup_task_delete(cid, tid):
+    db = get_db()
+    db.execute("DELETE FROM pickup_tasks WHERE id=? AND config_id=?", (tid, cid))
+    db.commit()
+    flash('Task deleted.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+# ── Event Notes ───────────────────────────────────────────────────────────────
+
+@app.route('/pickup/<int:cid>/notes/add', methods=['POST'])
+def pickup_note_add(cid):
+    db   = get_db()
+    user = get_current_user()
+    text = request.form.get('note_text', '').strip()
+    if not text:
+        flash('Note cannot be empty.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    db.execute(
+        "INSERT INTO pickup_event_notes (config_id, user_id, username, note_text) VALUES (?,?,?,?)",
+        (cid, user['id'] if user else None, user['name'] if user else 'unknown', text)
+    )
+    db.commit()
+    flash('Note added.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/notes/<int:nid>/delete', methods=['POST'])
+def pickup_note_delete(cid, nid):
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('Admin access required to delete notes.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    db = get_db()
+    db.execute("DELETE FROM pickup_event_notes WHERE id=? AND config_id=?", (nid, cid))
+    db.commit()
+    flash('Note deleted.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
 
 
 def _create_pickup_config_from_booking(db, bid, account, event, hotel,
@@ -5672,6 +5846,23 @@ def pickup_event(cid):
     else:
         primary_cid_for_report = None
 
+    # Tasks for this event
+    tasks = db.execute(
+        "SELECT * FROM pickup_tasks WHERE config_id=? ORDER BY completed_at IS NOT NULL, due_date ASC NULLS LAST, id DESC",
+        (cid,)
+    ).fetchall()
+
+    # Notes for this event
+    event_notes = db.execute(
+        "SELECT * FROM pickup_event_notes WHERE config_id=? ORDER BY id DESC",
+        (cid,)
+    ).fetchall()
+
+    # All active users (for task assignment)
+    all_users = db.execute(
+        "SELECT id, name FROM Users WHERE active=1 ORDER BY name"
+    ).fetchall()
+
     # Recently deleted weekly reports (kept 90 days, restorable)
     deleted_weekly = db.execute(
         """SELECT * FROM pickup_weekly_deleted
@@ -5692,7 +5883,8 @@ def pickup_event(cid):
                            has_hhr=has_hhr, today=_date.today().isoformat(),
                            is_multi_hotel=is_multi_hotel,
                            primary_cid_for_report=primary_cid_for_report,
-                           deleted_weekly=deleted_weekly)
+                           deleted_weekly=deleted_weekly,
+                           tasks=tasks, event_notes=event_notes, all_users=all_users)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────

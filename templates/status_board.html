@@ -13,7 +13,7 @@
 </div>
 
 {# ── Summary badges ── #}
-{% set severity_order = ['overdue_pickup','event_ended_no_hhr','past_cutoff_no_history','no_recent_contact','uniform_block','empty_block','missing_hotel_email','missing_client_contact','missing_cutoff','missing_rate'] %}
+{% set severity_order = ['overdue_pickup','event_ended_no_hhr','past_cutoff_no_history','no_recent_contact','cutoff_approaching','uniform_block','empty_block','missing_hotel_email','missing_client_contact','missing_cutoff','missing_rate'] %}
 {% set total = total_issues %}
 
 {% if total == 0 %}
@@ -61,17 +61,21 @@
         <table class="table table-hover table-sm mb-0 align-middle sb-sortable">
           <thead>
             <tr>
-              <th class="sb-sort-th" data-col="0" style="cursor:pointer;white-space:nowrap">
-                Booking ID <span class="sb-sort-icon text-muted small"></span>
+              <th style="width:32px;">
+                <input type="checkbox" class="form-check-input sb-select-all"
+                       data-section="{{ itype }}" title="Select all in this section">
               </th>
               <th class="sb-sort-th" data-col="1" style="cursor:pointer;white-space:nowrap">
+                Booking ID <span class="sb-sort-icon text-muted small"></span>
+              </th>
+              <th class="sb-sort-th" data-col="2" style="cursor:pointer;white-space:nowrap">
                 Event / Organization <span class="sb-sort-icon text-muted small"></span>
               </th>
               <th>Hotel</th>
-              <th class="sb-sort-th" data-col="3" style="cursor:pointer;white-space:nowrap">
+              <th class="sb-sort-th" data-col="4" style="cursor:pointer;white-space:nowrap">
                 Start <span class="sb-sort-icon text-muted small">▲</span>
               </th>
-              <th class="sb-sort-th" data-col="4" style="cursor:pointer;white-space:nowrap">
+              <th class="sb-sort-th" data-col="5" style="cursor:pointer;white-space:nowrap">
                 End <span class="sb-sort-icon text-muted small"></span>
               </th>
               <th>Issue</th>
@@ -82,6 +86,12 @@
           <tbody>
             {% for item in items %}
             <tr id="row-{{ itype }}-{{ item.config_id }}">
+              <td>
+                <input type="checkbox" class="form-check-input sb-row-check"
+                       data-section="{{ itype }}"
+                       data-cid="{{ item.config_id }}"
+                       data-itype="{{ itype }}">
+              </td>
               <td class="font-monospace small" data-sort="{{ item.booking_id or '0' }}">
                 {% if item.booking_id %}
                   <a href="{{ url_for('booking_detail', booking_id=item.booking_id) }}"
@@ -141,6 +151,27 @@
 {% endfor %}
 
 {% endif %}{# end total > 0 #}
+
+{# ── Bulk action bar (hidden until items are selected) ── #}
+<div id="bulkBar" class="d-none"
+     style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+            z-index:1050;background:#212529;color:#fff;border-radius:12px;
+            padding:10px 20px;box-shadow:0 4px 20px rgba(0,0,0,.4);
+            display:flex;align-items:center;gap:12px;white-space:nowrap;">
+  <span id="bulkCount" class="fw-semibold"></span>
+  <select id="bulkMode" class="form-select form-select-sm" style="width:160px;color:#000;">
+    <option value="1month">Ignore 1 month</option>
+    <option value="2months">Ignore 2 months</option>
+    <option value="custom">Custom date…</option>
+    <option value="permanent">Permanent</option>
+  </select>
+  <input type="date" id="bulkCustomDate" class="form-control form-control-sm d-none"
+         style="width:145px;color:#000;">
+  <button id="bulkIgnoreBtn" class="btn btn-sm btn-warning fw-semibold">
+    <i class="bi bi-eye-slash me-1"></i>Ignore Selected
+  </button>
+  <button id="bulkCancelBtn" class="btn btn-sm btn-outline-light">Cancel</button>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -225,9 +256,7 @@ document.querySelectorAll('.ignore-btn').forEach(function(btn) {
 
 // ── Table sorting ────────────────────────────────────────────────────────────
 (function() {
-  // Track sort state per table: { col, asc }
   const state = new WeakMap();
-
   function sortTable(table, col, asc) {
     const tbody = table.querySelector('tbody');
     const rows  = Array.from(tbody.querySelectorAll('tr'));
@@ -238,35 +267,122 @@ document.querySelectorAll('.ignore-btn').forEach(function(btn) {
                  : bv.localeCompare(av, undefined, {numeric: true});
     });
     rows.forEach(function(r) { tbody.appendChild(r); });
-
-    // Update header icons
     table.querySelectorAll('.sb-sort-th').forEach(function(th) {
       const icon = th.querySelector('.sb-sort-icon');
       if (!icon) return;
-      if (parseInt(th.dataset.col) === col) {
-        icon.textContent = asc ? '▲' : '▼';
-        th.style.color = '';
-      } else {
-        icon.textContent = '';
-      }
+      icon.textContent = (parseInt(th.dataset.col) === col) ? (asc ? '▲' : '▼') : '';
     });
   }
-
-  // Apply default sort (Start = col 3, asc) to every table on load
+  // Default sort: Start = col 4 (shifted +1 for checkbox column)
   document.querySelectorAll('.sb-sortable').forEach(function(table) {
-    state.set(table, {col: 3, asc: true});
-    sortTable(table, 3, true);
+    state.set(table, {col: 4, asc: true});
+    sortTable(table, 4, true);
   });
-
-  // Click handler
   document.querySelectorAll('.sb-sort-th').forEach(function(th) {
     th.addEventListener('click', function() {
       const table = th.closest('table');
       const col   = parseInt(th.dataset.col);
-      const cur   = state.get(table) || {col: 3, asc: true};
+      const cur   = state.get(table) || {col: 4, asc: true};
       const asc   = (cur.col === col) ? !cur.asc : true;
       state.set(table, {col, asc});
       sortTable(table, col, asc);
+    });
+  });
+})();
+
+// ── Bulk selection & ignore ───────────────────────────────────────────────────
+(function() {
+  const bulkBar     = document.getElementById('bulkBar');
+  const bulkCount   = document.getElementById('bulkCount');
+  const bulkMode    = document.getElementById('bulkMode');
+  const bulkCustom  = document.getElementById('bulkCustomDate');
+  const bulkBtn     = document.getElementById('bulkIgnoreBtn');
+  const bulkCancel  = document.getElementById('bulkCancelBtn');
+
+  function getChecked() {
+    return Array.from(document.querySelectorAll('.sb-row-check:checked'));
+  }
+  function updateBar() {
+    const checked = getChecked();
+    if (checked.length > 0) {
+      bulkCount.textContent = checked.length + ' item' + (checked.length > 1 ? 's' : '') + ' selected';
+      bulkBar.classList.remove('d-none');
+      bulkBar.style.display = 'flex';
+    } else {
+      bulkBar.classList.add('d-none');
+      bulkBar.style.display = '';
+    }
+  }
+
+  // Select all in section
+  document.querySelectorAll('.sb-select-all').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      const section = this.dataset.section;
+      document.querySelectorAll('.sb-row-check[data-section="' + section + '"]')
+        .forEach(function(r) { r.checked = cb.checked; });
+      updateBar();
+    });
+  });
+
+  document.querySelectorAll('.sb-row-check').forEach(function(cb) {
+    cb.addEventListener('change', updateBar);
+  });
+
+  bulkMode.addEventListener('change', function() {
+    bulkCustom.classList.toggle('d-none', this.value !== 'custom');
+  });
+
+  bulkCancel.addEventListener('click', function() {
+    document.querySelectorAll('.sb-row-check, .sb-select-all').forEach(function(cb) {
+      cb.checked = false;
+    });
+    updateBar();
+  });
+
+  bulkBtn.addEventListener('click', function() {
+    const checked = getChecked();
+    if (!checked.length) return;
+    const mode = bulkMode.value;
+    if (mode === 'permanent') {
+      if (!confirm('Permanently ignore ' + checked.length + ' item(s)?')) return;
+    }
+    let customDate = '';
+    if (mode === 'custom') {
+      customDate = bulkCustom.value;
+      if (!customDate) { alert('Please select a custom date first.'); return; }
+    }
+    const items = checked.map(function(cb) {
+      return { config_id: parseInt(cb.dataset.cid), issue_type: cb.dataset.itype };
+    });
+    bulkBtn.disabled = true;
+    bulkBtn.textContent = 'Ignoring…';
+    fetch('/status-board/ignore-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items, mode: mode, custom_date: customDate })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        checked.forEach(function(cb) {
+          const row = cb.closest('tr');
+          if (row) {
+            row.style.transition = 'opacity .3s';
+            row.style.opacity = '0';
+            setTimeout(function() { row.remove(); }, 320);
+          }
+        });
+        updateBar();
+      } else {
+        alert('Error: ' + (data.error || 'unknown'));
+      }
+      bulkBtn.disabled = false;
+      bulkBtn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Ignore Selected';
+    })
+    .catch(function() {
+      alert('Network error — please try again.');
+      bulkBtn.disabled = false;
+      bulkBtn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Ignore Selected';
     });
   });
 })();
