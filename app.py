@@ -3271,6 +3271,18 @@ def ensure_auth_tables():
             created_at   TEXT DEFAULT (datetime('now')),
             UNIQUE(user_id, config_id, issue_type)
         );
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            username    TEXT,
+            user_id     INTEGER,
+            timestamp   TEXT DEFAULT (datetime('now','localtime')),
+            method      TEXT,
+            endpoint    TEXT,
+            path        TEXT,
+            description TEXT,
+            detail      TEXT,
+            ip_address  TEXT
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -3361,6 +3373,120 @@ def require_login():
     if not user or not user['active']:
         session.clear()
         return redirect(url_for('login'))
+
+
+# ── Activity logging ──────────────────────────────────────────────────────────
+
+# Human-readable labels for each endpoint
+_ENDPOINT_LABELS = {
+    'index':                        'Viewed Home / Dashboard',
+    'login':                        'Logged in',
+    'logout':                       'Logged out',
+    'bookings':                     'Viewed Bookings list',
+    'booking_detail':               'Viewed Booking #{booking_id}',
+    'booking_contract_upload':      'Uploaded contract for Booking #{booking_id}',
+    'booking_contract_extract':     'Extracted contract to Pickup for Booking #{booking_id}',
+    'booking_contract_select_pickup':'Selected pickup for contract extraction #{booking_id}',
+    'booking_contract_parse_for_pickup': 'Parsed contract for Pickup config #{cid}',
+    'pickup_dashboard':             'Viewed Pickup Tracking dashboard',
+    'pickup_event':                 'Viewed Pickup event (config #{cid})',
+    'pickup_edit_event':            'Edited Pickup event (config #{cid})',
+    'pickup_add_report':            'Added pickup report (config #{cid})',
+    'pickup_delete_report':         'Deleted pickup report #{report_id}',
+    'pickup_contact_log':           'Logged hotel contact (config #{cid})',
+    'pickup_upload_contract':       'Uploaded contract via Pickup (config #{cid})',
+    'pickup_upload_hhr':            'Uploaded HHR file (config #{cid})',
+    'import_hhr':                   'Imported Housing History Report(s)',
+    'status_board':                 'Viewed Status Board',
+    'status_board_ignore':          'Ignored status board item',
+    'customer_report':              'Generated Customer Report',
+    'pickup_rooming_list':          'Viewed Rooming List (config #{cid})',
+    'pickup_rooming_list_upload':   'Uploaded Rooming List (config #{cid})',
+    'admin_users':                  'Viewed Admin — Users',
+    'admin_toggle_permission':      'Changed user permission (user #{uid})',
+    'admin_update_accounts':        'Updated account access (user #{uid})',
+    'admin_toggle_active':          'Toggled user active status (user #{uid})',
+    'admin_reset_password':         'Reset user password (user #{uid})',
+    'admin_download_db':            'Downloaded full database',
+    'admin_export_pickup_data':     'Exported pickup data',
+    'admin_import_pickup_data':     'Imported pickup data',
+    'admin_activity_log':           'Viewed Activity Log',
+    'rfp_list':                     'Viewed RFP list',
+    'rfp_detail':                   'Viewed RFP #{rfp_id}',
+    'rfp_create':                   'Created new RFP',
+    'rfp_edit':                     'Edited RFP #{rfp_id}',
+    'rfp_delete':                   'Deleted RFP #{rfp_id}',
+}
+
+# Endpoints to skip logging (too noisy or not meaningful)
+_SKIP_LOG_ENDPOINTS = {
+    'static', None,
+    'admin_activity_log',   # avoid self-referential noise
+    'status_board_ignore',  # logged via POST action description instead
+}
+
+def _log_activity(response):
+    """Record the current request to activity_log. Called from after_request."""
+    try:
+        endpoint = request.endpoint
+        if endpoint in _SKIP_LOG_ENDPOINTS:
+            return
+        # Only log successful page loads and meaningful POSTs (skip redirects for GET)
+        if request.method == 'GET' and response.status_code in (301, 302):
+            return
+        # Skip non-HTML/non-download responses that are just JSON fragments
+        ct = response.content_type or ''
+        if 'application/json' in ct and request.method == 'GET':
+            return
+
+        uid      = session.get('user_id')
+        username = session.get('username') or 'unknown'
+        path     = request.path
+
+        # Build human-readable description
+        label = _ENDPOINT_LABELS.get(endpoint)
+        if label:
+            # Fill in URL params
+            kw = dict(request.view_args or {})
+            try:
+                description = label.format(**kw)
+            except KeyError:
+                description = label
+        else:
+            # Fallback: turn endpoint name into readable text
+            description = (endpoint or path).replace('_', ' ').title()
+            if request.method == 'POST':
+                description = 'Submitted: ' + description
+
+        # Extra detail: form keys (not values) for POSTs, or query string for GETs
+        detail = None
+        if request.method == 'POST':
+            keys = [k for k in (request.form.keys() if request.form else [])
+                    if k not in ('password', 'password_hash', 'csrf_token')]
+            if keys:
+                detail = 'Fields: ' + ', '.join(keys[:8])
+        elif request.args:
+            detail = 'Query: ' + '&'.join(f'{k}={v}' for k, v in list(request.args.items())[:5])
+
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
+        if ip and ',' in ip:
+            ip = ip.split(',')[0].strip()
+
+        db = get_db()
+        db.execute(
+            '''INSERT INTO activity_log (username, user_id, method, endpoint, path, description, detail, ip_address)
+               VALUES (?,?,?,?,?,?,?,?)''',
+            (username, uid, request.method, endpoint, path, description, detail, ip)
+        )
+        db.commit()
+    except Exception:
+        pass  # Never let logging break the actual response
+
+
+@app.after_request
+def after_request_log(response):
+    _log_activity(response)
+    return response
 
 
 @app.context_processor
@@ -3533,6 +3659,72 @@ def admin_download_db():
         db_bytes,
         mimetype='application/octet-stream',
         headers={'Content-Disposition': 'attachment; filename="CPAinc.sqlite"'}
+    )
+
+
+@app.route('/admin/activity-log')
+def admin_activity_log():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('Admin access required.', 'error')
+        return redirect(url_for('index'))
+
+    db = get_db()
+
+    # Filters
+    filter_user = request.args.get('user', '').strip()
+    filter_date = request.args.get('date', '').strip()
+    filter_endpoint = request.args.get('endpoint', '').strip()
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = 100
+
+    where  = []
+    params = []
+    if filter_user:
+        where.append('username = ?')
+        params.append(filter_user)
+    if filter_date:
+        where.append("DATE(timestamp) = ?")
+        params.append(filter_date)
+    if filter_endpoint:
+        where.append('endpoint = ?')
+        params.append(filter_endpoint)
+
+    where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
+
+    total = db.execute(
+        f'SELECT COUNT(*) FROM activity_log {where_sql}', params
+    ).fetchone()[0]
+
+    logs = db.execute(
+        f'''SELECT id, username, timestamp, method, endpoint, path, description, detail, ip_address
+            FROM activity_log {where_sql}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?''',
+        params + [per_page, (page - 1) * per_page]
+    ).fetchall()
+
+    # Distinct users and endpoints for filter dropdowns
+    all_users     = [r[0] for r in db.execute(
+        "SELECT DISTINCT username FROM activity_log WHERE username IS NOT NULL ORDER BY username"
+    ).fetchall()]
+    all_endpoints = [r[0] for r in db.execute(
+        "SELECT DISTINCT endpoint FROM activity_log WHERE endpoint IS NOT NULL ORDER BY endpoint"
+    ).fetchall()]
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return render_template('activity_log.html',
+        logs=logs,
+        total=total,
+        page=page,
+        total_pages=total_pages,
+        per_page=per_page,
+        filter_user=filter_user,
+        filter_date=filter_date,
+        filter_endpoint=filter_endpoint,
+        all_users=all_users,
+        all_endpoints=all_endpoints,
     )
 
 
