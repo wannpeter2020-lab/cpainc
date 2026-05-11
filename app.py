@@ -3693,6 +3693,76 @@ def admin_fix_asa_dates():
     return html
 
 
+@app.route('/admin/fix-wrong-year-blocks')
+def admin_fix_wrong_year_blocks():
+    """One-time fix: clear contracted_block dates that don't match the booking's ReportPipeline year,
+    and unarchive the record so it reappears in the status board with correct pipeline-date fallback."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+
+    db  = get_db()
+    results = []
+
+    # These booking IDs were reported as having date inconsistencies.
+    # For each: look up the correct year from ReportPipeline, then clear contracted_block
+    # if its date keys belong to a different year.
+    TARGET_BIDS = ['170939', '170973', '212752', '231248', '226442', '231993']
+
+    pipeline = {}
+    for row in db.execute(
+        "SELECT BookingId, StartDate FROM ReportPipeline WHERE BookingId IN (?,?,?,?,?,?)",
+        TARGET_BIDS
+    ).fetchall():
+        s = str(row['StartDate'] or '')[:10]
+        if len(s) >= 4:
+            pipeline[str(row['BookingId'])] = int(s[:4])  # correct year
+
+    for bid in TARGET_BIDS:
+        correct_year = pipeline.get(bid)
+        rows = db.execute(
+            "SELECT id, event_name, hotel, contracted_block, status FROM pickup_config "
+            "WHERE booking_id = ?", (bid,)
+        ).fetchall()
+        for row in rows:
+            cid   = row['id']
+            block = {}
+            try:
+                block = json.loads(row['contracted_block'] or '{}')
+            except Exception:
+                pass
+
+            block_years = set(int(k[:4]) for k in block if len(k) >= 4)
+            wrong_year  = bool(block_years and correct_year and correct_year not in block_years)
+            need_unarch = row['status'] == 'archived'
+
+            if wrong_year or need_unarch:
+                new_block = '{}' if wrong_year else row['contracted_block']
+                db.execute(
+                    "UPDATE pickup_config SET contracted_block=?, status='active' WHERE id=?",
+                    (new_block, cid)
+                )
+                msg = f"BID {bid} CID {cid} ({row['hotel']}): "
+                parts = []
+                if wrong_year:
+                    parts.append(f"cleared block (had year(s) {block_years}, expected {correct_year})")
+                if need_unarch:
+                    parts.append("unarchived")
+                results.append(msg + '; '.join(parts))
+            else:
+                results.append(f"BID {bid} CID {cid} ({row['hotel']}): no change needed")
+
+    db.commit()
+
+    html = '<h3>Wrong-Year Block Fix — Results</h3>'
+    if results:
+        html += '<ul>' + ''.join(f'<li>{r}</li>' for r in results) + '</ul>'
+    else:
+        html += '<p>No matching records found.</p>'
+    html += '<p><a href="/status-board">Go to Status Board</a></p>'
+    return html
+
+
 # ── Status Board ──────────────────────────────────────────────────────────────
 
 @app.route('/status-board')
@@ -3731,6 +3801,25 @@ def status_board():
     else:
         base_sql += ' AND 1=0'
     configs = db.execute(base_sql, params).fetchall()
+
+    # --- ReportPipeline dates fallback (used when contracted_block is empty) ---
+    pipeline_dates = {}  # booking_id (str) → {'start': 'YYYY-MM-DD', 'end': 'YYYY-MM-DD'}
+    bid_list = [str(cfg['booking_id']) for cfg in configs if cfg['booking_id']]
+    if bid_list:
+        ph = ','.join('?' * len(bid_list))
+        for row in db.execute(
+            f"SELECT BookingId, StartDate, EndDate FROM ReportPipeline WHERE BookingId IN ({ph})",
+            bid_list
+        ).fetchall():
+            def _iso(raw):
+                if not raw:
+                    return None
+                s = str(raw)[:10]
+                return s if len(s) == 10 else None
+            pipeline_dates[str(row['BookingId'])] = {
+                'start': _iso(row['StartDate']),
+                'end':   _iso(row['EndDate']),
+            }
 
     # --- Latest pickup_weekly per config ---
     latest_pickup = {}
@@ -3783,8 +3872,10 @@ def status_board():
             pass
 
         dates       = sorted(block.keys())
-        event_start = dates[0]  if dates else None
-        event_end   = dates[-1] if dates else None
+        # Fall back to ReportPipeline dates when contracted_block has no date keys
+        _pdates     = pipeline_dates.get(str(cfg['booking_id'] or ''), {})
+        event_start = dates[0]           if dates else _pdates.get('start')
+        event_end   = dates[-1]          if dates else _pdates.get('end')
         total_block = sum(block.values()) if block else 0
         block_vals  = list(block.values())
 
