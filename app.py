@@ -3720,17 +3720,25 @@ def status_board():
     for row in db.execute("SELECT DISTINCT config_id FROM pickup_weekly").fetchall():
         has_history.add(row['config_id'])
 
-    # --- Issue definitions: (type, severity, title, card_color) ---
+    # --- Configs that have an HHR uploaded (keyed by booking_id) ---
+    has_hhr = set()
+    for row in db.execute(
+        "SELECT DISTINCT booking_id FROM housing_history_files WHERE booking_id IS NOT NULL"
+    ).fetchall():
+        has_hhr.add(str(row['booking_id']))
+
+    # --- Issue definitions: (severity, title, icon) ---
     ISSUE_META = {
-        'overdue_pickup':        ('danger',  'Overdue Pickup Report',           'bi-exclamation-circle-fill'),
-        'past_cutoff_no_history':('danger',  'Past Cutoff — No History Entered','bi-exclamation-triangle-fill'),
-        'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',    'bi-telephone-x-fill'),
-        'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)', 'bi-grid-fill'),
-        'empty_block':           ('warning', 'No Contracted Block Entered',     'bi-calendar-x-fill'),
-        'missing_hotel_email':   ('info',    'Missing Hotel Contact Email',     'bi-envelope-x-fill'),
-        'missing_client_contact':('info',    'Missing Client Name or Email',    'bi-person-x-fill'),
-        'missing_cutoff':        ('info',    'No Cutoff Date Set',              'bi-calendar-minus-fill'),
-        'missing_rate':          ('info',    'No Contracted Room Rate',         'bi-currency-dollar'),
+        'overdue_pickup':        ('danger',  'Overdue Pickup Report',                          'bi-exclamation-circle-fill'),
+        'past_cutoff_no_history':('danger',  'Past Cutoff',                                   'bi-exclamation-triangle-fill'),
+        'event_ended_no_hhr':    ('danger',  'Event Ended — No HHR Uploaded',                 'bi-file-earmark-x-fill'),
+        'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',                  'bi-telephone-x-fill'),
+        'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)','bi-grid-fill'),
+        'empty_block':           ('warning', 'No Contracted Block Entered',                    'bi-calendar-x-fill'),
+        'missing_hotel_email':   ('info',    'Missing Hotel Contact Email',                    'bi-envelope-x-fill'),
+        'missing_client_contact':('info',    'Missing Client Name or Email',                   'bi-person-x-fill'),
+        'missing_cutoff':        ('info',    'No Cutoff Date Set',                             'bi-calendar-minus-fill'),
+        'missing_rate':          ('info',    'No Contracted Room Rate',                        'bi-currency-dollar'),
     }
 
     issues_by_type = {k: [] for k in ISSUE_META}
@@ -3790,7 +3798,13 @@ def status_board():
         # 2. Past cutoff with no pickup history
         if cutoff and cutoff < today and cid not in has_history:
             _issue('past_cutoff_no_history',
-                   f'Cutoff was {cutoff} and no pickup history has been entered.',
+                   f'Cutoff was {cutoff} — no pickup history entered yet.',
+                   url_for('pickup_event', cid=cid))
+
+        # 2b. Event ended with no HHR uploaded
+        if is_ended and str(cfg['booking_id'] or '') not in has_hhr:
+            _issue('event_ended_no_hhr',
+                   f'Event ended {event_end} and no Housing History Report has been uploaded.',
                    url_for('pickup_event', cid=cid))
 
         # 3. No hotel contact in 21+ days (current events only)
