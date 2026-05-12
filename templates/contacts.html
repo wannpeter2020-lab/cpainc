@@ -76,7 +76,7 @@
                 <button class="btn btn-outline-secondary btn-sm me-1 btn-edit"
                   data-tbl="client"
                   data-id="{{ c.id }}"
-                  data-contact="{{ c|tojson|e }}">
+                  data-contact='{{ c|tojson }}'>
                   <i class="bi bi-pencil"></i>
                 </button>
                 <form method="post" action="{{ url_for('contact_delete', tbl='client', cid=c.id) }}"
@@ -144,7 +144,7 @@
                 <button class="btn btn-outline-secondary btn-sm me-1 btn-edit"
                   data-tbl="hotel"
                   data-id="{{ h.id }}"
-                  data-contact="{{ h|tojson|e }}">
+                  data-contact='{{ h|tojson }}'>
                   <i class="bi bi-pencil"></i>
                 </button>
                 <form method="post" action="{{ url_for('contact_delete', tbl='hotel', cid=h.id) }}"
