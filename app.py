@@ -2518,8 +2518,6 @@ def report_customer_summary():
             team_member=team_member, team_member_col='BookingAssociate')
         submitted = True
 
-    conn.close()
-
     # Build export filename/subtitle including team member when filtered
     tm_slug = f'_{team_member.replace(" ","_")}' if team_member else ''
     if len(selected_customers) == 1:
