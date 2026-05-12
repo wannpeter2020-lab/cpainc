@@ -515,16 +515,19 @@ def booking_cancel(booking_id):
 def booking_contract_upload(booking_id):
     files = request.files.getlist('contract_files')
     db = get_db()
-    added = 0
+    last_bcid = None
     for f in files:
         if f and f.filename:
             db.execute(
                 'INSERT INTO booking_contract (booking_id, filename, file_data, upload_date) VALUES (?,?,?,date("now"))',
                 (booking_id, f.filename, f.read())
             )
-            added += 1
+            last_bcid = db.execute('SELECT last_insert_rowid()').fetchone()[0]
     db.commit()
-    flash(f'{added} contract file{"s" if added != 1 else ""} uploaded. Click "Extract to Pickup" to auto-fill the room block.', 'success')
+    # Go straight into AI parsing flow for the last uploaded file
+    if last_bcid:
+        return redirect(url_for('booking_contract_extract', booking_id=booking_id, bcid=last_bcid))
+    flash('No file selected.', 'error')
     return redirect(url_for('booking_detail', booking_id=booking_id))
 
 
