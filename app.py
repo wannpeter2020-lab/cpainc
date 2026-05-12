@@ -4447,10 +4447,10 @@ def status_board():
             pass
 
         dates       = sorted(block.keys())
-        # Fall back to ReportPipeline dates when contracted_block has no date keys
+        # Pipeline dates are authoritative; fall back to contracted_block keys only if missing
         _pdates     = pipeline_dates.get(str(cfg['booking_id'] or ''), {})
-        event_start = dates[0]           if dates else _pdates.get('start')
-        event_end   = dates[-1]          if dates else _pdates.get('end')
+        event_start = _pdates.get('start') or (dates[0]  if dates else None)
+        event_end   = _pdates.get('end')   or (dates[-1] if dates else None)
         total_block = sum(block.values()) if block else 0
         block_vals  = list(block.values())
 
@@ -5311,8 +5311,10 @@ def pickup_dashboard():
                 pass
         has_final_history = any(w['label'] and 'final' in w['label'].lower() for w in all_weekly)
         all_dates = sorted(block.keys())
-        event_start = all_dates[0] if all_dates else (c['bk_start'] or None)
-        event_end   = all_dates[-1] if all_dates else (c['bk_end'] or None)
+        # Pipeline/booking dates are authoritative; fall back to contracted_block keys only if missing
+        # bk_start may come as ISO datetime "2026-07-24T00:00:00.000Z" — strip time part
+        event_start = (str(c['bk_start'])[:10] if c['bk_start'] else None) or (all_dates[0]  if all_dates else None)
+        event_end   = (str(c['bk_end'])[:10]   if c['bk_end']   else None) or (all_dates[-1] if all_dates else None)
         force_past = bool(c['force_past']) if c['force_past'] else False
         row = {
             'config': c, 'contracted_total': contracted_total,
@@ -5328,16 +5330,14 @@ def pickup_dashboard():
             'has_response': has_response, 'responded_date': responded_date,
         }
         start_date = None
-        if all_dates:
-            try:
-                start_date = date.fromisoformat(all_dates[0])
-            except Exception:
-                pass
-        # also try bk_start if contracted_block has no dates
-        # bk_start may come as ISO datetime "2026-07-24T00:00:00.000Z" — strip time part
-        if start_date is None and c['bk_start']:
+        if c['bk_start']:
             try:
                 start_date = date.fromisoformat(str(c['bk_start'])[:10])
+            except Exception:
+                pass
+        if start_date is None and all_dates:
+            try:
+                start_date = date.fromisoformat(all_dates[0])
             except Exception:
                 pass
         if has_final_history or force_past:
@@ -5356,8 +5356,8 @@ def pickup_dashboard():
         all_dates = sorted(block.keys())
         archived_rows.append({
             'config': c,
-            'event_start': all_dates[0] if all_dates else (c['bk_start'] or None),
-            'event_end':   all_dates[-1] if all_dates else (c['bk_end'] or None),
+            'event_start': (str(c['bk_start'])[:10] if c['bk_start'] else None) or (all_dates[0]  if all_dates else None),
+            'event_end':   (str(c['bk_end'])[:10]   if c['bk_end']   else None) or (all_dates[-1] if all_dates else None),
         })
 
     sort_mode = request.args.get('sort', 'date')
