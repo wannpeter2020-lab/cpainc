@@ -116,6 +116,26 @@ def us_date_filter(value):
         return value
 
 @app.template_filter('fmtdate')
+def _to_iso(raw):
+    """Convert any pipeline date value to a YYYY-MM-DD string, or return None.
+    Handles ISO format (2026-10-06 or 2026-10-06T00:00:00.000Z)
+    and US format (10/6/2026 or 10/23/2026) as stored by some Railway imports."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # ISO: starts with 4-digit year
+    if len(s) >= 10 and s[4] == '-':
+        return s[:10]
+    # US format MM/DD/YYYY or M/D/YYYY
+    try:
+        return datetime.strptime(s.split('T')[0], '%m/%d/%Y').strftime('%Y-%m-%d')
+    except Exception:
+        pass
+    return None
+
+
 def fmt_date(val):
     if not val:
         return ''
@@ -4194,7 +4214,7 @@ def admin_fix_wrong_year_blocks():
         "SELECT BookingId, StartDate FROM ReportPipeline WHERE BookingId IN (?,?,?,?,?,?)",
         TARGET_BIDS
     ).fetchall():
-        s = str(row['StartDate'] or '')[:10]
+        s = _to_iso(row['StartDate']) or ''
         if len(s) >= 4:
             pipeline[str(row['BookingId'])] = int(s[:4])  # correct year
 
@@ -4282,8 +4302,8 @@ def admin_fix_stray_block_dates():
             f"SELECT BookingId, StartDate, EndDate FROM ReportPipeline WHERE BookingId IN ({ph})",
             bid_list
         ).fetchall():
-            s = str(pr['StartDate'] or '')[:10]
-            e = str(pr['EndDate']   or '')[:10]
+            s = _to_iso(pr['StartDate']) or ''
+            e = _to_iso(pr['EndDate'])   or ''
             if len(s) == 10:
                 pipeline[str(pr['BookingId'])] = {'start': s, 'end': e}
 
@@ -4385,14 +4405,9 @@ def status_board():
             f"SELECT BookingId, StartDate, EndDate FROM ReportPipeline WHERE BookingId IN ({ph})",
             bid_list
         ).fetchall():
-            def _iso(raw):
-                if not raw:
-                    return None
-                s = str(raw)[:10]
-                return s if len(s) == 10 else None
             pipeline_dates[str(row['BookingId'])] = {
-                'start': _iso(row['StartDate']),
-                'end':   _iso(row['EndDate']),
+                'start': _to_iso(row['StartDate']),
+                'end':   _to_iso(row['EndDate']),
             }
 
     # --- Latest pickup_weekly per config ---
@@ -5313,8 +5328,8 @@ def pickup_dashboard():
         all_dates = sorted(block.keys())
         # Priority: 1) ReportPipeline (bk_start/bk_end), 2) manually-set pickup_config.event_start/end, 3) contracted_block keys
         # bk_start may come as ISO datetime "2026-07-24T00:00:00.000Z" — strip time part
-        event_start = (str(c['bk_start'])[:10] if c['bk_start'] else None) or c['event_start'] or (all_dates[0]  if all_dates else None)
-        event_end   = (str(c['bk_end'])[:10]   if c['bk_end']   else None) or c['event_end']   or (all_dates[-1] if all_dates else None)
+        event_start = _to_iso(c['bk_start']) or c['event_start'] or (all_dates[0]  if all_dates else None)
+        event_end   = _to_iso(c['bk_end'])   or c['event_end']   or (all_dates[-1] if all_dates else None)
         force_past = bool(c['force_past']) if c['force_past'] else False
         row = {
             'config': c, 'contracted_total': contracted_total,
@@ -5330,7 +5345,7 @@ def pickup_dashboard():
             'has_response': has_response, 'responded_date': responded_date,
         }
         start_date = None
-        for _sd in [str(c['bk_start'])[:10] if c['bk_start'] else None,
+        for _sd in [_to_iso(c['bk_start']),
                     c['event_start'],
                     all_dates[0] if all_dates else None]:
             if _sd:
@@ -5355,8 +5370,8 @@ def pickup_dashboard():
         all_dates = sorted(block.keys())
         archived_rows.append({
             'config': c,
-            'event_start': (str(c['bk_start'])[:10] if c['bk_start'] else None) or c['event_start'] or (all_dates[0]  if all_dates else None),
-            'event_end':   (str(c['bk_end'])[:10]   if c['bk_end']   else None) or c['event_end']   or (all_dates[-1] if all_dates else None),
+            'event_start': _to_iso(c['bk_start']) or c['event_start'] or (all_dates[0]  if all_dates else None),
+            'event_end':   _to_iso(c['bk_end'])   or c['event_end']   or (all_dates[-1] if all_dates else None),
         })
 
     sort_mode = request.args.get('sort', 'date')
@@ -6758,7 +6773,9 @@ def _get_current_pickup_events(db, account_filter=None):
                 pass
         if start_date is None and c['bk_start']:
             try:
-                start_date = _d.fromisoformat(str(c['bk_start'])[:10])
+                _bs = _to_iso(c['bk_start'])
+                if _bs:
+                    start_date = _d.fromisoformat(_bs)
             except Exception:
                 pass
         has_final = db.execute(
