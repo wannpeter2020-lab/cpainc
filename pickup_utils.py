@@ -1808,7 +1808,10 @@ def parse_rfp_docx(file_bytes):
     def _parse_date(s):
         if not s:
             return None
+        # Strip day-of-week prefix e.g. "Wed, "
         s = _re.sub(r'^[A-Za-z]{3},\s*', '', s.strip())
+        # Strip trailing annotations like " + 2 alternate dates"
+        s = _re.sub(r'\s*\+.*$', '', s).strip()
         for fmt in ('%b %d, %Y', '%B %d, %Y', '%m/%d/%Y', '%Y-%m-%d'):
             try:
                 return _dt.strptime(s.strip(), fmt).strftime('%Y-%m-%d')
@@ -1819,6 +1822,8 @@ def parse_rfp_docx(file_bytes):
     def _parse_date_range(s):
         if not s:
             return None, None
+        # Strip trailing annotations before splitting
+        s = _re.sub(r'\s*\+.*$', '', s).strip()
         parts = _re.split(r'\s*[-–]\s*', s, maxsplit=1)
         return _parse_date(parts[0]), _parse_date(parts[1]) if len(parts) > 1 else None
 
@@ -1843,7 +1848,23 @@ def parse_rfp_docx(file_bytes):
     total_room_nights = _parse_int(_after(['Total Room Nights']))
     peak_rooms        = _parse_int(_after(['Peak Room Nights']))
     client_org        = _after(['Organization Name'])
-    start_date, end_date = _parse_date_range(_after(['Event Dates']))
+
+    # Prefer "Planner Preferred" row over "Event Dates" (avoids "+ N alternate dates" suffix)
+    preferred_raw  = _after(['Planner Preferred'])
+    event_dates_raw = _after(['Event Dates'])
+    start_date, end_date = _parse_date_range(preferred_raw or event_dates_raw)
+
+    # Collect alternate date rows (multiple "Alternate Date" labels may appear)
+    alt_dates = []
+    for i, line in enumerate(lines):
+        if line.strip().lower() == 'alternate date':
+            for j in range(1, 3):
+                if i + j < len(lines):
+                    v = lines[i + j].strip()
+                    if v and _re.search(r'\d{4}', v):
+                        alt_dates.append(v)
+                        break
+    alt_start_date, alt_end_date = _parse_date_range(alt_dates[0]) if alt_dates else (None, None)
 
     return {
         'rfp_name':          rfp_name,
@@ -1858,6 +1879,8 @@ def parse_rfp_docx(file_bytes):
         'peak_rooms':        peak_rooms,
         'start_date':        start_date,
         'end_date':          end_date,
+        'alt_start_date':    alt_start_date,
+        'alt_end_date':      alt_end_date,
     }
 
 
