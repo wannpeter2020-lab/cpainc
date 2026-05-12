@@ -480,8 +480,9 @@
     <div class="section-label">Tools</div>
     {% if can_contacts %}<a href="#contacts"><i class="bi bi-person-lines-fill"></i> Contacts</a>{% endif %}
     {% if can_imp %}<a href="#import"><i class="bi bi-upload"></i> Import Tools</a>{% endif %}
-    {% if can_admin %}<a href="#settings"><i class="bi bi-gear"></i> Settings</a>{% endif %}
+    {% if can_admin %}<a href="#settings"><i class="bi bi-sliders"></i> Settings</a>{% endif %}
     {% if can_admin %}<a href="#admin"><i class="bi bi-shield-lock"></i> User Management</a>{% endif %}
+    {% if can_admin %}<a href="#activity-log"><i class="bi bi-clock-history"></i> Activity Log</a>{% endif %}
   </nav>
   <div class="back-link">
     <a href="/"><i class="bi bi-arrow-left me-1"></i> Back to App</a>
@@ -622,9 +623,11 @@
     <table class="info-table">
       <tr><th>Category</th><th>Colour</th><th>What It Means</th></tr>
       <tr><td><strong>Overdue Pickup</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Event has passed its cutoff date but no final pickup has been entered</td></tr>
-      <tr><td><strong>Past Cutoff — No History</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Cutoff has passed and no pickup history exists at all</td></tr>
+      <tr><td><strong>Past Cutoff</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Cutoff has passed and no pickup history exists at all</td></tr>
+      <tr><td><strong>Event Ended — No HHR Uploaded</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>The event end date has passed and no Housing History Report has been imported for this booking</td></tr>
       <tr><td><strong>No Recent Contact</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contact logged in the past 14 days and cutoff is approaching</td></tr>
-      <tr><td><strong>Uniform Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>All nightly block values are identical — possible copy-paste error</td></tr>
+      <tr><td><strong>Cutoff Approaching — Block Unverified</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>Cutoff is within 30 days and the contracted block has not been verified (all nights still identical)</td></tr>
+      <tr><td><strong>Uniform Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>All nightly block values are identical — possible copy-paste error, needs verification</td></tr>
       <tr><td><strong>Empty Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contracted block data has been entered yet</td></tr>
       <tr><td><strong>Missing Hotel Email</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No hotel contact email on file for this event</td></tr>
       <tr><td><strong>Missing Client Contact</strong></td><td><span style="color:#1976d2;font-weight:600;">● Blue</span></td><td>No client contact email on file for this event</td></tr>
@@ -642,6 +645,9 @@
       <tr><td><strong>Permanent</strong></td><td>Hides the item indefinitely (requires a confirmation prompt)</td></tr>
     </table>
     <div class="callout info"><i class="bi bi-info-circle"></i><p>Items reappear automatically after the ignore period expires. Permanent ignores suppress an item forever but do not delete any data. Contact your administrator to clear a permanent ignore if needed.</p></div>
+
+    <h3>Bulk Ignore</h3>
+    <p>To ignore multiple items at once, check the checkbox on the left of each row you want to dismiss. A floating action bar appears at the bottom of the screen — select the ignore duration and click <strong>Ignore Selected</strong>. All checked items are hidden in one step.</p>
   </div>
   {% endif %}
 
@@ -1026,6 +1032,7 @@ flowchart LR
       <tr><td><strong>Fill Missing</strong></td><td>Creates placeholder pickup tracking records for Kristin's bookings within your assigned accounts that don't yet have a tracking record</td></tr>
       <tr><td><strong>New Event</strong></td><td>Manually create a new pickup tracking record for an event</td></tr>
     </table>
+    <div class="callout info"><i class="bi bi-copy"></i><p><strong>Duplicate Detection:</strong> When creating a new event, the system checks for an existing record with the same Booking ID or the same event name and hotel combination. If a potential duplicate is found, a warning panel lists the matching records with links so you can review them. You must tick <em>"I understand this may be a duplicate"</em> to unlock the Save button and proceed.</p></div>
 
     <h3>Sticky Column Header</h3>
     <p>When you scroll down on the Pickup Tracking and Reporting page, the column header row automatically stays pinned near the top of the screen. The header follows as you scroll both vertically and horizontally so you always know which column you're reading.</p>
@@ -1079,10 +1086,29 @@ flowchart LR
       <li><strong>Event Info</strong> — hotel, organization, contracted block by night, cutoff, attrition %, rate, contacts</li>
       <li><strong>Weekly Pickup History</strong> — all weekly reports with total rooms, % of block, % of attrition</li>
       <li><strong>Pace Chart</strong> — visual graph of pickup over time vs. contracted block</li>
+      <li><strong>Tasks &amp; Follow-ups</strong> — action items assigned to this event with due dates</li>
+      <li><strong>Event Notes</strong> — free-text notes with author and timestamp</li>
       <li><strong>Rooming List History</strong> — all uploaded rooming lists</li>
       <li><strong>Hotel Contact Log</strong> — log of all contact attempts and responses</li>
+      <li><strong>Recently Deleted Reports</strong> — pickup reports deleted in the last 90 days, with a Restore button</li>
     </ul>
     <div class="callout info"><i class="bi bi-buildings"></i><p><strong>Multi-Hotel Events:</strong> If an event spans multiple hotels, a blue banner appears with a link to the <strong>Combined Event Report</strong> showing pickup across all hotels together.</p></div>
+
+    <h3>Tasks &amp; Follow-ups</h3>
+    <p>Each event has a task list for tracking action items. Tasks have a title, due date, and assigned owner. Overdue tasks are highlighted in red.</p>
+    <table class="info-table">
+      <tr><th>Action</th><th>How</th></tr>
+      <tr><td><strong>Add a task</strong></td><td>Click <strong>Add Task</strong> in the Tasks section, fill in the title, due date, and owner, then save</td></tr>
+      <tr><td><strong>Mark complete</strong></td><td>Click the checkmark button on the task row — the task is struck through and greyed out</td></tr>
+      <tr><td><strong>Reopen</strong></td><td>Click the reopen button to move a completed task back to active</td></tr>
+      <tr><td><strong>Delete</strong></td><td>Click the trash icon to permanently remove a task</td></tr>
+    </table>
+
+    <h3>Event Notes</h3>
+    <p>Use the Notes section to record free-text observations about the event — hotel conversations, client requests, issues to follow up on. Each note is stamped with the author's name and the date/time it was added.</p>
+
+    <h3>Restoring a Deleted Pickup Report</h3>
+    <p>If a weekly pickup report is deleted by mistake, it can be recovered for up to 90 days. Scroll to the <strong>Recently Deleted Reports</strong> section at the bottom of the event page. Deleted entries are listed with who removed them and when. Click <strong>Restore</strong> to move the report back into the active pickup history.</p>
   </div>
 
   {% if can_contracts %}
@@ -1111,8 +1137,8 @@ flowchart LR
       <div class="step">
         <div class="step-num">3</div>
         <div class="step-body">
-          <strong>Select your contract file and click "Extract Contract Data"</strong>
-          <p>Accepts <strong>PDF</strong> or <strong>Word (.docx)</strong> files. The app sends the contract text to Claude, which extracts:</p>
+          <strong>Select your contract file — AI extraction starts immediately</strong>
+          <p>Accepts <strong>PDF</strong> or <strong>Word (.docx)</strong> files. As soon as you select the file the app sends the contract text to Claude, which extracts:</p>
           <ul style="margin-top:8px;margin-bottom:0;">
             <li>Night-by-night room block (date → number of rooms)</li>
             <li>Nightly contracted rate</li>
@@ -1159,7 +1185,8 @@ flowchart LR
       </div>
     </div>
 
-    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Uploading a contract is the fastest way to set up a new event — it populates all the key fields in one step instead of entering them one by one in Edit.</p></div>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Uploading a contract is the fastest way to set up a new event — it populates all the key fields in one step instead of entering them one by one in Edit. If the extraction needs to be re-run (e.g. you uploaded the wrong file), use the <strong>Re-extract</strong> button on the review page.</p></div>
+    <div class="callout info"><i class="bi bi-book"></i><p>Contract upload also works from the <strong>Booking Detail</strong> page — open any booking and use the Upload Contract button there to push the extracted data directly into the linked pickup record.</p></div>
   </div>
   {% endif %}
 
@@ -1178,7 +1205,7 @@ flowchart LR
     <div class="section-title"><i class="bi bi-file-earmark-spreadsheet"></i> Customer Report (Excel)</div>
     <p>Generates a professional multi-tab Excel file to send to customers showing their event pickup pace.</p>
     <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Customer Report"</strong><p>Found in the top-right of the Current Events section on the Pickup dashboard.</p></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Customer Report"</strong><p>Found in the top-right of the Current Events <em>or</em> Future Events section on the Pickup dashboard.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Select customers and events</strong><p>Check/uncheck organisations and individual events. Use Select All / Clear All for bulk changes.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click "Generate Report"</strong><p>Downloads an Excel file with Tab 1 (Summary sorted by customer) plus one tab per event in the standard Pick-Up Update format.</p></div></div>
     </div>
@@ -1507,7 +1534,7 @@ flowchart TD
   <!-- ── User Management ────────────────────────────────────────── -->
   <div class="section" id="admin">
     <div class="section-title"><i class="bi bi-shield-lock"></i> User Management <span style="font-size:.75rem;font-weight:400;color:#888;">(Admin Only)</span></div>
-    <p>Click <strong>Settings</strong> in the navigation bar, then <strong>Users</strong>. Only admins can access this page.</p>
+    <p>Click <strong>Admin</strong> in the navigation bar, then <strong>User Management</strong>. Only admins can access this page.</p>
 
     <div class="screen">
       <div class="screen-bar">
@@ -1578,6 +1605,29 @@ flowchart TD
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Select the user and enter a new password</strong><p>Minimum 6 characters.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Click Reset</strong><p>The user can now log in with the new password.</p></div></div>
     </div>
+  </div>
+
+  <!-- ── Activity Log ─────────────────────────────────────────── -->
+  <div class="section" id="activity-log">
+    <div class="section-title"><i class="bi bi-clock-history"></i> Admin Tools <span style="font-size:.75rem;font-weight:400;color:#888;">(Admin Only)</span></div>
+    <p>The <strong>Admin</strong> menu in the navigation bar contains several tools beyond User Management.</p>
+
+    <table class="info-table">
+      <tr><th>Menu Item</th><th>What It Does</th></tr>
+      <tr><td><strong>Settings</strong></td><td>Commission splits, payment tolerance, date display format, and account-specific overrides</td></tr>
+      <tr><td><strong>User Management</strong></td><td>Add users, set permissions, assign account access, reset passwords</td></tr>
+      <tr><td><strong>Activity Log</strong></td><td>A full history of every action taken in the system — who did what and when, filterable by user, date, and action type</td></tr>
+      <tr><td><strong>Change Log</strong></td><td>A record of data changes made to records — edits, deletions, and imports with before/after values</td></tr>
+      <tr><td><strong>Download Database</strong></td><td>Downloads a backup copy of the full SQLite database file</td></tr>
+    </table>
+
+    <h3>Activity Log</h3>
+    <p>Click <strong>Admin → Activity Log</strong> to see a full audit trail of system usage. Each entry shows the user, timestamp, and a plain-English description of what was done (e.g. "Viewed booking 196621", "Uploaded contract for IECA Annual Conference", "Added weekly pickup report").</p>
+    <ul>
+      <li>Filter by <strong>user</strong>, <strong>date range</strong>, or <strong>action type</strong> using the controls at the top</li>
+      <li>Entries are grouped by date and paginated 100 per page</li>
+      <li>Only accessible to admins</li>
+    </ul>
   </div>
   {% endif %}{# end can_admin #}
 
