@@ -3278,6 +3278,13 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add event_start / event_end date columns to pickup_config
+    for _col in ('event_start', 'event_end'):
+        try:
+            db.execute(f'ALTER TABLE pickup_config ADD COLUMN {_col} TEXT')
+            db.commit()
+        except Exception:
+            pass
     # Add CRF columns to rfp and rfp_hotel if not present
     for _tbl, _col, _typ in [
         ('rfp',       'crf_filename', 'TEXT'),
@@ -7617,7 +7624,8 @@ def pickup_edit_event(cid):
             hotel_contact=?, hotel_contact_email=?, hotel_contacts=?,
             group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
             contracted_block=?, contracted_rate=?, shoulder_pre=?,
-            shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?
+            shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?,
+            event_start=?, event_end=?
             WHERE id=?
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
@@ -7627,7 +7635,8 @@ def pickup_edit_event(cid):
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
-            f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails), cid
+            f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails),
+            f.get('event_start') or None, f.get('event_end') or None, cid
         ))
         _log_change(db, cid, 'edit_event', _changes)
         db.commit()
