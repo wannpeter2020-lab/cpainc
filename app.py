@@ -3768,7 +3768,7 @@ def login():
             session['user_id']   = user['id']
             session['username']  = user['name']
             session['user_role'] = user['role']
-            next_page = request.form.get('next') or request.args.get('next') or url_for('index')
+            next_page = request.form.get('next') or request.args.get('next') or url_for('status_board')
             return redirect(next_page)
         error = 'Invalid username or password.'
     return render_template('login.html', error=error, next=request.args.get('next', ''))
