@@ -3910,6 +3910,60 @@ def admin_reset_password(uid):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/apply-aosa-import')
+def admin_apply_aosa_import():
+    """One-time: import AOSA/SCST 2026 pickup data for booking 214306 (config 108)."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+    db = get_db()
+    cfg = db.execute("SELECT id FROM pickup_config WHERE booking_id='214306'").fetchone()
+    if not cfg:
+        return 'pickup_config for booking 214306 not found.', 404
+    cid = cfg['id']
+    contracted_block = {
+        '2026-06-05': 40, '2026-06-06': 85, '2026-06-07': 125,
+        '2026-06-08': 125, '2026-06-09': 125, '2026-06-10': 120, '2026-06-11': 35
+    }
+    db.execute("UPDATE pickup_config SET contracted_block=?, attrition_pct=?, cutoff_date=? WHERE id=?",
+               (json.dumps(contracted_block), 0.8, '2026-05-15', cid))
+    weekly = [
+        ('Date Called 3/16','2026-03-16',{'2026-06-05':4,'2026-06-06':5,'2026-06-07':7,'2026-06-08':7,'2026-06-09':7,'2026-06-10':7,'2026-06-11':6},43),
+        ('Date Called 3/23','2026-03-23',{'2026-06-05':7,'2026-06-06':12,'2026-06-07':17,'2026-06-08':17,'2026-06-09':17,'2026-06-10':17,'2026-06-11':9},96),
+        ('Date Called 3/30','2026-03-30',{'2026-06-05':8,'2026-06-06':14,'2026-06-07':23,'2026-06-08':23,'2026-06-09':23,'2026-06-10':23,'2026-06-11':9},123),
+        ('Date Called 4/6', '2026-04-06',{'2026-06-05':10,'2026-06-06':17,'2026-06-07':29,'2026-06-08':29,'2026-06-09':29,'2026-06-10':29,'2026-06-11':10},153),
+        ('Date Called 4/13','2026-04-13',{'2026-06-05':11,'2026-06-06':24,'2026-06-07':45,'2026-06-08':45,'2026-06-09':45,'2026-06-10':45,'2026-06-11':13},228),
+        ('Date Called 4/20','2026-04-20',{'2026-06-05':15,'2026-06-06':35,'2026-06-07':54,'2026-06-08':54,'2026-06-09':54,'2026-06-10':54,'2026-06-11':14},280),
+        ('Date Called 4/27','2026-04-27',{'2026-06-05':16,'2026-06-06':34,'2026-06-07':64,'2026-06-08':64,'2026-06-09':63,'2026-06-10':63,'2026-06-11':18},322),
+        ('Date Called 5/6', '2026-05-06',{'2026-06-05':15,'2026-06-06':35,'2026-06-07':74,'2026-06-08':74,'2026-06-09':73,'2026-06-10':73,'2026-06-11':16},360),
+        ('Date Called 5/11','2026-05-11',{'2026-06-05':14,'2026-06-06':35,'2026-06-07':78,'2026-06-08':78,'2026-06-09':77,'2026-06-10':77,'2026-06-11':16},375),
+    ]
+    contracted_total = sum(contracted_block.values())
+    attrition_floor  = contracted_total * 0.8
+    inserted, skipped = 0, 0
+    prev_total = None
+    for label, report_date, pbn, total in weekly:
+        exists = db.execute("SELECT id FROM pickup_weekly WHERE config_id=? AND report_date=?", (cid, report_date)).fetchone()
+        if exists:
+            skipped += 1
+            prev_total = total
+            continue
+        change   = (total - prev_total) if prev_total is not None else None
+        pct_blk  = round(total / contracted_total * 100, 1) if contracted_total else None
+        pct_attr = round(total / attrition_floor  * 100, 1) if attrition_floor  else None
+        db.execute('''INSERT INTO pickup_weekly
+            (config_id,report_date,pickup_by_night,total_rooms,change_from_last,pct_of_block,pct_of_attrition,label,notes)
+            VALUES (?,?,?,?,?,?,?,?,?)''',
+            (cid, report_date, json.dumps(pbn), total, change, pct_blk, pct_attr, label, None))
+        inserted += 1
+        prev_total = total
+    db.commit()
+    return (f'<h3>AOSA import complete</h3>'
+            f'<p>Config ID: {cid} | Contracted block updated | '
+            f'{inserted} weekly rows inserted, {skipped} skipped (already existed).</p>'
+            f'<p><a href="/pickup/{cid}">View event</a></p>')
+
+
 @app.route('/admin/download-db')
 def admin_download_db():
     """Stream a consistent snapshot of the live SQLite database (admin only)."""
