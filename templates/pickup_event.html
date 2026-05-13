@@ -47,7 +47,14 @@
       </div>
       <div class="col-md-4">
         <div class="section-label">Cutoff Date</div>
-        <div>{{ config['cutoff_date'] | us_date }}</div>
+        <div>
+          {{ config['cutoff_date'] | us_date }}
+          {% if config['rooming_list_required'] %}
+          <span class="badge bg-warning text-dark ms-2" title="Client must submit a rooming list before cutoff">
+            <i class="bi bi-list-check me-1"></i>Rooming List Required
+          </span>
+          {% endif %}
+        </div>
       </div>
       <div class="col-md-4">
         <div class="section-label">Attrition %</div>

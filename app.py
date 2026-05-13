@@ -3305,6 +3305,12 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add rooming_list_required flag to pickup_config
+    try:
+        db.execute('ALTER TABLE pickup_config ADD COLUMN rooming_list_required INTEGER DEFAULT 0')
+        db.commit()
+    except Exception:
+        pass
     # Add CRF columns to rfp and rfp_hotel if not present
     for _tbl, _col, _typ in [
         ('rfp',       'crf_filename', 'TEXT'),
@@ -4441,6 +4447,7 @@ def status_board():
         'overdue_pickup':        ('danger',  'Overdue Pickup Report',                          'bi-exclamation-circle-fill'),
         'past_cutoff_no_history':('danger',  'Past Cutoff',                                   'bi-exclamation-triangle-fill'),
         'event_ended_no_hhr':    ('danger',  'Event Ended — No HHR Uploaded',                 'bi-file-earmark-x-fill'),
+        'rooming_list_due':      ('danger',  'Rooming List Due Within 15 Days',               'bi-list-check'),
         'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',                  'bi-telephone-x-fill'),
         'cutoff_approaching':    ('warning', 'Cutoff Approaching — Block Not Verified',        'bi-alarm-fill'),
         'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)','bi-grid-fill'),
@@ -4518,6 +4525,22 @@ def status_board():
             _issue('event_ended_no_hhr',
                    f'Event ended {event_end} and no Housing History Report has been uploaded.',
                    url_for('import_hhr'))
+
+        # 2c. Rooming list required and due within 15 days of cutoff
+        if cfg['rooming_list_required'] and cutoff and not is_ended:
+            try:
+                days_to_cutoff = (datetime.strptime(cutoff, '%Y-%m-%d') -
+                                  datetime.strptime(today, '%Y-%m-%d')).days
+                has_rooming = db.execute(
+                    'SELECT id FROM pickup_rooming_list WHERE config_id=? LIMIT 1', (cid,)
+                ).fetchone()
+                if days_to_cutoff <= 15 and not has_rooming:
+                    _issue('rooming_list_due',
+                           f'Rooming list required — cutoff is {cutoff} ({days_to_cutoff} days away). '
+                           f'Client must provide names before cut-off.',
+                           url_for('pickup_event', cid=cid))
+            except Exception:
+                pass
 
         # 3. No hotel contact in 21+ days (current events only)
         if is_current:
@@ -7635,19 +7658,21 @@ def pickup_edit_event(cid):
         for n, e in zip(f.getlist('cc_name[]'), f.getlist('cc_email[]')):
             if n.strip() or e.strip():
                 cc_emails.append({'name': n.strip(), 'email': e.strip()})
+        rooming_list_required = 1 if f.get('rooming_list_required') else 0
         _changes = [
-            ('organization',       config['organization'],       f['organization']),
-            ('event_name',         config['event_name'],         f.get('event_name')),
-            ('hotel',              config['hotel'],              f.get('hotel')),
-            ('cutoff_date',        config['cutoff_date'],        f.get('cutoff_date')),
-            ('contracted_rate',    config['contracted_rate'],    f.get('contracted_rate')),
-            ('attrition_pct',      config['attrition_pct'],      attrition),
-            ('contracted_block',   config['contracted_block'],   json.dumps(contracted_block)),
-            ('hotel_contact',      config['hotel_contact'],      hc_name),
-            ('hotel_contact_email',config['hotel_contact_email'],hc_email),
-            ('group_contact',      config['group_contact'],      gc_name),
-            ('group_contact_email',config['group_contact_email'],gc_email),
-            ('notes',              config['notes'],              f.get('notes')),
+            ('organization',          config['organization'],          f['organization']),
+            ('event_name',            config['event_name'],            f.get('event_name')),
+            ('hotel',                 config['hotel'],                 f.get('hotel')),
+            ('cutoff_date',           config['cutoff_date'],           f.get('cutoff_date')),
+            ('contracted_rate',       config['contracted_rate'],       f.get('contracted_rate')),
+            ('attrition_pct',         config['attrition_pct'],        attrition),
+            ('contracted_block',      config['contracted_block'],      json.dumps(contracted_block)),
+            ('hotel_contact',         config['hotel_contact'],        hc_name),
+            ('hotel_contact_email',   config['hotel_contact_email'],  hc_email),
+            ('group_contact',         config['group_contact'],        gc_name),
+            ('group_contact_email',   config['group_contact_email'],  gc_email),
+            ('notes',                 config['notes'],                f.get('notes')),
+            ('rooming_list_required', config['rooming_list_required'], rooming_list_required),
         ]
         db.execute('''
             UPDATE pickup_config SET
@@ -7656,7 +7681,7 @@ def pickup_edit_event(cid):
             group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
             contracted_block=?, contracted_rate=?, shoulder_pre=?,
             shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?,
-            event_start=?, event_end=?
+            event_start=?, event_end=?, rooming_list_required=?
             WHERE id=?
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
@@ -7667,7 +7692,8 @@ def pickup_edit_event(cid):
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
             f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails),
-            f.get('event_start') or None, f.get('event_end') or None, cid
+            f.get('event_start') or None, f.get('event_end') or None,
+            rooming_list_required, cid
         ))
         _log_change(db, cid, 'edit_event', _changes)
         db.commit()

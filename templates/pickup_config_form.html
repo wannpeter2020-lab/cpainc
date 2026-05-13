@@ -199,6 +199,21 @@
       </div>
     </div>
 
+    <div class="row g-3 mb-3">
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="rooming_list_required" id="rooming_list_required" value="1"
+                 {% if config and config['rooming_list_required'] %}checked{% endif %}>
+          <label class="form-check-label fw-semibold" for="rooming_list_required">
+            Rooming List Required
+          </label>
+          <div class="form-text">
+            Check if this contract requires the client to submit a rooming list (master bill / client-paid reservations) rather than attendees booking online. A status alert will fire 15 days before cutoff if no rooming list has been received.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="section-label mb-2">Contracted Block (one row per event night)</div>
     <table class="table table-sm w-auto" id="blockTable">
       <thead>
