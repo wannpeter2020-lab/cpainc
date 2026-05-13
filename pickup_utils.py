@@ -1315,16 +1315,21 @@ def _fmt_short(iso):
         return iso or ''
 
 def _build_cc(config_row):
-    """Return comma-separated CC email string. Handles both old (str) and new (dict) formats."""
+    """Return comma-separated CC email string.
+    Includes secondary hotel contact email (CC recipient) plus the cc_emails list."""
     try:
-        entries = json.loads(config_row['cc_emails'] or '[]')
         addrs = []
+        # Secondary hotel contact goes first in CC
+        hc2_email = (config_row['hotel_contact2_email'] or '').strip()
+        if hc2_email:
+            addrs.append(hc2_email)
+        entries = json.loads(config_row['cc_emails'] or '[]')
         for e in entries:
             if isinstance(e, dict):
                 addr = (e.get('email') or '').strip()
             else:
                 addr = str(e).strip()
-            if addr:
+            if addr and addr not in addrs:
                 addrs.append(addr)
         return ', '.join(addrs)
     except Exception:
@@ -1332,10 +1337,18 @@ def _build_cc(config_row):
 
 
 def _build_cc_recipients(config_row):
-    """Return list of {'name': str, 'email': str} dicts for all CC contacts."""
+    """Return list of {'name': str, 'email': str} dicts for all CC contacts.
+    Includes secondary hotel contact as first entry."""
     try:
-        entries = json.loads(config_row['cc_emails'] or '[]')
         result = []
+        seen = set()
+        # Secondary hotel contact goes first
+        hc2_email = (config_row['hotel_contact2_email'] or '').strip()
+        hc2_name  = (config_row['hotel_contact2']       or '').strip()
+        if hc2_email and hc2_email not in seen:
+            result.append({'name': hc2_name, 'email': hc2_email})
+            seen.add(hc2_email)
+        entries = json.loads(config_row['cc_emails'] or '[]')
         for e in entries:
             if isinstance(e, dict):
                 addr = (e.get('email') or '').strip()
@@ -1343,8 +1356,9 @@ def _build_cc_recipients(config_row):
             else:
                 addr = str(e).strip()
                 name = ''
-            if addr:
+            if addr and addr not in seen:
                 result.append({'name': name, 'email': addr})
+                seen.add(addr)
         return result
     except Exception:
         return []

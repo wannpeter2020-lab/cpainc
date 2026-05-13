@@ -99,15 +99,27 @@
         <div class="form-text">The hotel booking page link used to check current OTA rates</div>
       </div>
       <div class="col-md-6">
-        <label class="form-label fw-semibold">Hotel Contact Name</label>
+        <label class="form-label fw-semibold">Hotel Contact Name <span class="text-muted fw-normal small">(Primary — TO:)</span></label>
         <input type="text" name="hotel_contact" id="hotel_contact" class="form-control"
                value="{{ (config['hotel_contact'] or '') if config else '' }}"
                autocomplete="off" placeholder="Contact name">
       </div>
       <div class="col-md-6">
-        <label class="form-label fw-semibold">Hotel Contact Email</label>
+        <label class="form-label fw-semibold">Hotel Contact Email <span class="text-muted fw-normal small">(Primary)</span></label>
         <input type="text" name="hotel_contact_email" id="hotel_contact_email" class="form-control"
                value="{{ (config['hotel_contact_email'] or '') if config else '' }}"
+               placeholder="email@hotel.com">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Hotel Contact 2 Name <span class="text-muted fw-normal small">(Secondary — CC:)</span></label>
+        <input type="text" name="hotel_contact2" id="hotel_contact2" class="form-control"
+               value="{{ (config['hotel_contact2'] or '') if config else '' }}"
+               autocomplete="off" placeholder="Contact name">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Hotel Contact 2 Email <span class="text-muted fw-normal small">(Secondary)</span></label>
+        <input type="text" name="hotel_contact2_email" id="hotel_contact2_email" class="form-control"
+               value="{{ (config['hotel_contact2_email'] or '') if config else '' }}"
                placeholder="email@hotel.com">
       </div>
     </div>
@@ -353,10 +365,33 @@ function makeAutocomplete(nameInput, emailInput, apiUrl, paramFn) {
 const hotelNameInput        = document.getElementById('hotel');
 const hotelContactName      = document.getElementById('hotel_contact');
 const hotelContactEmail     = document.getElementById('hotel_contact_email');
+const hotelContact2Name     = document.getElementById('hotel_contact2');
+const hotelContact2Email    = document.getElementById('hotel_contact2_email');
 if (hotelContactName && hotelContactEmail) {
   makeAutocomplete(hotelContactName, hotelContactEmail, '/api/contacts/hotels',
     function() { return 'q=' + encodeURIComponent((hotelNameInput ? hotelNameInput.value : '') || ''); });
 }
+if (hotelContact2Name && hotelContact2Email) {
+  makeAutocomplete(hotelContact2Name, hotelContact2Email, '/api/contacts/hotels',
+    function() { return 'q=' + encodeURIComponent((hotelNameInput ? hotelNameInput.value : '') || ''); });
+}
+
+// For NEW events: auto-copy primary → secondary on primary field change (if secondary is blank)
+{% if not config %}
+function syncSecondary() {
+  if (hotelContact2Name && !hotelContact2Name.value.trim()) {
+    hotelContact2Name.value  = hotelContactName  ? hotelContactName.value  : '';
+  }
+  if (hotelContact2Email && !hotelContact2Email.value.trim()) {
+    hotelContact2Email.value = hotelContactEmail ? hotelContactEmail.value : '';
+  }
+}
+if (hotelContactName)  hotelContactName.addEventListener('change',  syncSecondary);
+if (hotelContactEmail) hotelContactEmail.addEventListener('change', syncSecondary);
+// Also sync when autocomplete picks a value (mousedown fires before blur)
+if (hotelContactName)  hotelContactName.addEventListener('blur',  function() { setTimeout(syncSecondary, 200); });
+if (hotelContactEmail) hotelContactEmail.addEventListener('blur', function() { setTimeout(syncSecondary, 200); });
+{% endif %}
 
 // Client contact autocomplete
 const orgInput          = document.getElementById('organization');

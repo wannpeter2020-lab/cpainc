@@ -87,7 +87,7 @@
         </div>
       </div>
       <div class="col-md-4">
-        <div class="section-label">Hotel Contact</div>
+        <div class="section-label">Hotel Contact <span class="text-muted fw-normal" style="font-size:.75rem">(TO:)</span></div>
         <div>
           {% if config['hotel_contact'] %}
             {{ config['hotel_contact'] }}
@@ -96,6 +96,16 @@
             {% endif %}
           {% else %}—{% endif %}
         </div>
+        {% if config['hotel_contact2'] or config['hotel_contact2_email'] %}
+        <div class="section-label mt-2">Hotel Contact 2 <span class="text-muted fw-normal" style="font-size:.75rem">(CC:)</span></div>
+        <div>
+          {{ config['hotel_contact2'] or '' }}
+          {% if config['hotel_contact2_email'] %}
+            {% if config['hotel_contact2'] %}—{% endif %}
+            <a href="mailto:{{ config['hotel_contact2_email'] }}">{{ config['hotel_contact2_email'] }}</a>
+          {% endif %}
+        </div>
+        {% endif %}
       </div>
     </div>
 

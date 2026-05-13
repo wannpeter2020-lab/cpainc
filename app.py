@@ -3311,6 +3311,13 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+    # Add secondary hotel contact columns to pickup_config
+    for _col in ('hotel_contact2', 'hotel_contact2_email'):
+        try:
+            db.execute(f'ALTER TABLE pickup_config ADD COLUMN {_col} TEXT')
+            db.commit()
+        except Exception:
+            pass
     # Add per-week OTA URL to pickup_weekly
     try:
         db.execute('ALTER TABLE pickup_weekly ADD COLUMN ota_url TEXT')
@@ -5693,8 +5700,10 @@ def pickup_new_event():
         attrition_raw = f.get('attrition_pct', '')
         attrition = float(attrition_raw) / 100 if attrition_raw else None
         ota_url = f.get('ota_url', '').strip() or None
-        hc_name  = f.get('hotel_contact', '').strip() or None
-        hc_email = f.get('hotel_contact_email', '').strip() or None
+        hc_name   = f.get('hotel_contact', '').strip() or None
+        hc_email  = f.get('hotel_contact_email', '').strip() or None
+        hc2_name  = f.get('hotel_contact2', '').strip() or hc_name   # default = primary
+        hc2_email = f.get('hotel_contact2_email', '').strip() or hc_email
         gc_name  = f.get('group_contact', '').strip() or None
         gc_email = f.get('group_contact_email', '').strip() or None
         hotel_contacts = [{'name': hc_name or '', 'email': hc_email or ''}] if (hc_name or hc_email) else []
@@ -5761,14 +5770,15 @@ def pickup_new_event():
         db.execute('''
             INSERT INTO pickup_config
             (booking_id, tab_name, organization, event_name, hotel, hotel_contact,
-             hotel_contact_email, hotel_contacts, group_contact, group_contact_email,
+             hotel_contact_email, hotel_contact2, hotel_contact2_email, hotel_contacts,
+             group_contact, group_contact_email,
              cutoff_date, attrition_pct, contracted_block, contracted_rate, shoulder_pre,
              shoulder_post, hotel_booking_link, notes, ota_url, cc_emails)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
             f.get('event_name'), f.get('hotel'), hc_name,
-            hc_email, json.dumps(hotel_contacts), gc_name,
+            hc_email, hc2_name, hc2_email, json.dumps(hotel_contacts), gc_name,
             gc_email, f.get('cutoff_date'),
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
@@ -7439,6 +7449,9 @@ def pickup_upload_contract(cid):
                 atr       = float(atr_str)  if atr_str  else config['attrition_pct']
                 hotel_contact       = request.form.get('hotel_contact', '').strip() or None
                 hotel_contact_email = request.form.get('hotel_contact_email', '').strip() or None
+                # Secondary hotel contact — defaults to same as primary (the sales person)
+                hotel_contact2      = request.form.get('hotel_contact2', '').strip() or hotel_contact
+                hotel_contact2_email= request.form.get('hotel_contact2_email', '').strip() or hotel_contact_email
                 group_contact       = request.form.get('group_contact', '').strip() or None
                 group_contact_email = request.form.get('group_contact_email', '').strip() or None
 
@@ -7449,21 +7462,24 @@ def pickup_upload_contract(cid):
 
                 db.execute('''
                     UPDATE pickup_config
-                    SET contracted_block    = ?,
-                        contracted_rate     = ?,
-                        cutoff_date         = ?,
-                        attrition_pct       = ?,
-                        block_is_estimated  = 0,
-                        contract_filename   = ?,
-                        contract_data       = ?,
-                        hotel_contact       = COALESCE(?, hotel_contact),
-                        hotel_contact_email = COALESCE(?, hotel_contact_email),
-                        group_contact       = COALESCE(?, group_contact),
-                        group_contact_email = COALESCE(?, group_contact_email)
+                    SET contracted_block     = ?,
+                        contracted_rate      = ?,
+                        cutoff_date          = ?,
+                        attrition_pct        = ?,
+                        block_is_estimated   = 0,
+                        contract_filename    = ?,
+                        contract_data        = ?,
+                        hotel_contact        = COALESCE(?, hotel_contact),
+                        hotel_contact_email  = COALESCE(?, hotel_contact_email),
+                        hotel_contact2       = COALESCE(?, hotel_contact2),
+                        hotel_contact2_email = COALESCE(?, hotel_contact2_email),
+                        group_contact        = COALESCE(?, group_contact),
+                        group_contact_email  = COALESCE(?, group_contact_email)
                     WHERE id = ?
                 ''', (json.dumps(block), rate, cutoff, atr,
                       contract_filename or None, file_blob,
                       hotel_contact, hotel_contact_email,
+                      hotel_contact2, hotel_contact2_email,
                       group_contact, group_contact_email, cid))
                 db.commit()
                 flash('Contract data saved — room block updated.', 'success')
@@ -7687,8 +7703,10 @@ def pickup_edit_event(cid):
         attrition_raw = f.get('attrition_pct', '')
         attrition = float(attrition_raw) / 100 if attrition_raw else None
         ota_url = f.get('ota_url', '').strip() or None
-        hc_name  = f.get('hotel_contact', '').strip() or None
-        hc_email = f.get('hotel_contact_email', '').strip() or None
+        hc_name   = f.get('hotel_contact', '').strip() or None
+        hc_email  = f.get('hotel_contact_email', '').strip() or None
+        hc2_name  = f.get('hotel_contact2', '').strip() or None
+        hc2_email = f.get('hotel_contact2_email', '').strip() or None
         gc_name  = f.get('group_contact', '').strip() or None
         gc_email = f.get('group_contact_email', '').strip() or None
         hotel_contacts = [{'name': hc_name or '', 'email': hc_email or ''}] if (hc_name or hc_email) else []
@@ -7708,6 +7726,8 @@ def pickup_edit_event(cid):
             ('contracted_block',      config['contracted_block'],      json.dumps(contracted_block)),
             ('hotel_contact',         config['hotel_contact'],        hc_name),
             ('hotel_contact_email',   config['hotel_contact_email'],  hc_email),
+            ('hotel_contact2',        config['hotel_contact2'],       hc2_name),
+            ('hotel_contact2_email',  config['hotel_contact2_email'], hc2_email),
             ('group_contact',         config['group_contact'],        gc_name),
             ('group_contact_email',   config['group_contact_email'],  gc_email),
             ('notes',                 config['notes'],                f.get('notes')),
@@ -7716,8 +7736,8 @@ def pickup_edit_event(cid):
         db.execute('''
             UPDATE pickup_config SET
             booking_id=?, tab_name=?, organization=?, event_name=?, hotel=?,
-            hotel_contact=?, hotel_contact_email=?, hotel_contacts=?,
-            group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
+            hotel_contact=?, hotel_contact_email=?, hotel_contact2=?, hotel_contact2_email=?,
+            hotel_contacts=?, group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
             contracted_block=?, contracted_rate=?, shoulder_pre=?,
             shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?,
             event_start=?, event_end=?, rooming_list_required=?
@@ -7725,7 +7745,7 @@ def pickup_edit_event(cid):
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
             f.get('event_name'), f.get('hotel'), hc_name,
-            hc_email, json.dumps(hotel_contacts), gc_name,
+            hc_email, hc2_name, hc2_email, json.dumps(hotel_contacts), gc_name,
             gc_email, f.get('cutoff_date'),
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
