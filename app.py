@@ -4517,7 +4517,7 @@ def status_board():
         if is_ended and str(cfg['booking_id'] or '') not in has_hhr:
             _issue('event_ended_no_hhr',
                    f'Event ended {event_end} and no Housing History Report has been uploaded.',
-                   url_for('pickup_event', cid=cid))
+                   url_for('import_housing'))
 
         # 3. No hotel contact in 21+ days (current events only)
         if is_current:
