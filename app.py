@@ -5313,7 +5313,12 @@ def pickup_dashboard():
 
     for c in configs:
         last = db.execute(
-            "SELECT * FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC LIMIT 1", (c['id'],)
+            """SELECT * FROM pickup_weekly WHERE config_id=?
+               AND (total_rooms IS NOT NULL AND total_rooms > 0)
+               AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'
+                                      AND label NOT LIKE '%Final%'))
+               ORDER BY report_date DESC LIMIT 1""",
+            (c['id'],)
         ).fetchone()
         all_weekly = db.execute("SELECT label FROM pickup_weekly WHERE config_id=?", (c['id'],)).fetchall()
         last_contact = db.execute(
