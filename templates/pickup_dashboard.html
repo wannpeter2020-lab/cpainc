@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Pickup Tracking — CPAinc{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-2">
   <h4 class="mb-0"><i class="bi bi-calendar-check me-2"></i>Pickup Tracking</h4>
   <div class="d-flex gap-2">
     <a href="{{ url_for('pickup_fill_missing') }}" class="btn btn-primary btn-sm">
@@ -11,6 +11,21 @@
       <i class="bi bi-plus-circle me-1"></i> New Event
     </a>
   </div>
+</div>
+
+{# ── Search bar ── #}
+<div class="mb-3">
+  <div class="input-group" style="max-width:480px">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="text" id="pickupSearch" class="form-control"
+           placeholder="Search event, org, hotel, booking ID…"
+           oninput="doPickupSearch(this.value)">
+    <button class="btn btn-outline-secondary" type="button"
+            onclick="doPickupSearch('');document.getElementById('pickupSearch').value=''">
+      Clear
+    </button>
+  </div>
+  <div id="pickupSearchInfo" class="text-muted small mt-1" style="display:none"></div>
 </div>
 
 {# ── KPI Cards ── #}
@@ -71,7 +86,12 @@
 
 {# ── Helper macro: render a single hotel row ── #}
 {% macro hotel_row(r, show_history=false, section='', indent=false) %}
-<tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}">
+{% set _s_bkid = (r.config['booking_id'] or '')|string %}
+{% set _s_evt  = (r.config['event_name'] or r.config['bk_event'] or '') %}
+{% set _s_org  = (r.config['organization'] or r.config['bk_org'] or '') %}
+{% set _s_htl  = (r.config['hotel'] or r.config['bk_hotel'] or '') %}
+<tr data-start="{{ r.event_start or '' }}" data-end="{{ r.event_end or '' }}"
+    data-search="{{ (_s_bkid ~ ' ' ~ _s_evt ~ ' ' ~ _s_org ~ ' ' ~ _s_htl)|lower }}">
   <td class="font-monospace small" {% if indent %}style="padding-left:2rem;"{% endif %}>
     {% if r.config['booking_id'] %}
       <a href="{{ url_for('booking_detail', booking_id=r.config['booking_id']) }}"
@@ -411,7 +431,7 @@
         </thead>
         <tbody>
           {% for r in archived_rows %}
-          <tr>
+          <tr data-search="{{ ((r.config['booking_id'] or '')|string ~ ' ' ~ (r.config['event_name'] or r.config['bk_event'] or '') ~ ' ' ~ (r.config['organization'] or r.config['bk_org'] or '') ~ ' ' ~ (r.config['hotel'] or r.config['bk_hotel'] or ''))|lower }}">
             <td class="font-monospace small">{{ r.config['booking_id'] or '—' }}</td>
             <td>
               {% set eff_event = r.config['event_name'] or r.config['bk_event'] %}
@@ -450,6 +470,67 @@
 
 {% block scripts %}
 <script>
+// ── Pickup search ─────────────────────────────────────────────────────────────
+function doPickupSearch(raw) {
+  const q = raw.trim().toLowerCase();
+  const info = document.getElementById('pickupSearchInfo');
+  let totalMatches = 0;
+
+  // 1. Process every row with data-search (both standalone and grouped sub-rows)
+  document.querySelectorAll('tr[data-search]').forEach(function(tr) {
+    const matches = !q || tr.dataset.search.includes(q);
+    tr.style.display = matches ? '' : 'none';
+    if (matches && q) totalMatches++;
+  });
+
+  // 2. Handle multi-hotel group headers (tr.table-primary) and their container rows
+  document.querySelectorAll('tr.table-primary').forEach(function(headerTr) {
+    const bsTarget = headerTr.dataset.bsTarget;
+    if (!bsTarget) return;
+    const collapseDiv = document.querySelector(bsTarget);
+    const containerTr = headerTr.nextElementSibling;
+
+    if (!q) {
+      headerTr.style.display = '';
+      if (containerTr) containerTr.style.display = '';
+      return;
+    }
+    const anyMatch = collapseDiv &&
+      Array.from(collapseDiv.querySelectorAll('tr[data-search]'))
+           .some(function(r) { return r.dataset.search.includes(q); });
+
+    headerTr.style.display = anyMatch ? '' : 'none';
+    if (containerTr) containerTr.style.display = anyMatch ? '' : 'none';
+    // Expand group when searching and it has matches
+    if (anyMatch && collapseDiv && !collapseDiv.classList.contains('show')) {
+      collapseDiv.classList.add('show');
+    }
+  });
+
+  // 3. Auto-expand sections with matches; update badges
+  ['collapseCurrent', 'collapseFuture', 'collapsePast', 'collapseArchived'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!q) return; // Don't collapse sections on clear
+    const visibleRows = Array.from(el.querySelectorAll('tr[data-search]'))
+                             .filter(function(r) { return r.style.display !== 'none'; });
+    if (visibleRows.length && !el.classList.contains('show')) {
+      const bsCol = bootstrap.Collapse.getOrCreateInstance(el, {toggle: false});
+      bsCol.show();
+    }
+  });
+
+  // 4. Show/hide info strip
+  if (q) {
+    info.style.display = '';
+    info.textContent = totalMatches === 0
+      ? 'No results found.'
+      : totalMatches + ' result' + (totalMatches === 1 ? '' : 's') + ' matching "' + raw.trim() + '"';
+  } else {
+    info.style.display = 'none';
+  }
+}
+
 // ── Chevron toggle for section cards ──────────────────────────────────────────
 document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function(btn) {
   // Skip group collapse toggles (they use tr elements, not buttons with data-bs-target pointing to card sections)

@@ -2,9 +2,9 @@
 {% block title %}RFP Tracking — CPAinc{% endblock %}
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-2">
   <h4 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>RFP Tracking
-    <span class="badge bg-secondary ms-1">{{ rfps|length }}</span>
+    <span class="badge bg-secondary ms-1" id="rfpCount">{{ rfps|length }}</span>
   </h4>
   <div class="d-flex gap-2">
     {% if show_archived %}
@@ -16,10 +16,28 @@
   </div>
 </div>
 
+{# ── Search / filter bar ── #}
+<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+  <div class="input-group" style="max-width:380px">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input type="text" id="rfpSearch" class="form-control"
+           placeholder="Search client, event, booking ID…"
+           oninput="doRfpFilter()">
+  </div>
+  <select id="rfpStatusFilter" class="form-select" style="max-width:200px" onchange="doRfpFilter()">
+    <option value="">All Statuses</option>
+    {% for key, val in statuses.items() %}
+    <option value="{{ val[1] }}">{{ val[1] }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn btn-outline-secondary" type="button" onclick="clearRfpFilter()">Clear</button>
+  <span id="rfpSearchInfo" class="text-muted small" style="display:none"></span>
+</div>
+
 {% if rfps %}
 <div class="card">
   <div class="table-responsive">
-    <table class="table table-hover table-sm align-middle mb-0">
+    <table class="table table-hover table-sm align-middle mb-0" id="rfpTable">
       <thead>
         <tr>
           <th>Client / Organization</th>
@@ -35,7 +53,9 @@
       <tbody>
         {% for r in rfps %}
         {% set st = statuses.get(r['status'], ('secondary', r['status'])) %}
-        <tr onclick="window.location='/rfp/{{ r['id'] }}'" style="cursor:pointer">
+        <tr onclick="window.location='/rfp/{{ r['id'] }}'" style="cursor:pointer"
+            data-search="{{ ((r['client_org'] or '') ~ ' ' ~ (r['event_name'] or '') ~ ' ' ~ (r['booking_id'] or '')|string)|lower }}"
+            data-status="{{ st[1] }}">
           <td class="fw-semibold">{{ r['client_org'] }}</td>
           <td class="small">{{ r['event_name'] or '—' }}</td>
           <td class="small text-nowrap">
@@ -55,6 +75,9 @@
           </td>
         </tr>
         {% endfor %}
+        <tr id="rfpNoResults" style="display:none">
+          <td colspan="8" class="text-center text-muted py-4">No results found.</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -73,4 +96,42 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+function doRfpFilter() {
+  const q      = (document.getElementById('rfpSearch').value || '').trim().toLowerCase();
+  const status = (document.getElementById('rfpStatusFilter').value || '').toLowerCase();
+  const info   = document.getElementById('rfpSearchInfo');
+  const noRes  = document.getElementById('rfpNoResults');
+  let visible  = 0;
+
+  document.querySelectorAll('#rfpTable tbody tr[data-search]').forEach(function(tr) {
+    const textMatch   = !q || tr.dataset.search.includes(q);
+    const statusMatch = !status || (tr.dataset.status || '').toLowerCase() === status;
+    const show = textMatch && statusMatch;
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  const total = document.querySelectorAll('#rfpTable tbody tr[data-search]').length;
+  document.getElementById('rfpCount').textContent = visible;
+
+  if (noRes) noRes.style.display = visible === 0 ? '' : 'none';
+
+  if (q || status) {
+    info.style.display = '';
+    info.textContent = visible + ' of ' + total + ' RFP' + (total === 1 ? '' : 's');
+  } else {
+    info.style.display = 'none';
+  }
+}
+
+function clearRfpFilter() {
+  document.getElementById('rfpSearch').value = '';
+  document.getElementById('rfpStatusFilter').value = '';
+  doRfpFilter();
+}
+</script>
 {% endblock %}
