@@ -5779,7 +5779,15 @@ def pickup_event(cid):
         "SELECT * FROM pickup_contact_log WHERE config_id=? ORDER BY contact_date DESC, id DESC", (cid,)
     ).fetchall()
     block = json.loads(config['contracted_block'] or '{}')
-    all_dates = sorted(block.keys())
+    # Include shoulder nights from any weekly entry that fall outside the contracted block
+    all_date_set = set(block.keys())
+    for _w in all_weekly:
+        try:
+            _pbn = json.loads(_w['pickup_by_night'] or '{}')
+            all_date_set.update(d for d in _pbn if d != 'historical_total')
+        except Exception:
+            pass
+    all_dates = sorted(all_date_set)
     contracted_total = sum(v for v in block.values() if v)
     day_map = {}
     for d in all_dates:
@@ -6017,6 +6025,13 @@ def pickup_event_report(primary_cid):
         contracted_total = sum(block.values())
         combined_block += contracted_total
         all_date_union.update(block.keys())
+        # Also include any shoulder nights from weekly entries
+        for _w in db.execute("SELECT pickup_by_night FROM pickup_weekly WHERE config_id=?", (c['id'],)).fetchall():
+            try:
+                _pbn = json.loads(_w['pickup_by_night'] or '{}')
+                all_date_union.update(d for d in _pbn if d != 'historical_total')
+            except Exception:
+                pass
 
         # Latest non-historical weekly entry (label IS NULL counts as current)
         last = db.execute(
