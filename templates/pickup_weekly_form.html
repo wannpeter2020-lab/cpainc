@@ -80,15 +80,58 @@
           <th class="text-end">Pickup</th>
           <th class="text-end">Last Pickup</th>
           <th class="text-end">Remaining</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>
+
+        {# ── Add shoulder BEFORE button ── #}
+        <tr id="addBeforeRow">
+          <td colspan="6" class="text-center border-0 py-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-3"
+                    onclick="addShoulder('before')" title="Add shoulder night before block">
+              <i class="bi bi-plus"></i>
+            </button>
+          </td>
+        </tr>
+
+        {# ── Pre-existing shoulder nights BEFORE the block (from saved entry) ── #}
+        {% if extra_dates is defined %}
+          {% for date in extra_dates %}
+            {% if block.keys()|sort|first is defined and date < (block.keys()|sort|first) %}
+              {% set input_val = (entry_pickup.get(date) or 0)|int if is_edit else (last_pickup.get(date) or 0)|int %}
+              {% set prev = (last_pickup.get(date) or 0)|int %}
+              <tr class="pickup-row text-muted existing-shoulder" data-date="{{ date }}">
+                <td class="fw-semibold">
+                  {{ date | us_date }}
+                  <span class="badge bg-light text-muted border ms-1" style="font-size:.7rem">shoulder</span>
+                  <button type="button" class="btn btn-sm btn-link text-danger p-0 ms-1"
+                          onclick="removeShoulderRow(this)" title="Remove">
+                    <i class="bi bi-x-circle"></i>
+                  </button>
+                </td>
+                <td class="text-end">—</td>
+                <td>
+                  <input type="number" name="night_{{ date }}" id="night_{{ date }}"
+                         class="form-control form-control-sm text-end night-input"
+                         style="width:90px" value="{{ input_val }}" min="0"
+                         data-contracted="0" oninput="updateStatus()">
+                </td>
+                <td class="text-end text-muted">{{ prev if prev else '—' }}</td>
+                <td class="text-end" id="rem_{{ date }}">—</td>
+                <td></td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+
+        {# ── Contracted block nights ── #}
         {% for date in block.keys()|sort %}
         {% set contracted = (block[date] or 0)|int %}
         {% set is_shoulder = contracted == 0 %}
         {% set input_val = (entry_pickup.get(date) or 0)|int if is_edit else (last_pickup.get(date) or 0)|int %}
         {% set prev = (last_pickup.get(date) or 0)|int %}
-        <tr class="{% if is_shoulder %}text-muted{% endif %}">
+        <tr class="pickup-row {% if is_shoulder %}text-muted{% endif %}" data-date="{{ date }}">
           <td class="fw-semibold">
             {{ date | us_date }}
             {% if is_shoulder %}<span class="badge bg-light text-muted border ms-1" style="font-size:.7rem">shoulder</span>{% endif %}
@@ -105,16 +148,59 @@
           </td>
           <td class="text-end text-muted">{{ prev if prev else '—' }}</td>
           <td class="text-end" id="rem_{{ date }}">{{ contracted - input_val }}</td>
+          <td></td>
         </tr>
         {% endfor %}
+
+        {# ── Pre-existing shoulder nights AFTER the block (from saved entry) ── #}
+        {% if extra_dates is defined %}
+          {% for date in extra_dates %}
+            {% if block.keys()|sort|last is defined and date > (block.keys()|sort|last) %}
+              {% set input_val = (entry_pickup.get(date) or 0)|int if is_edit else (last_pickup.get(date) or 0)|int %}
+              {% set prev = (last_pickup.get(date) or 0)|int %}
+              <tr class="pickup-row text-muted existing-shoulder" data-date="{{ date }}">
+                <td class="fw-semibold">
+                  {{ date | us_date }}
+                  <span class="badge bg-light text-muted border ms-1" style="font-size:.7rem">shoulder</span>
+                  <button type="button" class="btn btn-sm btn-link text-danger p-0 ms-1"
+                          onclick="removeShoulderRow(this)" title="Remove">
+                    <i class="bi bi-x-circle"></i>
+                  </button>
+                </td>
+                <td class="text-end">—</td>
+                <td>
+                  <input type="number" name="night_{{ date }}" id="night_{{ date }}"
+                         class="form-control form-control-sm text-end night-input"
+                         style="width:90px" value="{{ input_val }}" min="0"
+                         data-contracted="0" oninput="updateStatus()">
+                </td>
+                <td class="text-end text-muted">{{ prev if prev else '—' }}</td>
+                <td class="text-end" id="rem_{{ date }}">—</td>
+                <td></td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+
+        {# ── Add shoulder AFTER button ── #}
+        <tr id="addAfterRow">
+          <td colspan="6" class="text-center border-0 py-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-3"
+                    onclick="addShoulder('after')" title="Add shoulder night after block">
+              <i class="bi bi-plus"></i>
+            </button>
+          </td>
+        </tr>
+
       </tbody>
       <tfoot>
         <tr class="table-light fw-semibold">
           <td>Total</td>
-          <td class="text-end" id="contractedTotalDisplay">{{ contracted_total if contracted_total is defined else block.values()|sum }}</td>
+          <td class="text-end" id="contractedTotalDisplay">{{ block.values()|sum }}</td>
           <td class="text-end" id="totalPickup">—</td>
           <td class="text-end text-muted">{{ last['total_rooms'] if last else 0 }}</td>
           <td class="text-end" id="totalRemaining">—</td>
+          <td></td>
         </tr>
       </tfoot>
     </table>
@@ -153,6 +239,9 @@
 
 {% block scripts %}
 <script>
+// Sorted list of contracted block dates (used to calculate shoulder defaults)
+const BLOCK_DATES = {{ block.keys()|sort|list|tojson }};
+
 // Only sum non-zero contracted values for CONTRACTED_TOTAL
 const CONTRACTED_TOTAL = (function() {
   let t = 0;
@@ -167,6 +256,73 @@ const LAST_TOTAL       = {{ (last['total_rooms'] or 0) if last else 0 }};
 const IS_EDIT          = {{ 'true' if is_edit else 'false' }};
 const CONTRACTED_RATE  = {{ config['contracted_rate'] or 'null' }};
 
+// ── Offset a YYYY-MM-DD string by N days ────────────────────────────────────
+function offsetDate(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// ── Add a shoulder night row above or below the block ───────────────────────
+function addShoulder(direction) {
+  let defaultDate;
+  if (BLOCK_DATES.length > 0) {
+    defaultDate = direction === 'before'
+      ? offsetDate(BLOCK_DATES[0], -1)
+      : offsetDate(BLOCK_DATES[BLOCK_DATES.length - 1], 1);
+  } else {
+    defaultDate = new Date().toISOString().slice(0, 10);
+  }
+
+  const tr = document.createElement('tr');
+  tr.className = 'pickup-row text-muted dynamic-shoulder';
+  tr.innerHTML =
+    '<td class="fw-semibold">' +
+      '<input type="date" class="form-control form-control-sm d-inline-block me-1" style="width:155px"' +
+             ' value="' + defaultDate + '" onchange="onShoulderDateChange(this)">' +
+      '<span class="badge bg-light text-muted border me-1" style="font-size:.7rem">shoulder</span>' +
+      '<button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="removeShoulderRow(this)" title="Remove">' +
+        '<i class="bi bi-x-circle"></i>' +
+      '</button>' +
+    '</td>' +
+    '<td class="text-end">—</td>' +
+    '<td>' +
+      '<input type="number" name="night_' + defaultDate + '" id="night_' + defaultDate + '"' +
+             ' class="form-control form-control-sm text-end night-input shoulder-input"' +
+             ' style="width:90px" value="0" min="0" data-contracted="0" oninput="updateStatus()">' +
+    '</td>' +
+    '<td class="text-end text-muted">—</td>' +
+    '<td class="text-end"></td>' +
+    '<td></td>';
+
+  const tbody = document.querySelector('#pickupTable tbody');
+  if (direction === 'before') {
+    document.getElementById('addBeforeRow').after(tr);
+  } else {
+    tbody.insertBefore(tr, document.getElementById('addAfterRow'));
+  }
+  updateStatus();
+}
+
+// ── Update the night_* input name when a shoulder date picker changes ────────
+function onShoulderDateChange(dateInput) {
+  const newDate = dateInput.value;
+  if (!newDate) return;
+  const row = dateInput.closest('tr');
+  const numInput = row.querySelector('.shoulder-input');
+  if (numInput) {
+    numInput.name = 'night_' + newDate;
+    numInput.id   = 'night_' + newDate;
+  }
+}
+
+// ── Remove a shoulder row and recalc ────────────────────────────────────────
+function removeShoulderRow(btn) {
+  btn.closest('tr').remove();
+  updateStatus();
+}
+
+// ── Live totals / badges ─────────────────────────────────────────────────────
 function updateStatus() {
   let total = 0;
   document.querySelectorAll('.night-input').forEach(function(inp) {

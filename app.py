@@ -7693,10 +7693,16 @@ def pickup_weekly_new(cid):
         f = request.form
         block = json.loads(config['contracted_block'] or '{}')
         pickup_by_night = {}
-        for d in block:
-            val = f.get(f'night_{d}', '')
-            if val != '':
-                pickup_by_night[d] = int(val)
+        # Collect contracted block nights AND any shoulder nights added via the form
+        for key in f:
+            if key.startswith('night_'):
+                val = f.get(key, '').strip()
+                if val != '':
+                    d = key[6:]  # strip 'night_'
+                    try:
+                        pickup_by_night[d] = int(val)
+                    except ValueError:
+                        pass
         total_rooms = sum(pickup_by_night.values())
         contracted_total = sum(block.values())
         change_from_last = (total_rooms - (last['total_rooms'] or 0)) if last else None
@@ -7723,9 +7729,12 @@ def pickup_weekly_new(cid):
     block = json.loads(config['contracted_block'] or '{}')
     last_pickup = json.loads(last['pickup_by_night']) if last else {}
     today_str = datetime.today().strftime('%Y-%m-%d')
+    # Shoulder nights from last entry that aren't in the contracted block
+    extra_dates = sorted(set(last_pickup.keys()) - set(block.keys()))
     return render_template('pickup_weekly_form.html', config=config, block=block,
                            last=last, last_pickup=last_pickup, today=today_str,
-                           is_edit=False, entry=None, entry_pickup={}, wid=None)
+                           is_edit=False, entry=None, entry_pickup={}, wid=None,
+                           extra_dates=extra_dates)
 
 
 @app.route('/pickup/<int:cid>/weekly/<int:wid>/edit', methods=['GET', 'POST'])
@@ -7740,10 +7749,16 @@ def pickup_weekly_edit(cid, wid):
         f = request.form
         block = json.loads(config['contracted_block'] or '{}')
         pickup_by_night = {}
-        for d in block:
-            val = f.get(f'night_{d}', '')
-            if val != '':
-                pickup_by_night[d] = int(val)
+        # Collect contracted block nights AND any shoulder nights added via the form
+        for key in f:
+            if key.startswith('night_'):
+                val = f.get(key, '').strip()
+                if val != '':
+                    d = key[6:]  # strip 'night_'
+                    try:
+                        pickup_by_night[d] = int(val)
+                    except ValueError:
+                        pass
         total_rooms = sum(pickup_by_night.values())
         contracted_total = sum(block.values())
         pct_of_block     = round(total_rooms / contracted_total * 100, 1) if contracted_total else None
@@ -7776,6 +7791,8 @@ def pickup_weekly_edit(cid, wid):
         return redirect(url_for('pickup_event', cid=cid))
     block = json.loads(config['contracted_block'] or '{}')
     entry_pickup = json.loads(entry['pickup_by_night']) if entry['pickup_by_night'] else {}
+    # Shoulder nights saved on this entry that aren't in the contracted block
+    extra_dates = sorted(set(entry_pickup.keys()) - set(block.keys()))
     prev_entry = db.execute(
         "SELECT * FROM pickup_weekly WHERE config_id=? AND report_date < ? ORDER BY report_date DESC LIMIT 1",
         (cid, entry['report_date'])
@@ -7785,7 +7802,8 @@ def pickup_weekly_edit(cid, wid):
                            config=config, block=block,
                            last=prev_entry, last_pickup=last_pickup,
                            entry_pickup=entry_pickup, entry=entry,
-                           today=entry['report_date'], is_edit=True, wid=wid)
+                           today=entry['report_date'], is_edit=True, wid=wid,
+                           extra_dates=extra_dates)
 
 
 @app.route('/pickup/<int:cid>/weekly/<int:wid>/delete', methods=['POST'])
