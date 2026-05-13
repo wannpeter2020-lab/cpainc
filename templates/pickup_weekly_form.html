@@ -33,18 +33,21 @@
         {% if config['contracted_rate'] %}
         <div class="form-text">Contracted: ${{ "%.2f"|format(config['contracted_rate']) }}</div>
         {% endif %}
-        {% if config['ota_url'] %}
-        <div class="mt-2">
-          <a href="{{ config['ota_url'] }}" target="_blank" class="btn btn-sm btn-outline-info">
-            <i class="bi bi-box-arrow-up-right me-1"></i>Check Current Webrate
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">OTA Link <span class="text-muted fw-normal">(this week's search URL)</span></label>
+        <div class="input-group">
+          <input type="url" name="weekly_ota_url" class="form-control"
+                 value="{{ entry['ota_url'] if is_edit and entry and entry['ota_url'] else (config['ota_url'] or '') }}"
+                 placeholder="https://...">
+          {% set _ota_preview = (entry['ota_url'] if is_edit and entry and entry['ota_url'] else config['ota_url']) %}
+          {% if _ota_preview %}
+          <a href="{{ _ota_preview }}" target="_blank" class="btn btn-outline-info" title="Open current OTA link">
+            <i class="bi bi-box-arrow-up-right"></i>
           </a>
+          {% endif %}
         </div>
-        {% else %}
-        <div class="form-text text-warning">
-          <i class="bi bi-exclamation-triangle me-1"></i>No webrate URL saved —
-          <a href="{{ url_for('pickup_edit_event', cid=config['id']) }}">add it in Edit Event</a>
-        </div>
-        {% endif %}
+        <div class="form-text">Pre-filled from event config. Change to the exact URL you used this week.</div>
       </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Label</label>

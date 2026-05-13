@@ -172,6 +172,12 @@
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-envelope me-1"></i>Email Hotel
     </a>
+    {% if show_rate_issue %}
+    <a href="{{ url_for('pickup_email_hotel_rate_issue', cid=config['id']) }}"
+       class="btn btn-sm btn-danger">
+      <i class="bi bi-exclamation-triangle me-1"></i>Email Hotel Rate Issue
+    </a>
+    {% endif %}
     <a href="{{ url_for('pickup_email_client', cid=config['id']) }}"
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-envelope-heart me-1"></i>Email Client
@@ -407,6 +413,9 @@
                 {% if diff < 0 %}<span class="text-danger small">(-${{ "%.0f"|format(diff|abs) }})</span>
                 {% elif diff > 0 %}<span class="text-success small">(+${{ "%.0f"|format(diff) }})</span>
                 {% endif %}
+              {% endif %}
+              {% if w['ota_url'] %}
+              <a href="{{ w['ota_url'] }}" target="_blank" class="ms-1 text-info" title="OTA link for this week"><i class="bi bi-box-arrow-up-right small"></i></a>
               {% endif %}
             {% else %}—{% endif %}
           </td>

@@ -3311,6 +3311,12 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+    # Add per-week OTA URL to pickup_weekly
+    try:
+        db.execute('ALTER TABLE pickup_weekly ADD COLUMN ota_url TEXT')
+        db.commit()
+    except Exception:
+        pass
     # Add CRF columns to rfp and rfp_hotel if not present
     for _tbl, _col, _typ in [
         ('rfp',       'crf_filename', 'TEXT'),
@@ -5800,6 +5806,15 @@ def pickup_event(cid):
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
     all_weekly = db.execute("SELECT * FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC", (cid,)).fetchall()
+    # Most recent real entry for OTA rate comparison (excluding historical/placeholder rows)
+    last_real = db.execute(
+        """SELECT * FROM pickup_weekly WHERE config_id=?
+           AND (total_rooms IS NOT NULL AND total_rooms > 0)
+           AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'
+                                  AND label NOT LIKE '%Final%'))
+           ORDER BY report_date DESC LIMIT 1""",
+        (cid,)
+    ).fetchone()
     rooming = db.execute(
         "SELECT id, upload_date, filename, total_guests, reconciliation_status, discrepancy_notes FROM pickup_rooming_list WHERE config_id=? ORDER BY upload_date DESC", (cid,)
     ).fetchall()
@@ -5998,6 +6013,12 @@ def pickup_event(cid):
         (cid,)
     ).fetchall()
 
+    last_ota_rate = last_real['ota_rate'] if last_real else None
+    last_ota_url  = last_real['ota_url']  if last_real else None
+    show_rate_issue = bool(
+        last_ota_rate and config['contracted_rate'] and
+        float(last_ota_rate) < float(config['contracted_rate'])
+    )
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -6010,7 +6031,9 @@ def pickup_event(cid):
                            is_multi_hotel=is_multi_hotel,
                            primary_cid_for_report=primary_cid_for_report,
                            deleted_weekly=deleted_weekly,
-                           tasks=tasks, event_notes=event_notes, all_users=all_users)
+                           tasks=tasks, event_notes=event_notes, all_users=all_users,
+                           last_ota_rate=last_ota_rate, last_ota_url=last_ota_url,
+                           show_rate_issue=show_rate_issue)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -7756,13 +7779,14 @@ def pickup_weekly_new(cid):
         attrition_floor  = contracted_total * (config['attrition_pct'] or 0)
         pct_of_attrition = round(total_rooms / attrition_floor * 100, 1) if attrition_floor else None
         ota_rate = float(f['ota_rate']) if f.get('ota_rate') else None
+        weekly_ota_url = f.get('weekly_ota_url', '').strip() or config['ota_url'] or None
         db.execute('''
             INSERT INTO pickup_weekly
             (config_id, report_date, pickup_by_night, total_rooms, change_from_last,
-             pct_of_block, pct_of_attrition, ota_rate, label, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+             pct_of_block, pct_of_attrition, ota_rate, ota_url, label, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ''', (cid, f['report_date'], json.dumps(pickup_by_night), total_rooms,
-              change_from_last, pct_of_block, pct_of_attrition, ota_rate,
+              change_from_last, pct_of_block, pct_of_attrition, ota_rate, weekly_ota_url,
               f.get('label'), f.get('notes')))
         _log_change(db, cid, 'add_report', [
             ('report_date', None, f['report_date']),
@@ -7811,13 +7835,14 @@ def pickup_weekly_edit(cid, wid):
         attrition_floor  = contracted_total * (config['attrition_pct'] or 0)
         pct_of_attrition = round(total_rooms / attrition_floor * 100, 1) if attrition_floor else None
         ota_rate = float(f['ota_rate']) if f.get('ota_rate') else None
+        weekly_ota_url = f.get('weekly_ota_url', '').strip() or config['ota_url'] or None
         db.execute('''
             UPDATE pickup_weekly
             SET report_date=?, pickup_by_night=?, total_rooms=?,
-                pct_of_block=?, pct_of_attrition=?, ota_rate=?, label=?, notes=?
+                pct_of_block=?, pct_of_attrition=?, ota_rate=?, ota_url=?, label=?, notes=?
             WHERE id=? AND config_id=?
         ''', (f['report_date'], json.dumps(pickup_by_night), total_rooms,
-              pct_of_block, pct_of_attrition, ota_rate,
+              pct_of_block, pct_of_attrition, ota_rate, weekly_ota_url,
               f.get('label') or None, f.get('notes') or None, wid, cid))
         # Recompute change_from_last for all entries
         all_w = db.execute(
@@ -8376,6 +8401,69 @@ def pickup_email_hotel(cid):
     # ── Fallback: preview page ─────────────────────────────────────────────
     return render_template('pickup_email_preview.html', config=config, email=email,
                            email_type='hotel', ms_connected=bool(ms_row))
+
+
+@app.route('/pickup/<int:cid>/email/hotel/rate-issue')
+def pickup_email_hotel_rate_issue(cid):
+    """Open a hotel rate-parity issue email in Outlook."""
+    import platform
+    from pickup_utils import build_hotel_rate_issue_email
+
+    db = get_db()
+    config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    # Get the most recent real weekly entry for OTA data
+    last_real = db.execute(
+        """SELECT * FROM pickup_weekly WHERE config_id=?
+           AND (total_rooms IS NOT NULL AND total_rooms > 0)
+           AND (label IS NULL OR (label NOT LIKE 'ASAS %' AND label NOT LIKE 'Historical%'
+                                  AND label NOT LIKE '%Final%'))
+           ORDER BY report_date DESC LIMIT 1""",
+        (cid,)
+    ).fetchone()
+
+    if not last_real or not last_real['ota_rate']:
+        flash('No OTA rate found in the latest weekly entry.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    # Use weekly entry's ota_url first, fall back to config-level ota_url
+    ota_url = (last_real['ota_url'] or config['ota_url'] or '').strip() or None
+    email = build_hotel_rate_issue_email(config, last_real['ota_rate'], ota_url)
+    hotel_email = config['hotel_contact_email'] or ''
+    cc_list     = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
+    body_html   = email.get('body', '').replace('\n', '<br>')
+    user        = get_current_user()
+
+    if platform.system() == 'Darwin':
+        ok, err = _open_in_outlook(cid, email.get('subject', ''), hotel_email,
+                                   cc_list, body_html, 'hotel_rate_issue')
+        if ok:
+            flash('Rate issue email opened in Outlook — review and send when ready.', 'success')
+        else:
+            flash(f'Could not open Outlook: {err}', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    ms_row = db.execute(
+        'SELECT user_id FROM UserMicrosoftTokens WHERE user_id = ?', (user['id'],)
+    ).fetchone() if user else None
+
+    if ms_row:
+        from datetime import date as _date
+        draft_id, err = _create_outlook_draft(
+            user_id=user['id'], subject=email.get('subject', ''),
+            to_addr=hotel_email, cc_list=cc_list, body_html=body_html,
+        )
+        if draft_id:
+            flash('Rate issue draft created in your Outlook Drafts folder.', 'success')
+            return redirect(url_for('pickup_event', cid=cid))
+        else:
+            flash(f'Could not create Outlook draft: {err}', 'error')
+
+    return render_template('pickup_email_preview.html', config=config, email=email,
+                           email_type='hotel_rate_issue', ms_connected=bool(ms_row))
 
 
 @app.route('/pickup/<int:cid>/email/client')

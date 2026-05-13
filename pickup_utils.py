@@ -1346,6 +1346,63 @@ def hotel_request_mailto(config_row):
     return f"mailto:{quote(e['to'])}?subject={quote(e['subject'])}&body={quote(e['body'])}"
 
 
+def build_hotel_rate_issue_email(config_row, ota_rate, ota_url=None):
+    """
+    Build the hotel rate-parity issue email.
+    Returns {'to': str, 'cc': str, 'subject': str, 'body': str}.
+    """
+    try:
+        block  = json.loads(config_row['contracted_block'] or '{}')
+        dates  = sorted(block.keys())
+        date_range = (f"{_fmt_date(dates[0])} – {_fmt_date(dates[-1])}"
+                      if len(dates) > 1 else (_fmt_date(dates[0]) if dates else ''))
+
+        org          = config_row['organization'] or ''
+        event_name   = config_row['event_name'] or org
+        hotel        = config_row['hotel'] or ''
+        to           = config_row['hotel_contact_email'] or ''
+        c_rate       = config_row['contracted_rate']
+
+        _hc = (config_row['hotel_contact'] or '').strip()
+        if ',' in _hc:
+            _hc_first = _hc.split(',', 1)[1].strip().split()[0]
+        elif _hc:
+            _hc_first = _hc.split()[0]
+        else:
+            _hc_first = 'Team'
+
+        # Hotel address — use hotel field as name; address not separately stored
+        hotel_line = hotel
+
+        c_rate_str  = f"${float(c_rate):,.2f}" if c_rate else 'N/A'
+        ota_rate_str = f"${float(ota_rate):,.2f}" if ota_rate else 'N/A'
+        ota_link_line = f"OTA Link:         {ota_url}" if ota_url else ''
+
+        subject = f"Rate Parity Issue – {event_name} / {hotel}"
+
+        body = (
+            f"Hello {_hc_first},\n\n"
+            f"I hope your week is going well so far.\n\n"
+            f"We check weekly to ensure that {event_name} has the lowest negotiated rates "
+            f"for {date_range}. When we checked this week we are finding lower online rates:\n\n"
+            f"  Hotel:            {hotel_line}\n"
+            f"  Contracted Rate:  {c_rate_str}\n"
+            f"  OTA Rate:         {ota_rate_str}\n"
+        )
+        if ota_link_line:
+            body += f"  {ota_link_line}\n"
+
+        body += (
+            f"\nCan you please look into this and let me know how you would like to resolve "
+            f"this rate parity issue?\n\n"
+        )
+
+        cc = _build_cc(config_row)
+        return {'to': to, 'cc': cc, 'subject': subject, 'body': body}
+    except Exception as e:
+        return {'to': '', 'cc': '', 'subject': 'Rate Parity Issue', 'body': f'Error generating email: {e}'}
+
+
 def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None):
     """
     Build the client pickup-summary email with a spreadsheet-style grid.
@@ -1490,24 +1547,7 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
 
         history_block = 'WEEKLY HISTORY\n' + ''.join(history_lines)
 
-        # OTA note
-        ota_note = ''
-        if ota and c_rate:
-            diff = float(ota) - float(c_rate)
-            if diff < 0:
-                ota_note = (
-                    f"\nOTA RATE ALERT: The hotel's current online rate "
-                    f"(${float(ota):,.2f}) is BELOW the contracted group rate "
-                    f"(${float(c_rate):,.2f}) by ${abs(diff):,.2f}. "
-                    f"I will follow up with the hotel immediately."
-                )
-            else:
-                ota_note = (
-                    f"\nOTA Rate Check: Online rate ${float(ota):,.2f} is above "
-                    f"the contracted group rate (${float(c_rate):,.2f})."
-                )
-        elif ota:
-            ota_note = f"\n  Current OTA rate: ${float(ota):,.2f}"
+        # OTA note intentionally omitted from client email (internal use only)
 
         # Rooming list note
         rl_note = ''
@@ -1537,7 +1577,6 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
             + (f"{status_line}\n\n" if status_line else "")
             + f"{grid}\n"
             + f"{history_block}\n"
-            + (f"{ota_note}\n" if ota_note else "")
             + (f"{rl_note}\n" if rl_note else "")
             + "\nPlease feel free to reach out with any questions.\n\n"
         )
@@ -1645,10 +1684,6 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
             f'</table>'
         )
 
-        ota_html = ''
-        if ota_note:
-            color = 'color:#cc0000; font-weight:bold;' if 'ALERT' in ota_note else ''
-            ota_html = f'<p style="{F} {color}">{ota_note.strip()}</p>'
         rl_html = f'<p style="{F}">{rl_note.strip()}</p>' if rl_note else ''
         status_html = (f'<p style="{F} font-weight:bold;">{status_line}</p>'
                        if status_line else '')
@@ -1666,7 +1701,6 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
             + status_html
             + f'<p {P}><b>WEEKLY PICKUP REPORT</b></p>'
             + pickup_table
-            + ota_html
             + rl_html
             + f'<p {P}>Please feel free to reach out with any questions.</p>'
         )
