@@ -5326,6 +5326,10 @@ def pickup_dashboard():
                ORDER BY report_date DESC LIMIT 1""",
             (c['id'],)
         ).fetchone()
+        last_any = db.execute(
+            "SELECT report_date FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC LIMIT 1",
+            (c['id'],)
+        ).fetchone()
         all_weekly = db.execute("SELECT label FROM pickup_weekly WHERE config_id=?", (c['id'],)).fetchall()
         last_contact = db.execute(
             "SELECT contact_date, contact_type FROM pickup_contact_log WHERE config_id=? AND contact_type='email_sent' ORDER BY contact_date DESC, id DESC LIMIT 1",
@@ -5342,7 +5346,7 @@ def pickup_dashboard():
         last_total = last['total_rooms'] if last else 0
         last_pct_block = last['pct_of_block'] if last else None
         last_pct_attr  = last['pct_of_attrition'] if last else None
-        last_date      = last['report_date'] if last else None
+        last_date      = last_any['report_date'] if last_any else None
         last_ota       = last['ota_rate'] if last else None
         if last_pct_block is None:
             badge, badge_label = 'secondary', 'No data'
@@ -5959,11 +5963,17 @@ def pickup_event(cid):
     weekly_display.reverse()
 
     past_cutoff = False
+    meeting_ended = False
     has_final_history = any(w['label'] and 'final' in w['label'].lower() for w in all_weekly)
     if all_dates:
         try:
             if _dt.strptime(all_dates[0], '%Y-%m-%d') < _dt.today():
                 past_cutoff = True
+        except Exception:
+            pass
+        try:
+            if _dt.strptime(all_dates[-1], '%Y-%m-%d') < _dt.today():
+                meeting_ended = True
         except Exception:
             pass
     hhr_row = db.execute(
@@ -6027,6 +6037,7 @@ def pickup_event(cid):
                            day_map=day_map, contracted_total=contracted_total,
                            attrition_pct=attrition_pct, attrition_rooms=attrition_rooms,
                            past_cutoff=past_cutoff, has_final_history=has_final_history,
+                           meeting_ended=meeting_ended,
                            has_hhr=has_hhr, today=_date.today().isoformat(),
                            is_multi_hotel=is_multi_hotel,
                            primary_cid_for_report=primary_cid_for_report,
@@ -8434,7 +8445,7 @@ def pickup_email_hotel_rate_issue(cid):
     email = build_hotel_rate_issue_email(config, last_real['ota_rate'], ota_url)
     hotel_email = config['hotel_contact_email'] or ''
     cc_list     = [a.strip() for a in (email.get('cc') or '').replace(';', ',').split(',') if a.strip()]
-    body_html   = email.get('body', '').replace('\n', '<br>')
+    body_html   = email.get('body_html') or email.get('body', '').replace('\n', '<br>')
     user        = get_current_user()
 
     if platform.system() == 'Darwin':

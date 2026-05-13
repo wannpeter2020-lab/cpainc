@@ -576,6 +576,43 @@ _GUEST_RE_SONESTA = re.compile(
     re.MULTILINE
 )
 
+# Hilton/Embassy Suites GPRMLSTS "Group Member Status Report" format
+_GUEST_RE_HILTON_PMS = re.compile(
+    r'^([A-Za-z][A-Za-z/\-\'\s.,]{1,50}?)'   # Guest name (Last/First or First Last)
+    r'[ \t]+'
+    r'(?:[A-Z0-9]+[ \t]+)?'                   # Optional room type (NKS, NK, KS, Q, etc.)
+    r'N[ \t]+N[ \t]+'                          # DCI DK columns
+    r'(?:\d+[ \t]*,[ \t]*0[ \t]+\S+[ \t]+)?'  # Optional: #guests, 0, rate-plan-code
+    r'\$[\d.]+[ \t]+'                          # Room rate
+    r'N[ \t]+'                                 # RTG column
+    r'(?:[A-Z]+[ \t]+)?'                       # Optional MOP (CC, CS, etc.)
+    r'(NA|AR|DP)[ \t]+'                        # Guest STATUS (active guests only)
+    r'(\d{1,2}/\d{1,2}/\d{4})[ \t]+'          # Arrival  M/D/YYYY
+    r'(\d{1,2}/\d{1,2}/\d{4})[ \t]*$'         # Departure M/D/YYYY (end of line)
+    r'\n(\d{6,10})',                            # Confirmation number on next line
+    re.MULTILINE
+)
+
+
+def _repair_truncated_json(text):
+    """
+    Recover a JSON array that was cut off mid-stream (e.g. by a token limit).
+    Finds the last complete {...} object and closes the array.
+    Returns a valid JSON string, or None if no complete object found.
+    """
+    last_brace = text.rfind('}')
+    if last_brace == -1:
+        return None
+    truncated = text[:last_brace + 1]
+    if '[' in truncated and not truncated.rstrip().endswith(']'):
+        truncated = truncated.rstrip().rstrip(',') + ']'
+    try:
+        json.loads(truncated)
+        return truncated
+    except Exception:
+        return None
+
+
 def _mddyyyy_to_iso(s):
     """Convert M/DD/YYYY or MM/DD/YYYY to YYYY-MM-DD."""
     parts = s.strip().split('/')
@@ -651,7 +688,7 @@ def _ai_parse_rooming_list(all_text):
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
             model='claude-opus-4-5',
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{'role': 'user', 'content': prompt}]
         )
         response_text = message.content[0].text.strip()
@@ -659,7 +696,15 @@ def _ai_parse_rooming_list(all_text):
         response_text = re.sub(r'^```[a-z]*\s*', '', response_text)
         response_text = re.sub(r'\s*```$', '', response_text)
 
-        guests_raw = json.loads(response_text)
+        try:
+            guests_raw = json.loads(response_text)
+        except json.JSONDecodeError:
+            # Response was truncated (hit token limit) — recover partial results
+            repaired = _repair_truncated_json(response_text)
+            if repaired:
+                guests_raw = json.loads(repaired)
+            else:
+                raise
 
         result = []
         for g in guests_raw:
@@ -786,6 +831,36 @@ def parse_rooming_list_pdf(file_bytes):
                     'departure': departure,
                     'nights':    nights,
                     'rooms':     rooms,
+                })
+
+        # ── Fallback: Hilton/Embassy Suites GPRMLSTS "Group Member Status Report" ──
+        if not guests:
+            seen_conf = set()
+            for m in _GUEST_RE_HILTON_PMS.finditer(all_text):
+                name_raw = m.group(1).strip().rstrip(',').rstrip()
+                arr_raw  = m.group(3)
+                dep_raw  = m.group(4)
+                conf_no  = m.group(5)
+                key = (conf_no, arr_raw, dep_raw)
+                if key in seen_conf:
+                    continue
+                seen_conf.add(key)
+                try:
+                    arrival   = _mddyyyy_to_iso(arr_raw)
+                    departure = _mddyyyy_to_iso(dep_raw)
+                    nights    = (datetime.strptime(departure, '%Y-%m-%d') -
+                                 datetime.strptime(arrival,   '%Y-%m-%d')).days
+                except Exception:
+                    continue
+                if nights <= 0:
+                    continue
+                guests.append({
+                    'name':      name_raw,
+                    'conf_no':   conf_no,
+                    'arrival':   arrival,
+                    'departure': departure,
+                    'nights':    nights,
+                    'rooms':     1,
                 })
 
         # ── Final fallback: AI parser for unrecognized formats ──
@@ -1349,19 +1424,20 @@ def hotel_request_mailto(config_row):
 def build_hotel_rate_issue_email(config_row, ota_rate, ota_url=None):
     """
     Build the hotel rate-parity issue email.
-    Returns {'to': str, 'cc': str, 'subject': str, 'body': str}.
+    Returns {'to': str, 'cc': str, 'subject': str, 'body': str, 'body_html': str}.
     """
     try:
         block  = json.loads(config_row['contracted_block'] or '{}')
         dates  = sorted(block.keys())
         date_range = (f"{_fmt_date(dates[0])} – {_fmt_date(dates[-1])}"
-                      if len(dates) > 1 else (_fmt_date(dates[0]) if dates else ''))
+                      if len(dates) > 1 else (_fmt_date(dates[0]) if dates else 'the event dates'))
 
-        org          = config_row['organization'] or ''
-        event_name   = config_row['event_name'] or org
-        hotel        = config_row['hotel'] or ''
-        to           = config_row['hotel_contact_email'] or ''
-        c_rate       = config_row['contracted_rate']
+        org        = config_row['organization'] or ''
+        event_name = config_row['event_name'] or org
+        hotel      = config_row['hotel'] or ''
+        to         = config_row['hotel_contact_email'] or ''
+        c_rate     = config_row['contracted_rate']
+        ota_url    = ota_url or config_row.get('ota_url') or ''
 
         _hc = (config_row['hotel_contact'] or '').strip()
         if ',' in _hc:
@@ -1371,36 +1447,66 @@ def build_hotel_rate_issue_email(config_row, ota_rate, ota_url=None):
         else:
             _hc_first = 'Team'
 
-        # Hotel address — use hotel field as name; address not separately stored
-        hotel_line = hotel
+        c_rate_str   = f"${float(c_rate):.2f}"    if c_rate   else 'N/A'
+        ota_rate_str = f"${float(ota_rate):.2f}"  if ota_rate else 'N/A'
 
-        c_rate_str  = f"${float(c_rate):,.2f}" if c_rate else 'N/A'
-        ota_rate_str = f"${float(ota_rate):,.2f}" if ota_rate else 'N/A'
-        ota_link_line = f"OTA Link:         {ota_url}" if ota_url else ''
+        subject = f"Rate Parity Issue – {event_name or org} / {hotel}"
 
-        subject = f"Rate Parity Issue – {event_name} / {hotel}"
-
+        # Plain-text body
         body = (
             f"Hello {_hc_first},\n\n"
             f"I hope your week is going well so far.\n\n"
-            f"We check weekly to ensure that {event_name} has the lowest negotiated rates "
+            f"We check weekly to ensure that {event_name or org} has the lowest negotiated rates "
             f"for {date_range}. When we checked this week we are finding lower online rates:\n\n"
-            f"  Hotel:            {hotel_line}\n"
+            f"  Hotel Name:       {hotel}\n"
             f"  Contracted Rate:  {c_rate_str}\n"
-            f"  OTA Rate:         {ota_rate_str}\n"
+            f"  OTA Rate Found:   {ota_rate_str}\n"
         )
-        if ota_link_line:
-            body += f"  {ota_link_line}\n"
-
+        if ota_url:
+            body += f"  OTA Link:         {ota_url}\n"
         body += (
             f"\nCan you please look into this and let me know how you would like to resolve "
             f"this rate parity issue?\n\n"
         )
 
+        # HTML body — styled table for Outlook
+        P  = 'style="margin:0 0 10px 0;font-family:Arial,sans-serif;font-size:13px;"'
+        TD = 'style="padding:6px 12px;border:1px solid #dee2e6;font-family:Arial,sans-serif;font-size:13px;"'
+        TH = 'style="padding:6px 12px;border:1px solid #dee2e6;background:#f8f9fa;font-weight:bold;font-family:Arial,sans-serif;font-size:13px;"'
+
+        ota_link_cell = (
+            f'<a href="{ota_url}" style="color:#004B97;">{ota_url}</a>'
+            if ota_url else '—'
+        )
+
+        body_html = (
+            f'<p {P}>Hello {_hc_first},</p>'
+            f'<p {P}>I hope your week is going well so far.</p>'
+            f'<p {P}>We check weekly to ensure that <b>{event_name or org}</b> has the lowest '
+            f'negotiated rates for <b>{date_range}</b>. When we checked this week we are finding '
+            f'lower online rates:</p>'
+            f'<table style="border-collapse:collapse;margin-bottom:14px;">'
+            f'<thead><tr>'
+            f'<th {TH}>Hotel Name</th>'
+            f'<th {TH}>Contracted Rate</th>'
+            f'<th {TH}>OTA Rate Found</th>'
+            f'<th {TH}>OTA Link</th>'
+            f'</tr></thead>'
+            f'<tbody><tr>'
+            f'<td {TD}>{hotel}</td>'
+            f'<td {TD}>{c_rate_str}</td>'
+            f'<td {TD} style="color:#dc3545;font-weight:bold;padding:6px 12px;border:1px solid #dee2e6;">{ota_rate_str}</td>'
+            f'<td {TD}>{ota_link_cell}</td>'
+            f'</tr></tbody></table>'
+            f'<p {P}>Can you please look into this and let me know how you would like to resolve '
+            f'this rate parity issue?</p>'
+        )
+
         cc = _build_cc(config_row)
-        return {'to': to, 'cc': cc, 'subject': subject, 'body': body}
+        return {'to': to, 'cc': cc, 'subject': subject, 'body': body, 'body_html': body_html}
     except Exception as e:
-        return {'to': '', 'cc': '', 'subject': 'Rate Parity Issue', 'body': f'Error generating email: {e}'}
+        return {'to': '', 'cc': '', 'subject': 'Rate Parity Issue',
+                'body': f'Error generating email: {e}', 'body_html': ''}
 
 
 def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None):
@@ -1567,7 +1673,7 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
 
         body = (
             f"Hello {_first},\n\n"
-            f"Here is your weekly pickup update for {org} at {hotel}.\n"
+            f"Here is your weekly pickup update for {event_name or org} at {hotel}.\n"
             f"Report date: {_fmt_short(report_dt)}   |   Cut-off: {_fmt_short(config_row['cutoff_date']) if config_row['cutoff_date'] else 'N/A'}\n\n"
             f"SUMMARY\n"
             f"  Total Rooms:      {total:,} of {total_blk:,}\n"
@@ -1691,7 +1797,7 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
 
         html_body = (
             f'<p {P}>Hello {_first},</p>'
-            f'<p {P}>Here is your weekly pickup update for <b>{org}</b> at <b>{hotel}</b>.<br>'
+            f'<p {P}>Here is your weekly pickup update for <b>{event_name or org}</b> at <b>{hotel}</b>.<br>'
             f'Report date: {report_dt}&nbsp;&nbsp;|&nbsp;&nbsp;Cut-off: {config_row["cutoff_date"] or "N/A"}</p>'
             f'<p {P}><b>SUMMARY</b><br>'
             f'Total Rooms: <b>{total:,}</b> of {total_blk:,}<br>'
@@ -2537,11 +2643,6 @@ def parse_hhr_excel(file_bytes):
 
         # Hotel accounting sign-off
         elif 'history report approved' in lbl:
-            for i, cell in enumerate(row):
-                v = _sv(cell.value)
-                if v.lower().startswith('matthew') or (i > 0 and _sv(row[i-1].value).lower() == 'name'):
-                    pass
-            # Scan for Email field
             for i, cell in enumerate(row):
                 if _sv(cell.value).lower() == 'email' and i+1 < len(row):
                     stats['hotel_approver_email'] = _sv(row[i+1].value)

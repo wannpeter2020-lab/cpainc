@@ -143,8 +143,8 @@
     <a href="{{ url_for('pickup_rooming_upload', cid=config['id']) }}" class="btn btn-outline-primary btn-sm">
       <i class="bi bi-upload me-1"></i>Upload Rooming List
     </a>
-    {% if past_cutoff %}
-    <a href="{{ url_for('pickup_final_history', cid=config['id']) }}" class="btn btn-outline-{% if has_final_history %}success{% else %}warning{% endif %} btn-sm">
+    {% if meeting_ended %}
+    <a href="{{ url_for('pickup_final_history', cid=config['id']) }}" class="btn btn-{% if has_final_history %}success{% else %}outline-warning{% endif %} btn-sm">
       <i class="bi bi-flag-fill me-1"></i>{% if has_final_history %}Edit Final History{% else %}Enter Final History{% endif %}
     </a>
     {% endif %}
@@ -182,6 +182,7 @@
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-envelope-heart me-1"></i>Email Client
     </a>
+    {% if meeting_ended %}
     <a href="{{ url_for('pickup_email_housing', cid=config['id']) }}"
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-envelope-check me-1"></i>Email Hotel HHR
@@ -192,6 +193,7 @@
       <i class="bi bi-file-earmark-bar-graph me-1"></i>Email Client HHR Summary
     </a>
     {% endif %}
+    {% endif %}
   </div>
 
 </div>
@@ -200,34 +202,43 @@
 <div class="modal fade" id="contractModal" tabindex="-1" aria-labelledby="contractModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="contractModalLabel">
+          <i class="bi bi-file-earmark-arrow-up me-2"></i>
+          {% if config['contract_data'] %}Replace Contract{% else %}Upload Contract{% endif %}
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
       <form method="POST" action="{{ url_for('pickup_upload_contract', cid=config['id']) }}"
-            enctype="multipart/form-data">
-        <div class="modal-header">
-          <h5 class="modal-title" id="contractModalLabel">
-            <i class="bi bi-file-earmark-arrow-up me-2"></i>Upload Contract
-          </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-        </div>
+            enctype="multipart/form-data" id="contractUploadForm">
+        <input type="hidden" name="action" value="upload">
         <div class="modal-body">
-          <p class="text-muted small mb-3">Upload a PDF or Word contract — the app will extract the room block, rate, and cutoff date for your review.</p>
-          <div id="drop-zone" class="border border-2 border-dashed rounded p-4 text-center mb-3"
-               style="cursor:pointer; border-style:dashed!important">
-            <i class="bi bi-cloud-upload fs-2 text-muted"></i>
-            <p class="mb-1 mt-2">Drag &amp; drop your contract here</p>
-            <p class="text-muted small mb-2">or</p>
-            <input type="file" id="contract_file" name="contract_file"
-                   accept=".pdf,.doc,.docx" class="d-none">
-            <button type="button" class="btn btn-outline-secondary btn-sm"
-                    onclick="document.getElementById('contract_file').click()">
-              Browse Files
-            </button>
-            <p id="file-chosen" class="text-success small mt-2 mb-0" style="display:none"></p>
+          <p class="text-muted small mb-3">
+            Upload the signed hotel contract (PDF or Word .docx). The room block, rate,
+            cut-off date, and attrition % will be extracted automatically for review before saving.
+          </p>
+          <div id="contractDropZone"
+               onclick="document.getElementById('contractFileInput').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleContractDrop(event)"
+               style="border:2px dashed #adb5bd;border-radius:8px;padding:2.5rem 1rem;
+                      text-align:center;cursor:pointer;transition:border-color .2s,background .2s">
+            <i class="bi bi-cloud-arrow-up fs-2 text-muted d-block mb-2"></i>
+            <div class="text-muted">Drag &amp; drop your contract here, or <strong>click to browse</strong></div>
+            <div class="text-muted small mt-1">PDF or Word (.docx)</div>
+          </div>
+          <input type="file" id="contractFileInput" name="contract_file"
+                 accept=".pdf,.docx,.doc" class="d-none"
+                 onchange="showContractFile(this)">
+          <div id="contractFileChosen" class="mt-2 small text-success d-none">
+            <i class="bi bi-check-circle me-1"></i><span id="contractFileName"></span>
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">
-            <i class="bi bi-upload me-1"></i>Upload &amp; Parse
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="contractSubmitBtn" disabled>
+            <i class="bi bi-magic me-1"></i>Extract Contract Data
           </button>
         </div>
       </form>
@@ -855,45 +866,42 @@
 {% block scripts %}
 <script>
 // Contract upload modal — drag & drop + file chooser
-(function () {
-  const zone   = document.getElementById('drop-zone');
-  const input  = document.getElementById('contract_file');
-  const chosen = document.getElementById('file-chosen');
-
-  if (!zone) return;
-
-  function showFile(name) {
-    chosen.textContent = '✓ ' + name;
-    chosen.style.display = 'block';
+function showContractFile(input) {
+  const name = input.files[0] ? input.files[0].name : '';
+  const chosen = document.getElementById('contractFileChosen');
+  const label  = document.getElementById('contractFileName');
+  const btn    = document.getElementById('contractSubmitBtn');
+  if (name) {
+    label.textContent = name;
+    chosen.classList.remove('d-none');
+    if (btn) btn.disabled = false;
   }
+}
 
-  input.addEventListener('change', function () {
-    if (input.files[0]) showFile(input.files[0].name);
-  });
+function handleContractDrop(e) {
+  e.preventDefault();
+  const zone = document.getElementById('contractDropZone');
+  if (zone) zone.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files.length) {
+    const input = document.getElementById('contractFileInput');
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    showContractFile(input);
+  }
+}
 
-  zone.addEventListener('dragover', function (e) {
-    e.preventDefault();
-    zone.classList.add('bg-light');
-  });
-  zone.addEventListener('dragleave', function () {
-    zone.classList.remove('bg-light');
-  });
-  zone.addEventListener('drop', function (e) {
-    e.preventDefault();
-    zone.classList.remove('bg-light');
-    const files = e.dataTransfer.files;
-    if (files.length) {
-      const dt = new DataTransfer();
-      dt.items.add(files[0]);
-      input.files = dt.files;
-      showFile(files[0].name);
-    }
-  });
+// Add drag-over highlight style
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '#contractDropZone.drag-over{border-color:#0d6efd!important;background:#f0f5ff;}';
+  document.head.appendChild(style);
 })();
 
-// Show loading overlay when Upload & Parse is submitted
+// Show loading overlay when Extract Contract Data is submitted
 (function() {
-  const form = document.querySelector('#contractModal form');
+  const form = document.getElementById('contractUploadForm');
   if (!form) return;
   form.addEventListener('submit', function() {
     var overlay = document.getElementById('parse-loading-overlay');
