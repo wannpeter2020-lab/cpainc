@@ -17,7 +17,7 @@
     <form method="post" enctype="multipart/form-data">
       <div class="mb-4">
         <label class="form-label fw-semibold">Select File(s)</label>
-        <input type="file" name="files" class="form-control" accept=".xlsx,.xls" multiple required>
+        <input type="file" name="files" class="form-control" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" multiple required>
         <div class="form-text">Accepted format: .xlsx — the standard TeamHouse Housing History Report</div>
       </div>
       <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Import Housing History</button>
