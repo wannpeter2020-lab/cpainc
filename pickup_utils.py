@@ -2804,6 +2804,256 @@ def strip_hhr_commission_rows(file_bytes):
     return out.read()
 
 
+def clean_hhr_for_client(file_bytes):
+    """
+    Apply clean, professional formatting to a client-safe HHR Excel file.
+
+    Removes:
+      • All indexed/theme cell fill colors (the colored boxes)
+      • Commissionable No Shows row
+      • Commissionable Cancellations row
+      • Non-Commissionable Audit Pickup row
+      • Commissionable Audit Pickup row  (Total Audit Pickup is kept)
+
+    Applies:
+      • Navy header bar on DATE row (white text)
+      • Light navy tint on DAY row
+      • Subtle blue tint on Contracted Block row
+      • Soft gray on subtotal rows (Total Inside Block, Total Audit Pickup)
+      • Navy bar on FINAL TOTAL PICKUP row (white bold text)
+      • Light gray section headers (NOTES TO COLLECTIONS, HOTEL ACCOUNTING, etc.)
+      • Commission columns (P–S) hidden
+      • Thin grid borders on pickup data section
+      • Dates reformatted MM/DD; "Please fill out…" stripped from title
+      • Calibri 10pt throughout; consistent column widths; freeze panes
+    """
+    import io as _io, re as _re, datetime as _dt
+    from openpyxl import load_workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    NAVY       = 'FF1A3A5C'
+    NAVY_LIGHT = 'FFE8EDF4'
+    MID_GRAY   = 'FFF3F4F6'
+    WHITE      = 'FFFFFFFF'
+    TOTAL_BG   = 'FFD1D5DB'
+    ACCENT_BG  = 'FFE9F0F8'
+    _THIN      = Side(style='thin', color='FFD1D5DB')
+    _THIN_B    = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+
+    def _navy_f():          return PatternFill('solid', fgColor=NAVY)
+    def _fill(c):           return PatternFill('solid', fgColor=c)
+    def _no():              return PatternFill(fill_type=None)
+    def _fnt(bold=False, size=10, color='FF000000', italic=False):
+        return Font(name='Calibri', bold=bold, size=size, color=color, italic=italic)
+    def _ctr(): return Alignment(horizontal='center', vertical='center')
+    def _lft(): return Alignment(horizontal='left',   vertical='center')
+
+    ROWS_TO_DELETE = (
+        'commissionable no show',
+        'commissionable cancellation',
+        'non-commissionable audit pickup',
+        'commissionable audit pickup',
+    )
+
+    wb = load_workbook(_io.BytesIO(file_bytes), data_only=True)
+    ws = wb.active
+
+    # ── Delete unwanted rows (bottom-up so indices stay valid) ────────────────
+    for rnum in range(ws.max_row, 0, -1):
+        al = str(ws.cell(row=rnum, column=1).value or '').strip().lower()
+        if any(al.startswith(lbl) for lbl in ROWS_TO_DELETE):
+            ws.delete_rows(rnum)
+
+    max_col = ws.max_column
+
+    # ── Strip all existing fills; reset fonts to clean black Calibri ──────────
+    for row in ws.iter_rows():
+        for cell in row:
+            cell.fill = _no()
+            old = cell.font
+            cell.font = Font(name='Calibri', bold=old.bold,
+                             size=old.size or 10, color='FF000000',
+                             italic=old.italic)
+
+    # ── Locate key rows ───────────────────────────────────────────────────────
+    date_row = day_row = block_row = total_inside_row = None
+    total_audit_row = final_row = notes_row = acct_row = note_footer_row = None
+    rate_rows = []
+
+    for rnum in range(1, ws.max_row + 1):
+        al = str(ws.cell(row=rnum, column=1).value or '').strip().lower()
+        cl = str(ws.cell(row=rnum, column=3).value or '').strip().lower()
+        if al == 'date'  and date_row  is None:               date_row         = rnum
+        elif al == 'day' and day_row   is None:               day_row          = rnum
+        elif 'contracted block' in al  and block_row is None: block_row        = rnum
+        elif _re.match(r'rate\s+\d+', al):                    rate_rows.append(rnum)
+        elif 'total pickup inside block'  in al:              total_inside_row = rnum
+        elif 'total audit pickup'         in al:              total_audit_row  = rnum
+        elif 'final total pickup'         in al:              final_row        = rnum
+        elif 'notes to collections'       in al:              notes_row        = rnum
+        elif 'hotel accounting information' in al:            acct_row         = rnum
+        elif 'by submitting' in al or 'note:' in al or 'by submitting' in cl:
+            note_footer_row = rnum
+
+    # ── Row 1: title ──────────────────────────────────────────────────────────
+    for cnum in range(1, max_col + 1):
+        cell = ws.cell(row=1, column=cnum)
+        if cell.value:
+            val = str(cell.value)
+            cell.value = val.split('\n')[0].strip() if '\n' in val else val
+            cell.font  = _fnt(bold=True, size=13, color=NAVY)
+            cell.alignment = _lft()
+
+    # ── Info rows 2–(date_row-1): Org / Hotel / Event ────────────────────────
+    for rnum in range(2, (date_row or 5)):
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=rnum, column=cnum)
+            is_lbl = cnum == 1 and bool(cell.value)
+            cell.font = _fnt(bold=is_lbl, color=NAVY if is_lbl else 'FF000000')
+            cell.alignment = _lft()
+
+    # ── DATE row: navy fill, white text, reformat dates MM/DD ────────────────
+    if date_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=date_row, column=cnum)
+            cell.fill = _navy_f()
+            if isinstance(cell.value, _dt.datetime):
+                cell.value = cell.value.strftime('%m/%d')
+            cell.font      = _fnt(bold=bool(cell.value), color=WHITE, size=9)
+            cell.alignment = _ctr()
+
+    # ── DAY row: light navy tint ──────────────────────────────────────────────
+    if day_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=day_row, column=cnum)
+            cell.fill      = _fill(NAVY_LIGHT)
+            cell.font      = _fnt(bold=True, size=9, color=NAVY)
+            cell.alignment = _ctr()
+
+    # ── Contracted Block ──────────────────────────────────────────────────────
+    if block_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=block_row, column=cnum)
+            cell.fill      = _fill(ACCENT_BG)
+            cell.font      = _fnt(bold=True, size=9, color=NAVY)
+            cell.alignment = _lft() if cnum == 1 else _ctr()
+
+    # ── Rate 1–7 rows: clean white ────────────────────────────────────────────
+    for rnum in rate_rows:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=rnum, column=cnum)
+            cell.font      = _fnt(size=9)
+            cell.alignment = _lft() if cnum == 1 else _ctr()
+            if cnum in (14, 15) and isinstance(cell.value, (int, float)):
+                cell.number_format = '$#,##0.00'
+
+    # ── Total Inside Block ────────────────────────────────────────────────────
+    if total_inside_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=total_inside_row, column=cnum)
+            cell.fill      = _fill(TOTAL_BG)
+            cell.font      = _fnt(bold=True, size=9)
+            cell.alignment = _lft() if cnum == 1 else _ctr()
+
+    # ── Total Audit Pickup ────────────────────────────────────────────────────
+    if total_audit_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=total_audit_row, column=cnum)
+            cell.fill      = _fill(TOTAL_BG)
+            cell.font      = _fnt(bold=True, size=9)
+            cell.alignment = _lft() if cnum == 1 else _ctr()
+
+    # ── FINAL TOTAL PICKUP: navy bar ──────────────────────────────────────────
+    if final_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=final_row, column=cnum)
+            cell.fill      = _navy_f()
+            cell.font      = _fnt(bold=True, color=WHITE, size=10)
+            cell.alignment = _lft() if cnum == 1 else _ctr()
+
+    # ── Spacer rows between FINAL and NOTES ───────────────────────────────────
+    if final_row and notes_row:
+        for rnum in range(final_row + 1, notes_row):
+            for cnum in range(1, max_col + 1):
+                ws.cell(row=rnum, column=cnum).fill = _no()
+
+    # ── NOTES TO COLLECTIONS section ─────────────────────────────────────────
+    if notes_row:
+        end = acct_row or (notes_row + 12)
+        for rnum in range(notes_row, end):
+            a_val = str(ws.cell(row=rnum, column=1).value or '').strip()
+            for cnum in range(1, max_col + 1):
+                cell  = ws.cell(row=rnum, column=cnum)
+                c_val = str(cell.value or '').strip()
+                is_hdr = ((cnum == 1 and a_val and a_val.upper() == a_val) or
+                          (c_val and c_val.upper() == c_val and len(c_val) > 4))
+                if is_hdr:
+                    cell.fill = _fill(MID_GRAY)
+                    cell.font = _fnt(bold=True, size=9, color=NAVY)
+                else:
+                    cell.font = _fnt(bold=cell.font.bold, size=9)
+                cell.alignment = _lft()
+
+    # ── HOTEL ACCOUNTING INFORMATION ─────────────────────────────────────────
+    if acct_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=acct_row, column=cnum)
+            cell.fill      = _fill(MID_GRAY)
+            cell.font      = _fnt(bold=True, size=9, color=NAVY)
+            cell.alignment = _lft()
+        for rnum in range(acct_row + 1, ws.max_row + 1):
+            for cnum in range(1, max_col + 1):
+                cell = ws.cell(row=rnum, column=cnum)
+                cell.font = _fnt(bold=cell.font.bold, size=9)
+
+    # ── Note footer ───────────────────────────────────────────────────────────
+    if note_footer_row:
+        for cnum in range(1, max_col + 1):
+            cell = ws.cell(row=note_footer_row, column=cnum)
+            if cell.value:
+                cell.font = _fnt(italic=True, size=8, color='FF6B7280')
+
+    # ── Thin borders on pickup grid (DATE row → FINAL row) ───────────────────
+    if date_row and final_row:
+        right_col = 15
+        for rnum in range(date_row, final_row + 1):
+            for cnum in range(max_col, 0, -1):
+                if ws.cell(row=rnum, column=cnum).value not in (None, ''):
+                    right_col = max(right_col, cnum)
+                    break
+        for rnum in range(date_row, final_row + 1):
+            for cnum in range(1, right_col + 1):
+                ws.cell(row=rnum, column=cnum).border = _THIN_B
+
+    # ── Column widths ─────────────────────────────────────────────────────────
+    ws.column_dimensions['A'].width = 32
+    ws.column_dimensions['B'].width = 4
+    for c in range(3, 13):
+        ws.column_dimensions[get_column_letter(c)].width = 8
+    ws.column_dimensions['M'].width = 12
+    ws.column_dimensions['N'].width = 10
+    ws.column_dimensions['O'].width = 12
+    for c in range(16, 20):
+        ws.column_dimensions[get_column_letter(c)].width  = 0
+        ws.column_dimensions[get_column_letter(c)].hidden = True
+
+    # ── Row heights ───────────────────────────────────────────────────────────
+    ws.row_dimensions[1].height = 28
+    if date_row:  ws.row_dimensions[date_row].height  = 22
+    if day_row:   ws.row_dimensions[day_row].height   = 16
+    if final_row: ws.row_dimensions[final_row].height = 20
+
+    # ── Freeze panes below DATE header ────────────────────────────────────────
+    if date_row:
+        ws.freeze_panes = ws.cell(row=date_row + 1, column=3)
+
+    out = _io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.read()
+
+
 # ── Contract Document Parser ──────────────────────────────────────────────────
 
 def _extract_text_from_contract(file_bytes, filename=''):

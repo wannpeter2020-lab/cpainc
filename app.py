@@ -8662,8 +8662,8 @@ def pickup_hhr_download(cid):
         return redirect(url_for('pickup_event', cid=cid))
     file_bytes = bytes(hhr['file_data'])
     try:
-        from pickup_utils import strip_hhr_commission_rows
-        file_bytes = strip_hhr_commission_rows(file_bytes)
+        from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
+        file_bytes = clean_hhr_for_client(strip_hhr_commission_rows(file_bytes))
     except Exception:
         pass
     return send_file(_io.BytesIO(file_bytes),
@@ -8740,8 +8740,8 @@ def _get_post_report_data(cid):
     raw_bytes = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
     if raw_bytes:
         try:
-            from pickup_utils import strip_hhr_commission_rows
-            raw_bytes = strip_hhr_commission_rows(raw_bytes)
+            from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
+            raw_bytes = clean_hhr_for_client(strip_hhr_commission_rows(raw_bytes))
         except Exception:
             pass  # fall back to unstripped file if anything goes wrong
     config_dict['_hhr_file_data'] = raw_bytes
