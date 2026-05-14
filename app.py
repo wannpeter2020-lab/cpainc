@@ -4392,7 +4392,13 @@ def status_board():
 
     db          = get_db()
     today       = datetime.today().strftime('%Y-%m-%d')
-    acct_filter = get_user_account_filter(user)
+
+    # Status board always filters by UserAccountAccess, even for admins.
+    # If the user has no access rows (e.g. Peter), they see everything.
+    _sb_rows = db.execute(
+        'SELECT account_name FROM UserAccountAccess WHERE user_id=?', (user['id'],)
+    ).fetchall()
+    acct_filter = [r['account_name'] for r in _sb_rows] if _sb_rows else None
 
     # --- Load active ignore records for this user ---
     ignored = set()
