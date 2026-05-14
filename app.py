@@ -1392,8 +1392,9 @@ def import_voucher():
 
                 # Duplicate: same BookingID + same check/reference + same invoice line,
                 # OR same BookingID + same date + same amount from a DIFFERENT voucher (catch re-imports).
-                # The date+amount check is intentionally scoped to other vouchers only — the same voucher
-                # can legitimately have two lines for the same booking at the same amount (e.g. F1 + F1-TD).
+                # The date+amount check is scoped to OTHER vouchers only — the same voucher can
+                # legitimately carry two lines for the same booking at the same amount (e.g. F1 + F1-TD).
+                # Use 'Invoice: {num} |' (with delimiter) to prevent '177316-F1' matching '177316-F1-TD'.
                 dup = db.execute(
                     '''SELECT 1 FROM ChkRegNote
                        WHERE BookingID = ?
@@ -1401,7 +1402,7 @@ def import_voucher():
                            (Check_ = ? AND SpecialNotes LIKE ?)
                            OR (Check_ != ? AND DateOnCheck LIKE ? AND ABS(COALESCE(FinalPayment,0) - ?) < 0.02)
                          )''',
-                    (bid, check_num, f'%{invoice_num}%', check_num, f'{payment_date}%', usd_amount or 0)
+                    (bid, check_num, f'%Invoice: {invoice_num} |%', check_num, f'{payment_date}%', usd_amount or 0)
                 ).fetchone()
                 if dup:
                     file_skipped += 1
