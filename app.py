@@ -3324,12 +3324,16 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
-    # Add CRF columns to rfp and rfp_hotel if not present
+    # Add CRF columns and alt date columns to rfp/rfp_hotel if not present
     for _tbl, _col, _typ in [
-        ('rfp',       'crf_filename', 'TEXT'),
-        ('rfp',       'crf_data',     'BLOB'),
-        ('rfp_hotel', 'crf_row_data', 'TEXT'),
-        ('rfp_hotel', 'crf_version',  'INTEGER DEFAULT 0'),
+        ('rfp',       'crf_filename',    'TEXT'),
+        ('rfp',       'crf_data',        'BLOB'),
+        ('rfp_hotel', 'crf_row_data',    'TEXT'),
+        ('rfp_hotel', 'crf_version',     'INTEGER DEFAULT 0'),
+        ('rfp',       'alt_start_date_2','TEXT'),
+        ('rfp',       'alt_end_date_2',  'TEXT'),
+        ('rfp',       'alt_start_date_3','TEXT'),
+        ('rfp',       'alt_end_date_3',  'TEXT'),
     ]:
         try:
             db.execute(f'ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}')
@@ -9256,10 +9260,11 @@ def rfp_new():
         f = request.form
         db.execute('''
             INSERT INTO rfp (rfp_code, client_org, event_name, rfp_name, booking_id,
-                start_date, end_date, alt_start_date, alt_end_date, peak_rooms,
-                total_room_nights, total_attendees, f_and_b_budget,
+                start_date, end_date, alt_start_date, alt_end_date,
+                alt_start_date_2, alt_end_date_2, alt_start_date_3, alt_end_date_3,
+                peak_rooms, total_room_nights, total_attendees, f_and_b_budget,
                 response_due_date, decision_due_date, status, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ''', (
             f.get('rfp_code', '').strip() or None,
             f.get('client_org', '').strip(),
@@ -9270,6 +9275,10 @@ def rfp_new():
             f.get('end_date') or None,
             f.get('alt_start_date') or None,
             f.get('alt_end_date') or None,
+            f.get('alt_start_date_2') or None,
+            f.get('alt_end_date_2') or None,
+            f.get('alt_start_date_3') or None,
+            f.get('alt_end_date_3') or None,
             f.get('peak_rooms') or None,
             f.get('total_room_nights') or None,
             f.get('total_attendees') or None,
@@ -9329,6 +9338,7 @@ def rfp_edit(rid):
         db.execute('''
             UPDATE rfp SET rfp_code=?, client_org=?, event_name=?, rfp_name=?,
                 booking_id=?, start_date=?, end_date=?, alt_start_date=?, alt_end_date=?,
+                alt_start_date_2=?, alt_end_date_2=?, alt_start_date_3=?, alt_end_date_3=?,
                 peak_rooms=?, total_room_nights=?, total_attendees=?, f_and_b_budget=?,
                 response_due_date=?, decision_due_date=?, status=?, notes=?,
                 updated_at=datetime('now')
@@ -9343,6 +9353,10 @@ def rfp_edit(rid):
             f.get('end_date') or None,
             f.get('alt_start_date') or None,
             f.get('alt_end_date') or None,
+            f.get('alt_start_date_2') or None,
+            f.get('alt_end_date_2') or None,
+            f.get('alt_start_date_3') or None,
+            f.get('alt_end_date_3') or None,
             f.get('peak_rooms') or None,
             f.get('total_room_nights') or None,
             f.get('total_attendees') or None,

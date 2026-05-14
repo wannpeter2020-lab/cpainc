@@ -86,14 +86,34 @@
                value="{{ rfp['end_date'] if rfp and rfp['end_date'] else '' }}">
       </div>
       <div class="col-md-3">
-        <label class="form-label fw-semibold">Alt Start</label>
+        <label class="form-label fw-semibold">Alt 1 Start</label>
         <input type="date" name="alt_start_date" class="form-control"
                value="{{ rfp['alt_start_date'] if rfp and rfp['alt_start_date'] else '' }}">
       </div>
       <div class="col-md-3">
-        <label class="form-label fw-semibold">Alt End</label>
+        <label class="form-label fw-semibold">Alt 1 End</label>
         <input type="date" name="alt_end_date" class="form-control"
                value="{{ rfp['alt_end_date'] if rfp and rfp['alt_end_date'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt 2 Start</label>
+        <input type="date" name="alt_start_date_2" class="form-control"
+               value="{{ rfp['alt_start_date_2'] if rfp and rfp['alt_start_date_2'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt 2 End</label>
+        <input type="date" name="alt_end_date_2" class="form-control"
+               value="{{ rfp['alt_end_date_2'] if rfp and rfp['alt_end_date_2'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt 3 Start</label>
+        <input type="date" name="alt_start_date_3" class="form-control"
+               value="{{ rfp['alt_start_date_3'] if rfp and rfp['alt_start_date_3'] else '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Alt 3 End</label>
+        <input type="date" name="alt_end_date_3" class="form-control"
+               value="{{ rfp['alt_end_date_3'] if rfp and rfp['alt_end_date_3'] else '' }}">
       </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Response Due</label>
@@ -200,6 +220,12 @@ document.getElementById('rfpFileInput').addEventListener('change', function () {
         client_org:        'client_org',
         start_date:        'start_date',
         end_date:          'end_date',
+        alt_start_date:    'alt_start_date',
+        alt_end_date:      'alt_end_date',
+        alt_start_date_2:  'alt_start_date_2',
+        alt_end_date_2:    'alt_end_date_2',
+        alt_start_date_3:  'alt_start_date_3',
+        alt_end_date_3:    'alt_end_date_3',
         response_due_date: 'response_due_date',
         decision_due_date: 'decision_due_date',
         total_attendees:   'total_attendees',

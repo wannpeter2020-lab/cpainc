@@ -2018,7 +2018,9 @@ def parse_rfp_docx(file_bytes):
                     if v and _re.search(r'\d{4}', v):
                         alt_dates.append(v)
                         break
-    alt_start_date, alt_end_date = _parse_date_range(alt_dates[0]) if alt_dates else (None, None)
+    alt_start_date,   alt_end_date   = _parse_date_range(alt_dates[0]) if len(alt_dates) > 0 else (None, None)
+    alt_start_date_2, alt_end_date_2 = _parse_date_range(alt_dates[1]) if len(alt_dates) > 1 else (None, None)
+    alt_start_date_3, alt_end_date_3 = _parse_date_range(alt_dates[2]) if len(alt_dates) > 2 else (None, None)
 
     return {
         'rfp_name':          rfp_name,
@@ -2035,6 +2037,10 @@ def parse_rfp_docx(file_bytes):
         'end_date':          end_date,
         'alt_start_date':    alt_start_date,
         'alt_end_date':      alt_end_date,
+        'alt_start_date_2':  alt_start_date_2,
+        'alt_end_date_2':    alt_end_date_2,
+        'alt_start_date_3':  alt_start_date_3,
+        'alt_end_date_3':    alt_end_date_3,
     }
 
 

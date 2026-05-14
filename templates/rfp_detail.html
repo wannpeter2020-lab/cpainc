@@ -60,6 +60,12 @@
           {% if rfp['alt_start_date'] %}
           {{ rfp['alt_start_date'] | us_date }} – {{ rfp['alt_end_date'] | us_date if rfp['alt_end_date'] else '?' }}
           {% else %}—{% endif %}
+          {% if rfp['alt_start_date_2'] %}
+          <div class="text-muted small mt-1">{{ rfp['alt_start_date_2'] | us_date }} – {{ rfp['alt_end_date_2'] | us_date if rfp['alt_end_date_2'] else '?' }}</div>
+          {% endif %}
+          {% if rfp['alt_start_date_3'] %}
+          <div class="text-muted small">{{ rfp['alt_start_date_3'] | us_date }} – {{ rfp['alt_end_date_3'] | us_date if rfp['alt_end_date_3'] else '?' }}</div>
+          {% endif %}
         </div>
       </div>
       <div class="col-md-3">
