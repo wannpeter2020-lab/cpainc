@@ -6361,6 +6361,16 @@ def pickup_event_report_xlsx(primary_cid):
             (c['id'],)
         ).fetchall()
 
+        # Also include any shoulder nights recorded in pickup_by_night
+        for w in weekly_rows:
+            try:
+                pbn = json.loads(w['pickup_by_night'] or '{}')
+                for d in pbn.keys():
+                    if d:
+                        all_event_date_set.add(d)
+            except Exception:
+                pass
+
         hotel_data.append({
             'config': c,
             'hotel_name': c['hotel'] or c['event_name'] or '—',
@@ -6923,10 +6933,22 @@ def _get_current_pickup_events(db, account_filter=None):
                 end_date = _d.fromisoformat(all_dates[-1])
             except Exception:
                 pass
+        # Extend event_dates to include any shoulder nights recorded in pickup_by_night
+        all_event_date_set = set(all_dates)
+        for w in weekly_rows:
+            try:
+                pbn = json.loads(w['pickup_by_night'] or '{}')
+                for d in pbn.keys():
+                    if d:
+                        all_event_date_set.add(d)
+            except Exception:
+                pass
+        all_event_dates = sorted(all_event_date_set)
+
         current_events.append({
             'config':           c,
             'block':            block,
-            'event_dates':      all_dates,
+            'event_dates':      all_event_dates,
             'contracted_total': contracted_total,
             'org':              org,
             'event_name':       event_name,
