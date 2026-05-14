@@ -3062,6 +3062,119 @@ def clean_hhr_for_client(file_bytes):
 
 # ── Contract Document Parser ──────────────────────────────────────────────────
 
+def _pdf_pages_to_images(file_bytes, max_pages=10, dpi=100):
+    """Render PDF pages to base64 JPEG strings using pymupdf (no poppler needed).
+    Returns a list of base64-encoded JPEG byte strings, up to max_pages pages."""
+    try:
+        import fitz  # pymupdf
+        import base64
+        doc = fitz.open(stream=file_bytes, filetype='pdf')
+        images = []
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = page.get_pixmap(matrix=mat)
+            jpeg_bytes = pix.tobytes('jpeg')
+            images.append(base64.standard_b64encode(jpeg_bytes).decode('ascii'))
+        return images
+    except Exception:
+        return []
+
+
+def _ai_parse_contract_vision(images, api_key):
+    """Send rendered PDF page images to Claude vision API and extract structured
+    contract data. Used as fallback for scanned (image-only) PDFs."""
+    try:
+        import anthropic
+    except ImportError:
+        return {'error': 'anthropic package not installed'}
+
+    contract_extraction_prompt = """You are extracting structured data from scanned hotel group sales contract pages.
+
+Return ONLY a valid JSON object — no markdown fences, no explanation, nothing else.
+
+The JSON object must have exactly these keys:
+  contracted_rate       — nightly room rate as a number (e.g. 219.00), or null if not found
+  cutoff_date           — room block cutoff/release date in YYYY-MM-DD format, or null
+  attrition_pct         — attrition percentage as a decimal 0–1 (e.g. 0.80 for 80%), or null
+  hotel                 — hotel name as it appears in the contract, or null
+  hotel_contact         — hotel contact person's full name, or null
+  hotel_contact_email   — hotel contact email address, or null
+  group_contact         — client/group contact person's full name, or null
+  group_contact_email   — client/group contact email address, or null
+  contracted_block      — object mapping each night's date (YYYY-MM-DD) to the number of rooms
+                          blocked for that night (integer). Only include nights with a room
+                          count > 0. Example: {"2026-10-31": 200, "2026-11-01": 350}
+
+Rules:
+- For contracted_block, look for a night-by-night room schedule or block grid. Dates are
+  typically check-in dates (the night starting on that date).
+- If the contract shows a flat block (same rooms every night) without per-night breakdown,
+  generate one entry per night of the block period, each with that room count.
+- Cutoff date may be labeled "cutoff", "release date", "cut-off date", "room block deadline", etc.
+- Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
+- Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
+- Group contact is the client or meeting planner who signed or is listed as the customer.
+- If a field genuinely cannot be found, use null (not empty string, not 0)."""
+
+    content = [{'type': 'text', 'text': contract_extraction_prompt}]
+    for i, b64 in enumerate(images):
+        content.append({
+            'type': 'image',
+            'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}
+        })
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=2048,
+            messages=[{'role': 'user', 'content': content}]
+        )
+        raw = message.content[0].text.strip()
+        raw = re.sub(r'^```[a-z]*\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        data = json.loads(raw)
+
+        # Normalise contracted_block
+        block_raw = data.get('contracted_block') or {}
+        block = {}
+        for k, v in block_raw.items():
+            try:
+                datetime.strptime(str(k).strip(), '%Y-%m-%d')
+                rooms = int(v)
+                if rooms > 0:
+                    block[str(k).strip()] = rooms
+            except Exception:
+                continue
+        data['contracted_block'] = block
+
+        # Normalise attrition
+        atr = data.get('attrition_pct')
+        if atr is not None:
+            try:
+                atr = float(atr)
+                if atr > 1:
+                    atr = atr / 100
+                data['attrition_pct'] = round(atr, 4)
+            except Exception:
+                data['attrition_pct'] = None
+
+        # Normalise rate
+        rate = data.get('contracted_rate')
+        if rate is not None:
+            try:
+                data['contracted_rate'] = round(float(rate), 2)
+            except Exception:
+                data['contracted_rate'] = None
+
+        data.setdefault('error', None)
+        return data
+    except Exception as e:
+        return {'error': str(e), 'contracted_block': {}}
+
+
 def _extract_text_from_contract(file_bytes, filename=''):
     """Extract plain text from a PDF or Word contract file."""
     fname = (filename or '').lower()
@@ -3250,7 +3363,35 @@ def parse_contract_document(file_bytes, filename=''):
     }
 
     text = _extract_text_from_contract(file_bytes, filename)
+    fname = (filename or '').lower()
+
     if not text or not text.strip():
+        # Scanned / image-only PDF — fall back to vision-based extraction
+        if fname.endswith('.pdf'):
+            api_key = ''
+            try:
+                import importlib, sys
+                if 'config' in sys.modules:
+                    importlib.reload(sys.modules['config'])
+                else:
+                    import config as _cfg
+                    sys.modules['config'] = _cfg
+                api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+            except Exception:
+                pass
+            if not api_key:
+                import os
+                api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+            if not api_key:
+                return {**empty, 'error': 'Anthropic API key not configured'}
+            images = _pdf_pages_to_images(file_bytes, max_pages=10, dpi=100)
+            if not images:
+                return {**empty, 'error': 'Could not extract text or render pages from PDF — pymupdf may not be installed.'}
+            result = _ai_parse_contract_vision(images, api_key)
+            for k in empty:
+                if k not in result:
+                    result[k] = empty[k]
+            return result
         return {**empty, 'error': 'Could not extract text from file — is it a scanned image PDF?'}
 
     result = _ai_parse_contract(text)
