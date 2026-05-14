@@ -3423,6 +3423,12 @@ def ensure_auth_tables():
             ms_user_email TEXT,
             connected_at  TEXT    DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS UserPipelineAssociates (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id        INTEGER NOT NULL REFERENCES Users(id) ON DELETE CASCADE,
+            associate_name TEXT    NOT NULL,
+            UNIQUE(user_id, associate_name)
+        );
         CREATE TABLE IF NOT EXISTS status_board_ignore (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id      INTEGER NOT NULL REFERENCES Users(id) ON DELETE CASCADE,
@@ -3556,7 +3562,8 @@ def has_permission(user, perm):
 
 
 def get_user_account_filter(user=None):
-    """Returns a list of account names the user may see, or None for admins (no filter)."""
+    """Returns a list of account names the user may see, or None for admins (no filter).
+    Used for financial reporting — admins always see all."""
     if user is None:
         user = get_current_user()
     if user is None:
@@ -3567,6 +3574,51 @@ def get_user_account_filter(user=None):
         'SELECT account_name FROM UserAccountAccess WHERE user_id = ?', (user['id'],)
     ).fetchall()
     return [r['account_name'] for r in rows]
+
+
+def get_pickup_account_filter(user=None, db=None):
+    """Returns an account-name filter list for Pickup, RFP, and Status Board views.
+    Unlike get_user_account_filter, this applies to ALL users including admins.
+
+    Priority:
+      1. UserPipelineAssociates — dynamically queries ReportPipeline for all
+         AccountNames belonging to those associates. Used for Peter & Kristin.
+      2. UserAccountAccess — explicit list (Morgan, Ashleigh, Geralyn).
+      3. None — no filter (see everything). Only if user has neither table populated.
+    """
+    if user is None:
+        user = get_current_user()
+    if user is None:
+        return []
+    if db is None:
+        db = get_db()
+
+    # 1. Associate-driven filter (pipeline lookup)
+    assoc_rows = db.execute(
+        'SELECT associate_name FROM UserPipelineAssociates WHERE user_id=?', (user['id'],)
+    ).fetchall()
+    if assoc_rows:
+        associates = [r['associate_name'] for r in assoc_rows]
+        ph = ','.join('?' * len(associates))
+        acct_rows = db.execute(
+            f"SELECT DISTINCT AccountName FROM ReportPipeline "
+            f"WHERE BookingAssociate IN ({ph}) AND AccountName IS NOT NULL",
+            associates
+        ).fetchall()
+        return [r['AccountName'] for r in acct_rows]
+
+    # 2. Explicit UserAccountAccess list
+    acct_rows = db.execute(
+        'SELECT account_name FROM UserAccountAccess WHERE user_id=?', (user['id'],)
+    ).fetchall()
+    if acct_rows:
+        return [r['account_name'] for r in acct_rows]
+
+    # 3. No restriction (admin with no filter configured)
+    if user['role'] == 'admin':
+        return None
+
+    return []  # non-admin with no access configured
 
 
 @app.before_request
@@ -4393,12 +4445,7 @@ def status_board():
     db          = get_db()
     today       = datetime.today().strftime('%Y-%m-%d')
 
-    # Status board always filters by UserAccountAccess, even for admins.
-    # If the user has no access rows (e.g. Peter), they see everything.
-    _sb_rows = db.execute(
-        'SELECT account_name FROM UserAccountAccess WHERE user_id=?', (user['id'],)
-    ).fetchall()
-    acct_filter = [r['account_name'] for r in _sb_rows] if _sb_rows else None
+    acct_filter = get_pickup_account_filter(user, db)
 
     # --- Load active ignore records for this user ---
     ignored = set()
@@ -5001,7 +5048,7 @@ def pickup_fill_missing():
 
     db           = get_db()
     today        = datetime.today().strftime('%Y-%m-%d')
-    acct_filter  = get_user_account_filter(user)   # None = admin, [] = none, [...] = allowed list
+    acct_filter  = get_pickup_account_filter(user)   # None = no filter, [] = none, [...] = allowed list
 
     # Base query: future non-cancelled Kristin House bookings without a pickup_config entry
     base_sql = '''
@@ -5298,10 +5345,10 @@ def pickup_dashboard():
     today_str = today.isoformat()
     future_cutoff = today + timedelta(days=120)
 
-    # Account-level filter for non-admins
-    acct_filter = get_user_account_filter(user)
+    # Account-level filter (applies to all users including admins for Pickup)
+    acct_filter = get_pickup_account_filter(user)
     if acct_filter is None:
-        # admin — no restriction
+        # no restriction
         acct_where = ''
         acct_params = []
     elif acct_filter:
@@ -6974,7 +7021,7 @@ def pickup_customer_report_select():
     """Selection page — choose which customers/events to include in the report."""
     user = get_current_user()
     db = get_db()
-    current_events = _get_current_pickup_events(db, account_filter=get_user_account_filter(user))
+    current_events = _get_current_pickup_events(db, account_filter=get_pickup_account_filter(user))
 
     # Group by organisation for the UI
     from collections import OrderedDict
@@ -7001,7 +7048,7 @@ def pickup_customer_report_xlsx():
     today = _d.today()
 
     # Load all current events via shared helper (filtered by account access)
-    all_events = _get_current_pickup_events(db, account_filter=get_user_account_filter(user))
+    all_events = _get_current_pickup_events(db, account_filter=get_pickup_account_filter(user))
 
     # If POSTed from the selection page, filter to chosen config IDs only
     if request.method == 'POST':
@@ -9279,7 +9326,7 @@ def rfp_dashboard():
     user = get_current_user()
     db = get_db()
     show_archived = request.args.get('archived') == '1'
-    acct_filter = get_user_account_filter(user)
+    acct_filter = get_pickup_account_filter(user)
     base = (1 if show_archived else 0,)
     if acct_filter is None:
         rfps = db.execute(
@@ -9355,7 +9402,7 @@ def rfp_detail(rid):
     if not rfp:
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
-    acct_filter = get_user_account_filter(user)
+    acct_filter = get_pickup_account_filter(user)
     if acct_filter is not None and rfp['client_org'] not in acct_filter:
         flash('You do not have access to this RFP.', 'error')
         return redirect(url_for('rfp_dashboard'))
@@ -9375,7 +9422,7 @@ def rfp_edit(rid):
     if not rfp:
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
-    acct_filter = get_user_account_filter(user)
+    acct_filter = get_pickup_account_filter(user)
     if acct_filter is not None and rfp['client_org'] not in acct_filter:
         flash('You do not have access to this RFP.', 'error')
         return redirect(url_for('rfp_dashboard'))
