@@ -179,6 +179,9 @@
       <i class="bi bi-download me-1"></i>Download Contract
     </a>
     {% endif %}
+    <button type="button" class="btn btn-outline-warning btn-sm" data-bs-toggle="modal" data-bs-target="#amendmentModal">
+      <i class="bi bi-file-earmark-diff me-1"></i>Import Amendment
+    </button>
   </div>
 
   {# Right: email buttons (UPS Blue) #}
@@ -254,6 +257,53 @@
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-primary" id="contractSubmitBtn" disabled>
             <i class="bi bi-magic me-1"></i>Extract Contract Data
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# Amendment upload modal #}
+<div class="modal fade" id="amendmentModal" tabindex="-1" aria-labelledby="amendmentModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="amendmentModalLabel">
+          <i class="bi bi-file-earmark-diff me-2"></i>Import Contract Amendment / Addendum
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('pickup_import_amendment', cid=config['id']) }}"
+            enctype="multipart/form-data" id="amendmentUploadForm">
+        <input type="hidden" name="action" value="upload">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Upload the signed amendment or addendum document. Changes to the room block, rate,
+            hotel name, and cutoff date will be extracted automatically for your review before applying.
+          </p>
+          <div id="amendmentDropZone"
+               onclick="document.getElementById('amendmentFileInput').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleAmendmentDrop(event)"
+               style="border:2px dashed #ffc107;border-radius:8px;padding:2.5rem 1rem;
+                      text-align:center;cursor:pointer;transition:border-color .2s,background .2s">
+            <i class="bi bi-file-earmark-diff fs-2 text-warning d-block mb-2"></i>
+            <div class="text-muted">Drag &amp; drop your amendment here, or <strong>click to browse</strong></div>
+            <div class="text-muted small mt-1">PDF or Word (.docx)</div>
+          </div>
+          <input type="file" id="amendmentFileInput" name="amendment_file"
+                 accept=".pdf,.docx,.doc" class="d-none"
+                 onchange="showAmendmentFile(this)">
+          <div id="amendmentFileChosen" class="mt-2 small text-success d-none">
+            <i class="bi bi-check-circle me-1"></i><span id="amendmentFileName"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-warning" id="amendmentSubmitBtn" disabled>
+            <i class="bi bi-magic me-1"></i>Extract Changes
           </button>
         </div>
       </form>
@@ -594,6 +644,65 @@
   {% endif %}
 </div>
 
+{# ── Contract Amendments ── #}
+{% if amendments %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-file-earmark-diff me-2"></i>Contract Amendments
+      <span class="badge bg-warning text-dark ms-1">{{ amendments|length }}</span>
+    </span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0" style="font-size:.88rem">
+      <thead class="table-light">
+        <tr>
+          <th>Date</th>
+          <th>Uploaded By</th>
+          <th>Description</th>
+          <th>Changes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for amend in amendments %}
+        {% set ch = amend['changes_json'] | fromjson if amend['changes_json'] else {} %}
+        <tr>
+          <td class="text-nowrap">{{ amend['uploaded_at'][:10] | us_date }}</td>
+          <td>{{ amend['uploaded_by'] or '—' }}</td>
+          <td>{{ amend['description'] or '—' }}</td>
+          <td>
+            {% if ch %}
+              {% for field, diff in ch.items() %}
+                {% if field == 'contracted_block' %}
+                  <span class="badge bg-secondary me-1">Block ({{ diff | length }} night{{ 's' if diff|length != 1 else '' }})</span>
+                {% elif field == 'contracted_rate' %}
+                  <span class="badge bg-info text-dark me-1">Rate → ${{ "%.2f"|format(diff.new) }}</span>
+                {% elif field == 'hotel' %}
+                  <span class="badge bg-primary me-1">Hotel → {{ diff.new }}</span>
+                {% elif field == 'cutoff_date' %}
+                  <span class="badge bg-secondary me-1">Cutoff → {{ diff.new | us_date }}</span>
+                {% endif %}
+              {% endfor %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if amend['file_data'] %}
+            <a href="{{ url_for('pickup_amendment_download', cid=config['id'], amid=amend['id']) }}"
+               class="btn btn-sm btn-outline-secondary" title="Download amendment">
+              <i class="bi bi-download"></i>
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {# ── Hotel Contact Log ── #}
 <div class="card mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">
@@ -907,10 +1016,38 @@ function handleContractDrop(e) {
   }
 }
 
+// Amendment upload modal — drag & drop + file chooser
+function showAmendmentFile(input) {
+  const name = input.files[0] ? input.files[0].name : '';
+  const chosen = document.getElementById('amendmentFileChosen');
+  const label  = document.getElementById('amendmentFileName');
+  const btn    = document.getElementById('amendmentSubmitBtn');
+  if (name) {
+    label.textContent = name;
+    chosen.classList.remove('d-none');
+    if (btn) btn.disabled = false;
+  }
+}
+
+function handleAmendmentDrop(e) {
+  e.preventDefault();
+  const zone = document.getElementById('amendmentDropZone');
+  if (zone) zone.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files.length) {
+    const input = document.getElementById('amendmentFileInput');
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    showAmendmentFile(input);
+  }
+}
+
 // Add drag-over highlight style
 (function() {
   const style = document.createElement('style');
-  style.textContent = '#contractDropZone.drag-over{border-color:#0d6efd!important;background:#f0f5ff;}';
+  style.textContent = '#contractDropZone.drag-over{border-color:#0d6efd!important;background:#f0f5ff;}'
+    + '#amendmentDropZone.drag-over{border-color:#ffc107!important;background:#fffbf0;}';
   document.head.appendChild(style);
 })();
 

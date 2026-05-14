@@ -3516,3 +3516,224 @@ def parse_contract_document(file_bytes, filename=''):
             result[k] = empty[k]
 
     return result
+
+
+# ── Amendment / Addendum parsing ──────────────────────────────────────────────
+
+def _ai_parse_amendment(text):
+    """Extract structured data from a contract amendment/addendum (text-based)."""
+    api_key = ''
+    try:
+        import importlib, sys
+        if 'config' in sys.modules:
+            importlib.reload(sys.modules['config'])
+        else:
+            import config as _cfg
+            sys.modules['config'] = _cfg
+        api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        import os
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return {'error': 'Anthropic API key not configured'}
+
+    try:
+        import anthropic
+    except ImportError:
+        return {'error': 'anthropic package not installed'}
+
+    prompt = """You are extracting structured data from a hotel group contract AMENDMENT or ADDENDUM.
+An amendment changes specific terms of an existing contract — it does NOT define a full new contract.
+
+Return ONLY a valid JSON object — no markdown fences, no explanation, nothing else.
+
+The JSON object must have exactly these keys:
+  description      — a short plain-English summary of what this amendment changes (1-2 sentences), required
+  contracted_block — an object mapping date (YYYY-MM-DD) to rooms (integer) for ONLY the nights
+                     that are being changed by this amendment. Nights with 0 rooms mean that night
+                     is being REMOVED from the block. Null if the block is not changed.
+  contracted_rate  — the new nightly room rate as a number (e.g. 219.00), or null if rate is not changing
+  hotel            — the new hotel name if it has changed (e.g. rebrand/rename), or null if not changing
+  cutoff_date      — the new cutoff/release date in YYYY-MM-DD format, or null if not changing
+
+Rules:
+- ONLY populate a field if the amendment explicitly changes that value.
+- If a field is not mentioned or not changing, return null for it — do NOT copy values from elsewhere.
+- For contracted_block: only include nights that the amendment adds, increases, decreases, or removes.
+  A night with 0 rooms means it is being removed from the block.
+- If the amendment shows a flat block change (e.g. "block increased to 50 rooms per night"), include
+  all affected nights using the date range stated.
+- The description field is always required — summarize what this amendment does.
+
+Contract amendment text:
+""" + text[:15000]
+
+    try:
+        import anthropic as _ant
+        client = _ant.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model='claude-haiku-4-5',
+            max_tokens=2048,
+            messages=[{'role': 'user', 'content': prompt}]
+        )
+        raw = message.content[0].text.strip()
+        raw = re.sub(r'^```[a-z]*\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        data = json.loads(raw)
+
+        # Normalise contracted_block
+        block_raw = data.get('contracted_block') or {}
+        if block_raw:
+            block = {}
+            for k, v in block_raw.items():
+                try:
+                    datetime.strptime(str(k).strip(), '%Y-%m-%d')
+                    block[str(k).strip()] = int(v)  # keep 0s — they mean "remove this night"
+                except Exception:
+                    continue
+            data['contracted_block'] = block if block else None
+        else:
+            data['contracted_block'] = None
+
+        # Normalise rate
+        rate = data.get('contracted_rate')
+        if rate is not None:
+            try:
+                data['contracted_rate'] = round(float(rate), 2)
+            except Exception:
+                data['contracted_rate'] = None
+
+        data.setdefault('error', None)
+        data.setdefault('description', '')
+        return data
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def _ai_parse_amendment_vision(images, api_key):
+    """Vision-based fallback for scanned amendment PDFs."""
+    try:
+        import anthropic
+    except ImportError:
+        return {'error': 'anthropic package not installed'}
+
+    amendment_prompt = """You are extracting structured data from a scanned hotel contract AMENDMENT or ADDENDUM.
+An amendment changes specific terms of an existing contract — it does NOT define a full new contract.
+
+Return ONLY a valid JSON object — no markdown fences, no explanation, nothing else.
+
+The JSON object must have exactly these keys:
+  description      — a short plain-English summary of what this amendment changes (1-2 sentences), required
+  contracted_block — an object mapping date (YYYY-MM-DD) to rooms (integer) for ONLY the nights
+                     being changed. Nights with 0 rooms mean removal from block. Null if not changed.
+  contracted_rate  — the new nightly room rate as a number, or null if rate is not changing
+  hotel            — the new hotel name if it has changed (rebrand/rename), or null
+  cutoff_date      — the new cutoff/release date in YYYY-MM-DD format, or null
+
+Rules:
+- ONLY populate a field if the amendment explicitly changes that value. Null = not changing.
+- For contracted_block: only include nights being added, changed, or removed.
+- The description field is always required."""
+
+    content = [{'type': 'text', 'text': amendment_prompt}]
+    for b64 in images:
+        content.append({
+            'type': 'image',
+            'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}
+        })
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=2048,
+            messages=[{'role': 'user', 'content': content}]
+        )
+        raw = message.content[0].text.strip()
+        raw = re.sub(r'^```[a-z]*\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        data = json.loads(raw)
+
+        block_raw = data.get('contracted_block') or {}
+        if block_raw:
+            block = {}
+            for k, v in block_raw.items():
+                try:
+                    datetime.strptime(str(k).strip(), '%Y-%m-%d')
+                    block[str(k).strip()] = int(v)
+                except Exception:
+                    continue
+            data['contracted_block'] = block if block else None
+        else:
+            data['contracted_block'] = None
+
+        rate = data.get('contracted_rate')
+        if rate is not None:
+            try:
+                data['contracted_rate'] = round(float(rate), 2)
+            except Exception:
+                data['contracted_rate'] = None
+
+        data.setdefault('error', None)
+        data.setdefault('description', '')
+        return data
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def parse_amendment_document(file_bytes, filename=''):
+    """
+    Parse a hotel contract amendment PDF or Word file.
+    Returns a dict with keys:
+      description       — str summary of what changed
+      contracted_block  — {YYYY-MM-DD: rooms, ...} (only changed nights) or None
+      contracted_rate   — float or None
+      hotel             — str or None
+      cutoff_date       — 'YYYY-MM-DD' or None
+      error             — str or None
+    """
+    empty = {
+        'description': '', 'contracted_block': None, 'contracted_rate': None,
+        'hotel': None, 'cutoff_date': None, 'error': None,
+    }
+
+    text = _extract_text_from_contract(file_bytes, filename)
+    fname = (filename or '').lower()
+
+    if not text or not text.strip():
+        if fname.endswith('.pdf'):
+            api_key = ''
+            try:
+                import importlib, sys
+                if 'config' in sys.modules:
+                    importlib.reload(sys.modules['config'])
+                else:
+                    import config as _cfg
+                    sys.modules['config'] = _cfg
+                api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+            except Exception:
+                pass
+            if not api_key:
+                import os
+                api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+            if not api_key:
+                return {**empty, 'error': 'Anthropic API key not configured'}
+            images = _pdf_pages_to_images(file_bytes, max_pages=10, dpi=100)
+            if not images:
+                return {**empty, 'error': 'Could not extract text or render pages from PDF.'}
+            result = _ai_parse_amendment_vision(images, api_key)
+            for k in empty:
+                if k not in result:
+                    result[k] = empty[k]
+            return result
+        return {**empty, 'error': 'Could not extract text from file.'}
+
+    result = _ai_parse_amendment(text)
+    for k in empty:
+        if k not in result:
+            result[k] = empty[k]
+    return result

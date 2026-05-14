@@ -3504,6 +3504,17 @@ def ensure_auth_tables():
             old_value   TEXT,
             new_value   TEXT
         );
+        CREATE TABLE IF NOT EXISTS pickup_amendments (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id     INTEGER NOT NULL REFERENCES pickup_config(id) ON DELETE CASCADE,
+            uploaded_at   TEXT DEFAULT (datetime('now')),
+            uploaded_by   TEXT,
+            filename      TEXT,
+            file_data     BLOB,
+            description   TEXT,
+            changes_json  TEXT DEFAULT '{}',
+            applied       INTEGER DEFAULT 1
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -6199,6 +6210,12 @@ def pickup_event(cid):
         last_ota_rate and config['contracted_rate'] and
         float(last_ota_rate) < float(config['contracted_rate'])
     )
+
+    # Amendments / addendum history
+    amendments = db.execute(
+        "SELECT * FROM pickup_amendments WHERE config_id=? ORDER BY uploaded_at DESC", (cid,)
+    ).fetchall()
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -6214,7 +6231,8 @@ def pickup_event(cid):
                            deleted_weekly=deleted_weekly,
                            tasks=tasks, event_notes=event_notes, all_users=all_users,
                            last_ota_rate=last_ota_rate, last_ota_url=last_ota_url,
-                           show_rate_issue=show_rate_issue)
+                           show_rate_issue=show_rate_issue,
+                           amendments=amendments)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -7704,6 +7722,158 @@ def pickup_contract_download(cid):
     buf = io.BytesIO(row['contract_data'])
     return send_file(buf, as_attachment=True,
                      download_name=row['contract_filename'] or f'contract_{cid}.pdf')
+
+
+@app.route('/pickup/<int:cid>/import-amendment', methods=['GET', 'POST'])
+def pickup_import_amendment(cid):
+    """Upload a contract amendment/addendum PDF, AI-extract changes, review then apply."""
+    from pickup_utils import parse_amendment_document
+    db = get_db()
+    config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'upload')
+
+        # ── Step 2: user confirmed the diff ───────────────────────────────────
+        if action == 'confirm':
+            try:
+                import base64
+                current_block = json.loads(config['contracted_block'] or '{}')
+
+                # Collect changes from form
+                new_rate_str    = request.form.get('new_rate', '').strip()
+                new_hotel       = request.form.get('new_hotel', '').strip() or None
+                new_cutoff      = request.form.get('new_cutoff', '').strip() or None
+                description     = request.form.get('description', '').strip()
+                block_changes   = json.loads(request.form.get('block_changes_json', '{}'))
+
+                filename_stored = request.form.get('_amend_filename', '')
+                file_b64        = request.form.get('_amend_data_b64', '')
+                file_blob       = base64.b64decode(file_b64) if file_b64 else None
+
+                # Build audit diff
+                changes = {}
+                if new_rate_str:
+                    new_rate = round(float(new_rate_str), 2)
+                    changes['contracted_rate'] = {
+                        'old': config['contracted_rate'],
+                        'new': new_rate
+                    }
+                else:
+                    new_rate = None
+
+                if new_hotel:
+                    changes['hotel'] = {'old': config['hotel'], 'new': new_hotel}
+
+                if new_cutoff:
+                    changes['cutoff_date'] = {'old': config['cutoff_date'], 'new': new_cutoff}
+
+                # Apply block changes
+                merged_block = dict(current_block)
+                block_diff = {}
+                for d, rooms in block_changes.items():
+                    rooms = int(rooms)
+                    old_rooms = current_block.get(d)
+                    if rooms == 0:
+                        # Remove this night
+                        block_diff[d] = {'old': old_rooms, 'new': None}
+                        merged_block.pop(d, None)
+                    else:
+                        block_diff[d] = {'old': old_rooms, 'new': rooms}
+                        merged_block[d] = rooms
+
+                if block_diff:
+                    changes['contracted_block'] = block_diff
+
+                # Apply to pickup_config
+                update_parts = []
+                update_vals  = []
+                if new_rate is not None:
+                    update_parts.append('contracted_rate = ?')
+                    update_vals.append(new_rate)
+                if new_hotel:
+                    update_parts.append('hotel = ?')
+                    update_vals.append(new_hotel)
+                if new_cutoff:
+                    update_parts.append('cutoff_date = ?')
+                    update_vals.append(new_cutoff)
+                if merged_block != current_block:
+                    update_parts.append('contracted_block = ?')
+                    update_vals.append(json.dumps(merged_block))
+
+                if update_parts:
+                    update_vals.append(cid)
+                    db.execute(
+                        f"UPDATE pickup_config SET {', '.join(update_parts)} WHERE id=?",
+                        update_vals
+                    )
+
+                # Store amendment record
+                user = session.get('user', {})
+                db.execute('''
+                    INSERT INTO pickup_amendments
+                        (config_id, uploaded_by, filename, file_data, description, changes_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (cid,
+                      user.get('name') or user.get('username') or 'Unknown',
+                      filename_stored or None,
+                      file_blob,
+                      description,
+                      json.dumps(changes)))
+
+                db.commit()
+                flash('Amendment applied and recorded.', 'success')
+                return redirect(url_for('pickup_event', cid=cid))
+
+            except Exception as e:
+                flash(f'Error applying amendment: {e}', 'error')
+                return redirect(url_for('pickup_event', cid=cid))
+
+        # ── Step 1: parse the uploaded file ───────────────────────────────────
+        f = request.files.get('amendment_file')
+        if not f or not f.filename:
+            flash('No file selected.', 'error')
+            return redirect(url_for('pickup_event', cid=cid))
+
+        file_bytes = f.read()
+        extracted  = parse_amendment_document(file_bytes, filename=f.filename)
+
+        if extracted.get('error'):
+            flash(f'Could not parse amendment: {extracted["error"]}', 'error')
+            return redirect(url_for('pickup_event', cid=cid))
+
+        import base64
+        file_b64 = base64.b64encode(file_bytes).decode('ascii')
+
+        current_block = json.loads(config['contracted_block'] or '{}')
+        return render_template('pickup_amendment_review.html',
+                               config=config,
+                               extracted=extracted,
+                               current_block=current_block,
+                               filename=f.filename,
+                               file_b64=file_b64)
+
+    # GET — redirect back (upload happens via modal POST)
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/amendment/<int:amid>/download')
+def pickup_amendment_download(cid, amid):
+    """Download a stored amendment file."""
+    db = get_db()
+    row = db.execute(
+        "SELECT filename, file_data FROM pickup_amendments WHERE id=? AND config_id=?",
+        (amid, cid)
+    ).fetchone()
+    if not row or not row['file_data']:
+        flash('Amendment file not found.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    buf = io.BytesIO(row['file_data'])
+    return send_file(buf, as_attachment=True,
+                     download_name=row['filename'] or f'amendment_{amid}.pdf')
 
 
 def _build_housing_form_wb(config, pipeline):

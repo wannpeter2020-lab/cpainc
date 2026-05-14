@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}Review Amendment — {{ config['event_name'] or config['organization'] }}{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Event
+  </a>
+  <h4 class="mt-1">Review Amendment / Addendum</h4>
+  <div class="text-muted small">{{ config['event_name'] or config['organization'] }} — {{ config['hotel'] }}</div>
+</div>
+
+<div class="alert alert-info d-flex align-items-center gap-2 mb-3" style="max-width:760px">
+  <i class="bi bi-robot fs-5"></i>
+  <span>Changes extracted from <strong>{{ filename }}</strong> — review and correct before applying.</span>
+</div>
+
+<form method="post" action="{{ url_for('pickup_import_amendment', cid=config['id']) }}">
+  <input type="hidden" name="action" value="confirm">
+  <input type="hidden" name="_amend_filename" value="{{ filename }}">
+  <input type="hidden" name="_amend_data_b64" value="{{ file_b64 }}">
+  <input type="hidden" name="block_changes_json" id="block_changes_json"
+         value="{{ (extracted.contracted_block or {}) | tojson }}">
+
+  {# ── Description ── #}
+  <div class="card mb-4" style="max-width:760px">
+    <div class="card-header fw-semibold">Amendment Summary</div>
+    <div class="card-body">
+      <label class="form-label small fw-semibold mb-1">What does this amendment do?</label>
+      <input type="text" name="description" class="form-control"
+             value="{{ extracted.description or '' }}"
+             placeholder="e.g. Room block increased from 30 to 45 rooms per night for Oct 14–15">
+    </div>
+  </div>
+
+  {# ── Field-level changes ── #}
+  <div class="card mb-4" style="max-width:760px">
+    <div class="card-header fw-semibold">Field Changes</div>
+    <div class="card-body">
+      <p class="text-muted small mb-3">
+        Only fields explicitly changed in the amendment are shown. Leave a field blank to keep the current value.
+      </p>
+
+      {# Rate #}
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold">Contracted Rate ($)</label>
+          <div class="text-muted small mb-1">
+            Current: {% if config['contracted_rate'] %}<strong>${{ "%.2f"|format(config['contracted_rate']) }}</strong>{% else %}<em>not set</em>{% endif %}
+          </div>
+          <input type="number" step="0.01" name="new_rate" class="form-control"
+                 value="{{ extracted.contracted_rate or '' }}"
+                 placeholder="Leave blank to keep current">
+          {% if extracted.contracted_rate and extracted.contracted_rate != config['contracted_rate'] %}
+          <div class="form-text text-warning">
+            <i class="bi bi-arrow-right-circle me-1"></i>Amendment sets to ${{ "%.2f"|format(extracted.contracted_rate) }}
+          </div>
+          {% endif %}
+        </div>
+
+        {# Hotel name #}
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold">Hotel Name</label>
+          <div class="text-muted small mb-1">
+            Current: <strong>{{ config['hotel'] or '—' }}</strong>
+          </div>
+          <input type="text" name="new_hotel" class="form-control"
+                 value="{{ extracted.hotel or '' }}"
+                 placeholder="Leave blank to keep current">
+          {% if extracted.hotel and extracted.hotel != config['hotel'] %}
+          <div class="form-text text-warning">
+            <i class="bi bi-arrow-right-circle me-1"></i>Amendment sets to {{ extracted.hotel }}
+          </div>
+          {% endif %}
+        </div>
+
+        {# Cutoff date #}
+        <div class="col-md-4">
+          <label class="form-label small fw-semibold">Cutoff Date</label>
+          <div class="text-muted small mb-1">
+            Current: <strong>{{ config['cutoff_date'] | us_date if config['cutoff_date'] else '—' }}</strong>
+          </div>
+          <input type="date" name="new_cutoff" class="form-control"
+                 value="{{ extracted.cutoff_date or '' }}">
+          {% if extracted.cutoff_date and extracted.cutoff_date != config['cutoff_date'] %}
+          <div class="form-text text-warning">
+            <i class="bi bi-arrow-right-circle me-1"></i>Amendment sets to {{ extracted.cutoff_date | us_date }}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Block changes ── #}
+  <div class="card mb-4" style="max-width:760px">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Night-by-Night Block Changes</span>
+      <span class="text-muted small" id="block_summary_label"></span>
+    </div>
+    <div class="card-body p-0">
+      {% if extracted.contracted_block %}
+      <table class="table table-sm table-bordered mb-0" id="amend_block_table">
+        <thead class="table-light">
+          <tr>
+            <th>Date</th>
+            <th>Day</th>
+            <th>Current Rooms</th>
+            <th>Amendment Rooms</th>
+            <th>Change</th>
+          </tr>
+        </thead>
+        <tbody id="amend_block_tbody"></tbody>
+      </table>
+      {% else %}
+      <div class="card-body text-muted small">
+        <i class="bi bi-info-circle me-1"></i>
+        No block changes were found in this amendment. Only the field changes above will be applied.
+      </div>
+      {% endif %}
+    </div>
+    {% if extracted.contracted_block %}
+    <div class="card-footer bg-light">
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addNight()">
+        <i class="bi bi-plus-circle me-1"></i>Add Night
+      </button>
+      <span class="text-muted small ms-2">Add a night not listed in the amendment</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="max-width:760px" class="d-flex gap-2">
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-check-circle me-1"></i>Apply Amendment
+    </button>
+    <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary">
+      Cancel
+    </a>
+  </div>
+</form>
+
+<script>
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const CURRENT_BLOCK = {{ current_block | tojson }};
+let blockChanges = {{ (extracted.contracted_block or {}) | tojson }};
+
+function renderTable() {
+  const dates = Object.keys(blockChanges).sort();
+  const tbody = document.getElementById('amend_block_tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  dates.forEach(d => {
+    tbody.appendChild(makeRow(d, blockChanges[d]));
+  });
+  updateSummary();
+  syncJson();
+}
+
+function makeRow(d, amendRooms) {
+  const dt = new Date(d + 'T12:00:00');
+  const currentRooms = CURRENT_BLOCK[d] !== undefined ? CURRENT_BLOCK[d] : null;
+  const tr = document.createElement('tr');
+  const diff = amendRooms - (currentRooms || 0);
+  let changeLabel = '';
+  let rowClass = '';
+  if (currentRooms === null) {
+    changeLabel = '<span class="badge bg-success">New night</span>';
+    rowClass = 'table-success';
+  } else if (amendRooms === 0) {
+    changeLabel = '<span class="badge bg-danger">Remove</span>';
+    rowClass = 'table-danger';
+  } else if (diff > 0) {
+    changeLabel = `<span class="badge bg-primary">+${diff}</span>`;
+    rowClass = 'table-primary';
+  } else if (diff < 0) {
+    changeLabel = `<span class="badge bg-warning text-dark">${diff}</span>`;
+    rowClass = 'table-warning';
+  } else {
+    changeLabel = '<span class="text-muted">No change</span>';
+  }
+  tr.className = rowClass;
+  tr.dataset.date = d;
+  tr.innerHTML = `
+    <td>${d}</td>
+    <td>${DAYS[dt.getDay()]}</td>
+    <td class="text-muted">${currentRooms !== null ? currentRooms : '<em class="text-muted">not in block</em>'}</td>
+    <td>
+      <input type="number" min="0" class="form-control form-control-sm" style="width:90px"
+             value="${amendRooms}"
+             onchange="blockChanges['${d}']=parseInt(this.value)||0; refreshRow(this.closest('tr'),'${d}'); updateSummary(); syncJson();">
+    </td>
+    <td id="change_${d.replace(/-/g,'_')}">${changeLabel}</td>`;
+  return tr;
+}
+
+function refreshRow(tr, d) {
+  const amendRooms = blockChanges[d] || 0;
+  const currentRooms = CURRENT_BLOCK[d] !== undefined ? CURRENT_BLOCK[d] : null;
+  const diff = amendRooms - (currentRooms || 0);
+  const changeCell = document.getElementById('change_' + d.replace(/-/g,'_'));
+  let changeLabel = '';
+  let rowClass = '';
+  if (currentRooms === null) {
+    changeLabel = '<span class="badge bg-success">New night</span>';
+    rowClass = 'table-success';
+  } else if (amendRooms === 0) {
+    changeLabel = '<span class="badge bg-danger">Remove</span>';
+    rowClass = 'table-danger';
+  } else if (diff > 0) {
+    changeLabel = `<span class="badge bg-primary">+${diff}</span>`;
+    rowClass = 'table-primary';
+  } else if (diff < 0) {
+    changeLabel = `<span class="badge bg-warning text-dark">${diff}</span>`;
+    rowClass = 'table-warning';
+  } else {
+    changeLabel = '<span class="text-muted">No change</span>';
+  }
+  tr.className = rowClass;
+  if (changeCell) changeCell.innerHTML = changeLabel;
+}
+
+function updateSummary() {
+  const totalAmend = Object.values(blockChanges).reduce((s,v)=>s+(parseInt(v)||0),0);
+  const label = document.getElementById('block_summary_label');
+  if (label) label.textContent = `${Object.keys(blockChanges).length} night(s) affected`;
+}
+
+function syncJson() {
+  document.getElementById('block_changes_json').value = JSON.stringify(blockChanges);
+}
+
+function addNight() {
+  const d = prompt('Enter the date to add or change (YYYY-MM-DD):');
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+  if (blockChanges[d] !== undefined) { alert('That date is already in the list.'); return; }
+  blockChanges[d] = 0;
+  const tbody = document.getElementById('amend_block_tbody');
+  // Insert in sorted order
+  const existingDates = [...tbody.querySelectorAll('tr')].map(r=>r.dataset.date).filter(Boolean);
+  const allDates = [...existingDates, d].sort();
+  const idx = allDates.indexOf(d);
+  const newRow = makeRow(d, 0);
+  if (idx >= existingDates.length) {
+    tbody.appendChild(newRow);
+  } else {
+    const refRow = tbody.querySelector(`tr[data-date="${allDates[idx+1]}"]`);
+    if (refRow) tbody.insertBefore(newRow, refRow);
+    else tbody.appendChild(newRow);
+  }
+  updateSummary();
+  syncJson();
+}
+
+renderTable();
+</script>
+{% endblock %}
