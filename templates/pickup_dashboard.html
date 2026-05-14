@@ -388,6 +388,26 @@
   </div>
 </div>
 
+{# ── Missing HHR ── #}
+<div class="card mb-3 border-warning">
+  <div class="card-header d-flex justify-content-between align-items-center bg-warning bg-opacity-10">
+    <span><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Missing HHR
+      <span class="badge bg-warning text-dark ms-1">{{ missing_hhr_rows|length }}</span>
+      <span class="text-muted small fw-normal ms-2">— meeting ended, no HHR uploaded yet</span>
+    </span>
+    <button class="btn btn-sm btn-outline-warning" type="button"
+            data-bs-toggle="collapse" data-bs-target="#collapseMissingHhr">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div id="collapseMissingHhr" class="collapse show">
+    {{ event_table(missing_hhr_rows, missing_hhr_groups, missing_hhr_group_order, show_history=true, table_id='tbl-missing-hhr', section='missing_hhr') }}
+    {% if not missing_hhr_rows %}
+    <div class="p-3 text-muted small"><i class="bi bi-check-circle me-1 text-success"></i>No events with missing HHR.</div>
+    {% endif %}
+  </div>
+</div>
+
 {# ── Past Events ── #}
 <div class="card mb-3">
   <div class="card-header d-flex justify-content-between align-items-center">

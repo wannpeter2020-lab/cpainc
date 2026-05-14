@@ -5326,7 +5326,12 @@ def pickup_dashboard():
         LEFT JOIN ReportPipeline p ON CAST(c.booking_id AS TEXT)=CAST(p.BookingId AS TEXT)
         WHERE c.status='archived'{acct_where} ORDER BY c.cutoff_date
     """, acct_params).fetchall()
-    past_rows, current_rows, future_rows, archived_rows = [], [], [], []
+    past_rows, current_rows, future_rows, archived_rows, missing_hhr_rows = [], [], [], [], []
+
+    # Pre-compute which booking_ids have HHR uploaded (needed for categorization)
+    has_hhr_bids = {str(r[0]) for r in db.execute(
+        "SELECT DISTINCT booking_id FROM housing_history_files WHERE booking_id IS NOT NULL"
+    ).fetchall()}
 
     for c in configs:
         last = db.execute(
@@ -5403,12 +5408,26 @@ def pickup_dashboard():
                     break
                 except Exception:
                     pass
-        if has_final_history or force_past:
+        end_date = None
+        for _ed in [_to_iso(c['bk_end']),
+                    c['event_end'],
+                    all_dates[-1] if all_dates else None]:
+            if _ed:
+                try:
+                    end_date = date.fromisoformat(_ed)
+                    break
+                except Exception:
+                    pass
+        meeting_ended = end_date is not None and end_date < today
+        has_hhr = str(c['booking_id'] or '') in has_hhr_bids
+        if force_past or (has_final_history and meeting_ended):
             past_rows.append(row)
+        elif meeting_ended and has_hhr:
+            past_rows.append(row)
+        elif meeting_ended and not has_hhr:
+            missing_hhr_rows.append(row)
         elif c['force_current']:
             current_rows.append(row)
-        elif start_date is not None and start_date < today:
-            past_rows.append(row)
         elif start_date is not None and start_date > future_cutoff:
             future_rows.append(row)
         else:
@@ -5433,6 +5452,7 @@ def pickup_dashboard():
         current_rows.sort(key=_sort_key)
     _sort_key = lambda r: r.get('event_start') or ''
     past_rows.sort(key=_sort_key)
+    missing_hhr_rows.sort(key=_sort_key)
     future_rows.sort(key=_sort_key)
     archived_rows.sort(key=_sort_key)
 
@@ -5492,9 +5512,10 @@ def pickup_dashboard():
                 group_order.append(key)
         return groups, group_order
 
-    current_groups, current_group_order = _build_groups(current_rows)
-    future_groups,  future_group_order  = _build_groups(future_rows)
-    past_groups,    past_group_order    = _build_groups(past_rows)
+    current_groups,     current_group_order     = _build_groups(current_rows)
+    future_groups,      future_group_order      = _build_groups(future_rows)
+    past_groups,        past_group_order        = _build_groups(past_rows)
+    missing_hhr_groups, missing_hhr_group_order = _build_groups(missing_hhr_rows)
 
     # ── KPI metrics ──────────────────────────────────────────────────────────
     def _sum_block(rows):
@@ -5518,14 +5539,8 @@ def pickup_dashboard():
         "SELECT COUNT(*) FROM pickup_config WHERE status='active'"
     ).fetchone()[0]  # placeholder — actual count needs status board logic; show total active
 
-    # Events missing HHR (ended with no HHR)
-    has_hhr_bids = {str(r[0]) for r in db.execute(
-        "SELECT DISTINCT booking_id FROM housing_history_files WHERE booking_id IS NOT NULL"
-    ).fetchall()}
-    kpi_missing_hhr = sum(
-        1 for r in past_rows
-        if str(r['config']['booking_id'] or '') not in has_hhr_bids
-    )
+    # Events missing HHR (ended with no HHR uploaded) — now its own section
+    kpi_missing_hhr = len(missing_hhr_rows)
 
     kpis = {
         'active_events':   kpi_active_events,
@@ -5539,9 +5554,12 @@ def pickup_dashboard():
     return render_template('pickup_dashboard.html',
                            past_rows=past_rows, current_rows=current_rows,
                            future_rows=future_rows, archived_rows=archived_rows,
+                           missing_hhr_rows=missing_hhr_rows,
                            current_groups=current_groups, current_group_order=current_group_order,
                            future_groups=future_groups,   future_group_order=future_group_order,
                            past_groups=past_groups,       past_group_order=past_group_order,
+                           missing_hhr_groups=missing_hhr_groups,
+                           missing_hhr_group_order=missing_hhr_group_order,
                            today=today_str, sort_mode=sort_mode, kpis=kpis)
 
 
