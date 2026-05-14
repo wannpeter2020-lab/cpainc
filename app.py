@@ -516,8 +516,13 @@ def booking_detail(booking_id):
         comm_pct = float(booking['CommissionPercent'] or 0)
     except Exception:
         comm_pct = 0
+    pickup_configs = db.execute(
+        "SELECT id, hotel, event_name FROM pickup_config WHERE CAST(booking_id AS TEXT)=CAST(? AS TEXT) AND status='active' ORDER BY id",
+        (booking_id,)
+    ).fetchall()
     return render_template('booking_detail.html', booking=booking, pickups=pickups, checks=checks,
-        comm_pct=comm_pct, split=split, booking_contracts=booking_contracts)
+        comm_pct=comm_pct, split=split, booking_contracts=booking_contracts,
+        pickup_configs=pickup_configs)
 
 # ── Cancel Booking ────────────────────────────────────────────────────────────
 
