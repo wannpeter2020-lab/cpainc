@@ -3503,6 +3503,7 @@ def ensure_auth_tables():
     db.commit()
     _seed_users(db)
     _seed_pipeline_associates(db)
+    _seed_pickup_placeholders(db)
 
 
 def _seed_pipeline_associates(db):
@@ -3531,6 +3532,55 @@ def _seed_pipeline_associates(db):
     for bid in ('31226',):
         db.execute(f"DELETE FROM pickup_config WHERE booking_id=? {_safe_delete_where}", (bid,))
 
+    db.commit()
+
+
+def _seed_pickup_placeholders(db):
+    """Create placeholder pickup_config records for known bookings.
+    Uses INSERT OR IGNORE so existing records (with contracts/data) are never overwritten."""
+    placeholders = [
+        # (booking_id, organization, event_name, hotel)
+        # ── ASAS 2029 Montreal ───────────────────────────────────────────────
+        ('231279', 'American Dairy Science Association and the American Society of Animal Science (ADSA/ASAS)',
+         'ASAS 2029 Annual Meeting', 'InterContinental Montreal'),
+        ('231280', 'American Dairy Science Association and the American Society of Animal Science (ADSA/ASAS)',
+         'ASAS 2029 Annual Meeting', 'Hampton Inn by Hilton Montreal Downtown'),
+        # ── National Honey Board 2026 ────────────────────────────────────────
+        ('229707', 'National Honey Board',
+         'National Honey Board Annual Meeting 2026', 'Hotel Champlain Burlington, Curio Collection by Hilton'),
+        # ── IECA 2028 Louisville ─────────────────────────────────────────────
+        ('229065', 'International Erosion Control Association',
+         '2028 IECA Annual Conference', 'Omni Louisville Hotel'),
+        ('229396', 'International Erosion Control Association',
+         '2028 IECA Annual Conference', 'The Seelbach Hilton Louisville'),
+        # ── SRM 2028 Corpus Christi ──────────────────────────────────────────
+        ('230237', 'Society for Range Management',
+         '2028 SRM Annual Meeting', 'Holiday Inn Corpus Christi Downtown Marina'),
+        # ── IECA 2029 Cleveland ──────────────────────────────────────────────
+        ('230882', 'International Erosion Control Association',
+         '2029 IECA Annual Conference', 'Cleveland Marriott Downtown at Key Tower'),
+        ('230883', 'International Erosion Control Association',
+         '2029 IECA Annual Conference', 'Hilton Cleveland Downtown'),
+        ('230908', 'International Erosion Control Association',
+         '2029 IECA Annual Conference', 'Drury Plaza Hotel Cleveland'),
+        # ── ESA 2030 Salt Lake City ──────────────────────────────────────────
+        ('231211', 'Entomological Society of America (ESA)',
+         '2030 ESA Annual Meeting', 'Salt Lake Marriott Downtown at City Creek'),
+        ('231213', 'Entomological Society of America (ESA)',
+         '2030 ESA Annual Meeting', 'AC Hotel Salt Lake City Downtown'),
+        ('231267', 'Entomological Society of America (ESA)',
+         '2030 ESA Annual Meeting', 'Hyatt Regency Salt Lake City'),
+    ]
+    for booking_id, org, event_name, hotel in placeholders:
+        db.execute('''
+            INSERT OR IGNORE INTO pickup_config
+                (booking_id, organization, event_name, hotel,
+                 contracted_block, status,
+                 hotel_contacts, cc_emails, force_current, force_past,
+                 shoulder_pre, shoulder_post)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ''', (booking_id, org, event_name, hotel,
+              '{}', 'active', '[]', '[]', 0, 0, 3, 3))
     db.commit()
 
 
