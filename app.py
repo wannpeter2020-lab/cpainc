@@ -9710,6 +9710,232 @@ def rfp_hotel_proposal_download(rid, hid):
                      as_attachment=True)
 
 
+@app.route('/rfp/<int:rid>/upload-contract', methods=['POST'])
+def rfp_upload_contract(rid):
+    """Step 1 — AI-parse an uploaded hotel contract and show a review screen."""
+    import uuid, tempfile
+    from pickup_utils import parse_contract_document
+    db = get_db()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    f = request.files.get('contract_file')
+    if not f or not f.filename:
+        flash('No file selected.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    file_bytes = f.read()
+
+    # Find the selected (or best available) hotel to pre-fill contacts
+    selected_hotel = db.execute(
+        "SELECT * FROM rfp_hotel WHERE rfp_id=? AND status='selected' "
+        "ORDER BY updated_at DESC LIMIT 1", (rid,)
+    ).fetchone()
+    if not selected_hotel:
+        selected_hotel = db.execute(
+            "SELECT * FROM rfp_hotel WHERE rfp_id=? "
+            "AND status NOT IN ('declined','eliminated') "
+            "ORDER BY updated_at DESC LIMIT 1", (rid,)
+        ).fetchone()
+
+    extracted = parse_contract_document(file_bytes, filename=f.filename)
+    if extracted.get('error'):
+        flash(f'Could not parse contract: {extracted["error"]}', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+
+    # Save to temp file so confirm step doesn't need a re-upload
+    tmp_id   = str(uuid.uuid4())
+    tmp_path = os.path.join(tempfile.gettempdir(), f'rfp_contract_{tmp_id}')
+    with open(tmp_path, 'wb') as fh:
+        fh.write(file_bytes)
+
+    return render_template('rfp_contract_review.html',
+                           rfp=rfp,
+                           selected_hotel=selected_hotel,
+                           extracted=extracted,
+                           filename=f.filename,
+                           tmp_id=tmp_id)
+
+
+@app.route('/rfp/<int:rid>/upload-contract/confirm', methods=['POST'])
+def rfp_upload_contract_confirm(rid):
+    """Step 2 — save AI-extracted contract data to rfp, hotel, and pickup_config."""
+    import tempfile
+    from datetime import date as _date
+    db = get_db()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+
+    # ── Parse form ────────────────────────────────────────────────────────────
+    raw_block    = request.form.get('contracted_block', '{}')
+    block        = json.loads(raw_block)
+    rate_str     = request.form.get('contracted_rate', '').strip()
+    cutoff_str   = request.form.get('cutoff_date', '').strip()
+    atr_str      = request.form.get('attrition_pct', '').strip()
+    hotel_contact        = request.form.get('hotel_contact', '').strip() or None
+    hotel_contact_email  = request.form.get('hotel_contact_email', '').strip() or None
+    hotel_contact2       = request.form.get('hotel_contact2', '').strip() or hotel_contact
+    hotel_contact2_email = request.form.get('hotel_contact2_email', '').strip() or hotel_contact_email
+    group_contact        = request.form.get('group_contact', '').strip() or None
+    group_contact_email  = request.form.get('group_contact_email', '').strip() or None
+
+    contracted_rate = float(rate_str) if rate_str else None
+    attrition_pct   = float(atr_str)  if atr_str  else None
+
+    # ── Derive rfp-level fields from block ────────────────────────────────────
+    dates             = sorted(block.keys())
+    start_date        = dates[0]  if dates else None
+    end_date          = dates[-1] if dates else None
+    peak_rooms        = max(block.values()) if block else None
+    total_room_nights = sum(block.values()) if block else None
+
+    cutoff_days = None
+    if cutoff_str and start_date:
+        try:
+            cutoff_days = (_date.fromisoformat(start_date) -
+                           _date.fromisoformat(cutoff_str)).days
+        except Exception:
+            pass
+
+    # ── File blob from temp file written in step 1 ────────────────────────────
+    contract_filename = request.form.get('_contract_filename', '')
+    tmp_id   = request.form.get('_tmp_id', '')
+    tmp_path = os.path.join(tempfile.gettempdir(), f'rfp_contract_{tmp_id}') if tmp_id else ''
+    file_blob = None
+    if tmp_path and os.path.exists(tmp_path):
+        with open(tmp_path, 'rb') as fh:
+            file_blob = fh.read()
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+    # ── Update rfp record ─────────────────────────────────────────────────────
+    db.execute('''
+        UPDATE rfp SET
+            start_date        = COALESCE(?, start_date),
+            end_date          = COALESCE(?, end_date),
+            peak_rooms        = COALESCE(?, peak_rooms),
+            total_room_nights = COALESCE(?, total_room_nights),
+            contract_filename = ?,
+            contract_data     = ?,
+            status            = CASE WHEN status NOT IN ('contracted','dead')
+                                     THEN 'contracted' ELSE status END,
+            updated_at        = datetime('now')
+        WHERE id=?
+    ''', (start_date, end_date, peak_rooms, total_room_nights,
+          contract_filename or None, file_blob, rid))
+
+    # ── Update selected hotel record ──────────────────────────────────────────
+    selected_hotel = db.execute(
+        "SELECT * FROM rfp_hotel WHERE rfp_id=? AND status='selected' "
+        "ORDER BY updated_at DESC LIMIT 1", (rid,)
+    ).fetchone()
+    if not selected_hotel:
+        selected_hotel = db.execute(
+            "SELECT * FROM rfp_hotel WHERE rfp_id=? "
+            "AND status NOT IN ('declined','eliminated') "
+            "ORDER BY updated_at DESC LIMIT 1", (rid,)
+        ).fetchone()
+    if selected_hotel:
+        db.execute('''
+            UPDATE rfp_hotel SET
+                proposed_rate = COALESCE(?, proposed_rate),
+                attrition_pct = COALESCE(?, attrition_pct),
+                cutoff_days   = COALESCE(?, cutoff_days),
+                contact_name  = COALESCE(?, contact_name),
+                contact_email = COALESCE(?, contact_email),
+                updated_at    = datetime('now')
+            WHERE id=?
+        ''', (contracted_rate, attrition_pct, cutoff_days,
+              hotel_contact, hotel_contact_email, selected_hotel['id']))
+
+    # ── Update or create pickup_config ────────────────────────────────────────
+    pickup_updated = False
+    if block and rfp['booking_id']:
+        existing_pc = db.execute(
+            'SELECT id FROM pickup_config WHERE CAST(booking_id AS INTEGER)=CAST(? AS INTEGER)',
+            (rfp['booking_id'],)
+        ).fetchone()
+        hotel_name = selected_hotel['hotel_name'] if selected_hotel else (rfp['event_name'] or '')
+        org        = rfp['client_org'] or ''
+        event_name = rfp['event_name'] or ''
+        cutoff_iso = cutoff_str or None
+
+        if existing_pc:
+            db.execute('''
+                UPDATE pickup_config SET
+                    contracted_block     = ?,
+                    contracted_rate      = COALESCE(?, contracted_rate),
+                    cutoff_date          = COALESCE(?, cutoff_date),
+                    attrition_pct        = COALESCE(?, attrition_pct),
+                    block_is_estimated   = 0,
+                    contract_filename    = COALESCE(?, contract_filename),
+                    contract_data        = COALESCE(?, contract_data),
+                    hotel_contact        = COALESCE(?, hotel_contact),
+                    hotel_contact_email  = COALESCE(?, hotel_contact_email),
+                    hotel_contact2       = COALESCE(?, hotel_contact2),
+                    hotel_contact2_email = COALESCE(?, hotel_contact2_email),
+                    group_contact        = COALESCE(?, group_contact),
+                    group_contact_email  = COALESCE(?, group_contact_email)
+                WHERE id=?
+            ''', (json.dumps(block), contracted_rate, cutoff_iso, attrition_pct,
+                  contract_filename or None, file_blob,
+                  hotel_contact, hotel_contact_email,
+                  hotel_contact2, hotel_contact2_email,
+                  group_contact, group_contact_email,
+                  existing_pc['id']))
+            pickup_updated = True
+        else:
+            from datetime import timedelta as _td
+            cutoff_default = (
+                cutoff_iso if cutoff_iso else
+                ((_date.fromisoformat(start_date) - _td(days=30)).isoformat()
+                 if start_date else None)
+            )
+            db.execute('''
+                INSERT INTO pickup_config
+                    (booking_id, organization, event_name, hotel,
+                     contracted_block, contracted_rate, cutoff_date,
+                     attrition_pct, status, block_is_estimated,
+                     contract_filename, contract_data,
+                     hotel_contact, hotel_contact_email,
+                     hotel_contact2, hotel_contact2_email,
+                     group_contact, group_contact_email,
+                     hotel_contacts, cc_emails, force_current, force_past)
+                VALUES (?,?,?,?,?,?,?,?,'active',0,?,?,?,?,?,?,?,?,'[]','[]',0,0)
+            ''', (str(rfp['booking_id']), org, event_name, hotel_name,
+                  json.dumps(block), contracted_rate, cutoff_default,
+                  attrition_pct or 0.80,
+                  contract_filename or None, file_blob,
+                  hotel_contact, hotel_contact_email,
+                  hotel_contact2, hotel_contact2_email,
+                  group_contact, group_contact_email))
+            pickup_updated = True
+
+    db.commit()
+    msg = 'Contract saved — RFP and hotel updated.'
+    if pickup_updated:
+        msg += ' Pickup tracking updated with real block data.'
+    flash(msg, 'success')
+    return redirect(url_for('rfp_detail', rid=rid))
+
+
+@app.route('/rfp/<int:rid>/contract/download')
+def rfp_contract_download(rid):
+    import io as _io
+    db = get_db()
+    rfp = db.execute('SELECT contract_filename, contract_data FROM rfp WHERE id=?', (rid,)).fetchone()
+    if not rfp or not rfp['contract_data']:
+        flash('Contract not found.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    return send_file(_io.BytesIO(rfp['contract_data']),
+                     download_name=rfp['contract_filename'] or 'contract.pdf',
+                     as_attachment=True)
+
+
 @app.route('/rfp/<int:rid>/upload-rfp', methods=['POST'])
 def rfp_upload_document(rid):
     f = request.files.get('rfp_file')
