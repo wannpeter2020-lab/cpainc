@@ -3519,15 +3519,17 @@ def _seed_pipeline_associates(db):
             )
 
     # Remove pickup_config records that don't belong in this system
-    # (Peter Wann's FCCS accounts and any non-Kristin/Morgan orgs entered in error)
-    non_system_orgs = ('FCCS',)
-    for org in non_system_orgs:
-        db.execute(
-            "DELETE FROM pickup_config WHERE organization=? "
-            "AND id NOT IN (SELECT config_id FROM pickup_weekly) "
-            "AND id NOT IN (SELECT config_id FROM pickup_contact_log)",
-            (org,)
-        )
+    # Safe delete only — skips records that have pickup history or contact logs
+    _safe_delete_where = (
+        "AND id NOT IN (SELECT config_id FROM pickup_weekly WHERE config_id IS NOT NULL) "
+        "AND id NOT IN (SELECT config_id FROM pickup_contact_log WHERE config_id IS NOT NULL)"
+    )
+    # Non-system orgs (Peter Wann's FCCS accounts)
+    for org in ('FCCS',):
+        db.execute(f"DELETE FROM pickup_config WHERE organization=? {_safe_delete_where}", (org,))
+    # Specific booking IDs entered in error (2029 ASAS — not in pipeline, no history)
+    for bid in ('31226',):
+        db.execute(f"DELETE FROM pickup_config WHERE booking_id=? {_safe_delete_where}", (bid,))
 
     db.commit()
 
