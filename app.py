@@ -9720,6 +9720,17 @@ def rfp_upload_contract(rid):
     if not rfp:
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
+    # Save booking_id to rfp record if provided (required by modal)
+    booking_id = request.form.get('booking_id', '').strip()
+    if not booking_id:
+        flash('Booking ID is required before importing a contract.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+    if booking_id != (rfp['booking_id'] or '').strip():
+        db.execute("UPDATE rfp SET booking_id=?, updated_at=datetime('now') WHERE id=?",
+                   (booking_id, rid))
+        db.commit()
+        rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+
     f = request.files.get('contract_file')
     if not f or not f.filename:
         flash('No file selected.', 'error')

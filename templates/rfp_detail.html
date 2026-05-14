@@ -129,15 +129,11 @@
       {% else %}
       <span class="text-muted small">No contract uploaded</span>
       {% endif %}
-      <form method="post" action="{{ url_for('rfp_upload_contract', rid=rfp['id']) }}"
-            enctype="multipart/form-data" class="d-inline" id="rfpContractUploadForm">
-        <label class="btn btn-sm btn-outline-secondary mb-0" title="Upload signed contract — AI extracts block, rate, and contacts">
-          <i class="bi bi-file-earmark-arrow-up me-1"></i>{% if rfp['contract_filename'] %}Replace Contract{% else %}Upload Contract{% endif %}
-          <input type="file" name="contract_file" class="d-none"
-                 accept=".pdf,.docx,.doc"
-                 onchange="document.getElementById('rfpContractLoadingOverlay').style.display='flex'; this.closest('form').submit()">
-        </label>
-      </form>
+      <button type="button" class="btn btn-sm btn-outline-secondary"
+              data-bs-toggle="modal" data-bs-target="#contractUploadModal"
+              title="Upload signed contract — AI extracts block, rate, and contacts">
+        <i class="bi bi-file-earmark-arrow-up me-1"></i>{% if rfp['contract_filename'] %}Replace Contract{% else %}Upload Contract{% endif %}
+      </button>
     </div>
   </div>
 </div>
@@ -355,6 +351,46 @@
   </div>
 </div>
 
+<!-- ── Contract Upload Modal ─────────────────────────────────────────────── -->
+<div class="modal fade" id="contractUploadModal" tabindex="-1"
+     aria-labelledby="contractUploadModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" action="{{ url_for('rfp_upload_contract', rid=rfp['id']) }}"
+            enctype="multipart/form-data" id="rfpContractUploadForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="contractUploadModalLabel">
+            <i class="bi bi-file-earmark-arrow-up me-2"></i>Upload Contract
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Booking ID <span class="text-danger">*</span></label>
+            <input type="text" name="booking_id" id="contractBookingId" class="form-control"
+                   value="{{ rfp['booking_id'] or '' }}"
+                   placeholder="e.g. 239561" required
+                   inputmode="numeric">
+            <div class="form-text">The pipeline booking number this contract belongs to.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label fw-semibold">Contract File <span class="text-danger">*</span></label>
+            <input type="file" name="contract_file" id="contractFileInput"
+                   class="form-control" accept=".pdf,.docx,.doc" required>
+            <div class="form-text">PDF or Word (.docx) — Claude will extract the room block, rate, and contacts.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="contractUploadSubmitBtn">
+            <i class="bi bi-magic me-1"></i>Extract Contract Data
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -373,6 +409,15 @@ document.querySelectorAll('input[name="others_action"]').forEach(function(r) {
     document.getElementById('removeWarning').classList.toggle('d-none', this.value !== 'remove');
   });
 });
+
+// Contract upload modal — show loading overlay on submit
+var rfpContractForm = document.getElementById('rfpContractUploadForm');
+if (rfpContractForm) {
+  rfpContractForm.addEventListener('submit', function() {
+    var ov = document.getElementById('rfpContractLoadingOverlay');
+    if (ov) ov.style.display = 'flex';
+  });
+}
 
 // Hide contract loading overlay on back-navigation
 window.addEventListener('pageshow', function() {
