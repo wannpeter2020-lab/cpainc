@@ -3502,6 +3502,34 @@ def ensure_auth_tables():
     ''')
     db.commit()
     _seed_users(db)
+    _seed_pipeline_associates(db)
+
+
+def _seed_pipeline_associates(db):
+    """Ensure Peter and Kristin are mapped to Kristin House + Morgan Klinkradt associates."""
+    for username in ('peter', 'kristin'):
+        row = db.execute('SELECT id FROM Users WHERE username=?', (username,)).fetchone()
+        if not row:
+            continue
+        uid = row['id']
+        for assoc in ('Kristin House', 'Morgan Klinkradt'):
+            db.execute(
+                'INSERT OR IGNORE INTO UserPipelineAssociates (user_id, associate_name) VALUES (?,?)',
+                (uid, assoc)
+            )
+
+    # Remove pickup_config records that don't belong in this system
+    # (Peter Wann's FCCS accounts and any non-Kristin/Morgan orgs entered in error)
+    non_system_orgs = ('FCCS',)
+    for org in non_system_orgs:
+        db.execute(
+            "DELETE FROM pickup_config WHERE organization=? "
+            "AND id NOT IN (SELECT config_id FROM pickup_weekly) "
+            "AND id NOT IN (SELECT config_id FROM pickup_contact_log)",
+            (org,)
+        )
+
+    db.commit()
 
 
 def _hash_password(password):
