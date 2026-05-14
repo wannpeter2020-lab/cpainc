@@ -632,6 +632,92 @@ def _mmddyy_dashes_to_iso(s):
     return f'{yr}-{int(m):02d}-{int(d):02d}'
 
 
+def _ai_parse_rooming_list_vision(images, api_key):
+    """
+    Vision fallback: send rendered PDF page images to Claude and extract guest records.
+    Used when pdfplumber returns no text (scanned / image-only PDF).
+
+    Returns (guests_list, error_str) — same shape as _ai_parse_rooming_list.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        return [], 'anthropic package not installed'
+
+    rooming_prompt = (
+        "You are parsing scanned pages of a hotel group rooming list.\n"
+        "Extract every individual guest reservation visible across all the images.\n\n"
+        "Return ONLY a valid JSON array — no other text, no markdown fences, no explanation.\n"
+        "Each element must have exactly these keys:\n"
+        "  name       — guest name as it appears (e.g. \"Smith,John\" or \"John Smith\")\n"
+        "  conf_no    — reservation/confirmation number (string)\n"
+        "  arrival    — arrival date in YYYY-MM-DD format\n"
+        "  departure  — departure date in YYYY-MM-DD format\n"
+        "  nights     — integer number of nights\n"
+        "  rooms      — integer number of rooms (default 1 if not shown)\n\n"
+        "Rules:\n"
+        "- Skip header rows, page headers/footers, summary/total rows, and note lines.\n"
+        "- If 'nights' is not explicit, compute it as (departure - arrival) in days.\n"
+        "- Convert all dates to YYYY-MM-DD regardless of the source format.\n"
+        "- If a line has an obvious continuation (e.g. 'Res. Notes:'), skip it.\n"
+        "- Include every guest across all pages — do not truncate the list."
+    )
+
+    content = [{'type': 'text', 'text': rooming_prompt}]
+    for b64 in images:
+        content.append({
+            'type': 'image',
+            'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}
+        })
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model='claude-opus-4-5',
+            max_tokens=8192,
+            messages=[{'role': 'user', 'content': content}]
+        )
+        response_text = message.content[0].text.strip()
+        response_text = re.sub(r'^```[a-z]*\s*', '', response_text)
+        response_text = re.sub(r'\s*```$', '', response_text)
+
+        try:
+            guests_raw = json.loads(response_text)
+        except json.JSONDecodeError:
+            repaired = _repair_truncated_json(response_text)
+            if repaired:
+                guests_raw = json.loads(repaired)
+            else:
+                raise
+
+        result = []
+        for g in guests_raw:
+            try:
+                arr_str = str(g.get('arrival', '')).strip()
+                dep_str = str(g.get('departure', '')).strip()
+                nights  = int(g.get('nights', 0))
+                if nights <= 0:
+                    nights = (datetime.strptime(dep_str, '%Y-%m-%d') -
+                              datetime.strptime(arr_str, '%Y-%m-%d')).days
+                if nights <= 0:
+                    continue
+                result.append({
+                    'name':      str(g.get('name', '')).strip(),
+                    'conf_no':   str(g.get('conf_no', '')).strip(),
+                    'arrival':   arr_str,
+                    'departure': dep_str,
+                    'nights':    nights,
+                    'rooms':     int(g.get('rooms', 1)),
+                })
+            except Exception:
+                continue
+
+        return result, None
+
+    except Exception as e:
+        return [], str(e)
+
+
 def _ai_parse_rooming_list(all_text):
     """
     AI fallback: send raw PDF text to Claude and ask it to extract guest records.
@@ -867,10 +953,38 @@ def parse_rooming_list_pdf(file_bytes):
         ai_parsed = False
         ai_error  = None
         if not guests:
-            ai_guests, ai_error = _ai_parse_rooming_list(all_text)
-            if ai_guests:
-                guests    = ai_guests
-                ai_parsed = True
+            if not all_text.strip():
+                # Scanned / image-only PDF — use vision
+                api_key = ''
+                try:
+                    import importlib, sys as _sys
+                    if 'config' in _sys.modules:
+                        importlib.reload(_sys.modules['config'])
+                    else:
+                        import config as _cfg
+                        _sys.modules['config'] = _cfg
+                    api_key = _sys.modules['config'].ANTHROPIC_API_KEY.strip()
+                except Exception:
+                    pass
+                if not api_key:
+                    import os
+                    api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+                if api_key:
+                    images = _pdf_pages_to_images(file_bytes, max_pages=20, dpi=100)
+                    if images:
+                        ai_guests, ai_error = _ai_parse_rooming_list_vision(images, api_key)
+                        if ai_guests:
+                            guests    = ai_guests
+                            ai_parsed = True
+                    else:
+                        ai_error = 'Could not render PDF pages — pymupdf may not be installed.'
+                else:
+                    ai_error = 'Scanned PDF detected but Anthropic API key is not configured.'
+            else:
+                ai_guests, ai_error = _ai_parse_rooming_list(all_text)
+                if ai_guests:
+                    guests    = ai_guests
+                    ai_parsed = True
 
         # Compute rooms per night from arrival/departure dates
         nights_by_date = {}
