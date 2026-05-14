@@ -119,13 +119,41 @@
       {% endif %}
     </div>
     {% if extracted.contracted_block %}
-    <div class="card-footer bg-light">
-      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addNight()">
-        <i class="bi bi-plus-circle me-1"></i>Add Night
-      </button>
-      <span class="text-muted small ms-2">Add a night not listed in the amendment</span>
+    <div class="card-footer bg-light d-flex flex-wrap align-items-center gap-3">
+      <div>
+        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addNight()">
+          <i class="bi bi-plus-circle me-1"></i>Add Night
+        </button>
+        <span class="text-muted small ms-2">Add a night not listed in the amendment</span>
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox" name="replace_block" id="replaceBlockCheck"
+               value="1" onchange="toggleReplaceMode(this.checked)">
+        <label class="form-check-label fw-semibold small" for="replaceBlockCheck">
+          This is the complete new block — remove all other nights
+        </label>
+      </div>
     </div>
     {% endif %}
+  </div>
+
+  {# Dropped nights panel — shown only when replace mode is on #}
+  <div class="card mb-4 border-danger d-none" id="droppedCard" style="max-width:760px">
+    <div class="card-header bg-danger bg-opacity-10 text-danger fw-semibold">
+      <i class="bi bi-trash me-2"></i>Nights that will be removed from the block
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0">
+        <thead class="table-light">
+          <tr><th>Date</th><th>Day</th><th>Current Rooms</th><th>Action</th></tr>
+        </thead>
+        <tbody id="droppedTbody"></tbody>
+      </table>
+    </div>
+    <div class="card-footer text-muted small">
+      These nights are in the current block but not in the amendment. They will be deleted when you apply.
+      Uncheck the box above to keep them, or add them to the amendment table manually.
+    </div>
   </div>
 
   <div style="max-width:760px" class="d-flex gap-2">
@@ -248,6 +276,42 @@ function addNight() {
   }
   updateSummary();
   syncJson();
+}
+
+function toggleReplaceMode(on) {
+  const droppedCard = document.getElementById('droppedCard');
+  const droppedTbody = document.getElementById('droppedTbody');
+  if (!droppedCard || !droppedTbody) return;
+
+  if (!on) {
+    droppedCard.classList.add('d-none');
+    droppedTbody.innerHTML = '';
+    return;
+  }
+
+  // Find nights in current block that are NOT in blockChanges
+  const amendDates = new Set(Object.keys(blockChanges));
+  const droppedDates = Object.keys(CURRENT_BLOCK).filter(d => !amendDates.has(d)).sort();
+
+  if (droppedDates.length === 0) {
+    droppedCard.classList.add('d-none');
+    return;
+  }
+
+  droppedTbody.innerHTML = '';
+  droppedDates.forEach(d => {
+    const dt = new Date(d + 'T12:00:00');
+    const rooms = CURRENT_BLOCK[d];
+    const tr = document.createElement('tr');
+    tr.className = 'table-danger';
+    tr.innerHTML = `
+      <td>${d}</td>
+      <td>${DAYS[dt.getDay()]}</td>
+      <td>${rooms}</td>
+      <td><span class="badge bg-danger">Will be removed</span></td>`;
+    droppedTbody.appendChild(tr);
+  });
+  droppedCard.classList.remove('d-none');
 }
 
 renderTable();

@@ -7772,8 +7772,17 @@ def pickup_import_amendment(cid):
                     changes['cutoff_date'] = {'old': config['cutoff_date'], 'new': new_cutoff}
 
                 # Apply block changes
-                merged_block = dict(current_block)
-                block_diff = {}
+                replace_block  = request.form.get('replace_block') == '1'
+                merged_block   = dict(current_block)
+                block_diff     = {}
+
+                # If replace mode: nights in current block NOT in amendment → drop them
+                if replace_block:
+                    for d in list(current_block.keys()):
+                        if d not in block_changes:
+                            block_diff[d] = {'old': current_block[d], 'new': None}
+                            merged_block.pop(d, None)
+
                 for d, rooms in block_changes.items():
                     rooms = int(rooms)
                     old_rooms = current_block.get(d)
