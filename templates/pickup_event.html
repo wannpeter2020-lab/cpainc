@@ -174,11 +174,6 @@
     <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#contractModal">
       <i class="bi bi-file-earmark-arrow-up me-1"></i>Upload Contract
     </button>
-    {% if is_multi_hotel %}
-    <a href="{{ url_for('pickup_bulk_upload', primary_cid=primary_cid_for_report) }}" class="btn btn-sm btn-outline-primary">
-      <i class="bi bi-cloud-upload me-1"></i>Bulk Upload Contracts
-    </a>
-    {% endif %}
     {% if config['contract_data'] %}
     <a href="{{ url_for('pickup_contract_download', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-download me-1"></i>Download Contract
