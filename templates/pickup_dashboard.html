@@ -108,7 +108,14 @@
     <div class="text-muted small">{{ eff_org }}</div>
     {% endif %}
   </td>
-  <td>{{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}</td>
+  <td>
+    {{ r.config['hotel'] or r.config['bk_hotel'] or '—' }}
+    {% if r.config['contract_filename'] %}
+      <i class="bi bi-file-earmark-check text-success ms-1" title="Contract uploaded: {{ r.config['contract_filename'] }}"></i>
+    {% else %}
+      <i class="bi bi-file-earmark-x text-warning ms-1" title="No contract uploaded"></i>
+    {% endif %}
+  </td>
   <td>{{ r.event_start | us_date }}</td>
   <td>{{ r.event_end | us_date }}</td>
   <td>{{ r.config['cutoff_date'] | us_date }}</td>
