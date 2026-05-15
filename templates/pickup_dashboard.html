@@ -291,15 +291,14 @@
               <span class="badge bg-{{ grp.badge }}">{{ grp.badge_label }}</span>
             </td>
             {% if show_history %}<td></td>{% endif %}
-            <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;">
+            <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;"
+                onclick="event.stopPropagation()">
               <a href="{{ url_for('pickup_bulk_upload', primary_cid=grp.primary_cid) }}"
-                 class="btn btn-sm btn-outline-secondary me-1"
-                 onclick="event.stopPropagation()">
-                <i class="bi bi-cloud-upload me-1"></i>Bulk Upload
+                 class="btn btn-sm btn-outline-secondary me-1">
+                <i class="bi bi-cloud-upload me-1"></i>Bulk Upload Contracts
               </a>
               <a href="{{ url_for('pickup_event_report', primary_cid=grp.primary_cid) }}"
-                 class="btn btn-sm btn-outline-primary"
-                 onclick="event.stopPropagation()">
+                 class="btn btn-sm btn-outline-primary">
                 <i class="bi bi-bar-chart me-1"></i>Event Report
               </a>
             </td>
