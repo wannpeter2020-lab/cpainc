@@ -10485,7 +10485,7 @@ def rfp_import_crf_confirm(rid):
     }
 
     for idx, h in enumerate(hotels):
-        if request.form.get(f'include_{idx}') != '1':
+        if '1' not in request.form.getlist(f'include_{idx}'):
             continue
         hotel_name = (h.get('hotel_name') or '').strip()
         if not hotel_name:
