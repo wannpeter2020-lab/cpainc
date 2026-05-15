@@ -282,7 +282,7 @@ def dashboard():
     user = get_current_user()
     if not has_permission(user, 'dashboard'):
         flash('You do not have access to the Dashboard.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     from datetime import timedelta
     db      = get_db()
     today   = datetime.today().strftime('%Y-%m-%d')
@@ -430,6 +430,10 @@ def dashboard():
 
 @app.route('/')
 def index():
+    return redirect(url_for('status_board'))
+
+@app.route('/pipeline')
+def pipeline():
     user = get_current_user()
     if not has_permission(user, 'bookings_view'):
         return render_template('no_access.html', section='Bookings')
@@ -495,11 +499,11 @@ def booking_detail(booking_id):
     booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
     if not booking:
         flash('Booking not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     acct_filter = get_user_account_filter(user)
     if acct_filter is not None and booking['AccountName'] not in acct_filter:
         flash('You do not have access to this booking.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     pickups = db.execute('SELECT *, rowid FROM Pickup WHERE BookingID = ? ORDER BY rowid', (booking_id,)).fetchall()
     checks  = db.execute('SELECT * FROM ChkRegNote WHERE BookingID = ? ORDER BY DateOnCheck DESC', (booking_id,)).fetchall()
     booking_contracts = db.execute(
@@ -655,7 +659,7 @@ def booking_new():
     user = get_current_user()
     if not has_permission(user, 'bookings_edit'):
         flash('You do not have permission to add bookings.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         db = get_db()
         fields = ['BookingId','BookingName','BookingAssociate','ShareType','BookingType','BookingStatus',
@@ -688,7 +692,7 @@ def booking_edit(booking_id):
     booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
     if not booking:
         flash('Booking not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         fields = ['BookingName','BookingAssociate','ShareType','BookingType','BookingStatus','Addendum',
                   'BookedDate','StartDate','EndDate','AccountName','EventName','Customer',
@@ -715,7 +719,7 @@ def import_bookings():
     user = get_current_user()
     if not has_permission(user, 'import_bookings'):
         flash('You do not have access to this import tool.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         file = request.files.get('file')
         if not file or not file.filename:
@@ -934,7 +938,7 @@ def import_bookings():
             flash(msg, 'success')
         except Exception as e:
             flash(f'Import error: {e}', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     return render_template('import.html')
 
 # ── Import Cancelled Meetings ─────────────────────────────────────────────────
@@ -944,7 +948,7 @@ def import_cancelled():
     user = get_current_user()
     if not has_permission(user, 'import_cancelled'):
         flash('You do not have access to this import tool.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     from datetime import datetime as _dt, timedelta as _td
 
     def excel_date(v):
@@ -1077,7 +1081,7 @@ def import_cancelled():
             )
         except Exception as e:
             flash(f'Import error: {e}', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     return render_template('import_cancelled.html')
 
 # ── Import Payments ───────────────────────────────────────────────────────────
@@ -1087,7 +1091,7 @@ def import_payments():
     user = get_current_user()
     if not has_permission(user, 'import_payments'):
         flash('You do not have access to this import tool.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         file = request.files.get('file')
         if not file or not file.filename:
@@ -1215,7 +1219,7 @@ def import_voucher():
     user = get_current_user()
     if not has_permission(user, 'import_payments'):
         flash('You do not have access to this import tool.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
 
     if request.method == 'GET':
         return render_template('import_voucher.html')
@@ -1471,7 +1475,7 @@ def pickup_new(booking_id):
     booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
     if not booking:
         flash('Booking not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         actual_pickup   = request.form.get('actual_pickup', '').strip() or None
         attrition       = request.form.get('attrition', '').strip() or None
@@ -1517,7 +1521,7 @@ def pickup_edit(pickup_id):
     pickup = db.execute('SELECT *, rowid FROM Pickup WHERE rowid = ?', (pickup_id,)).fetchone()
     if not pickup:
         flash('Pickup record not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     booking_id = pickup['BookingID']
     if request.method == 'POST':
         actual_pickup   = request.form.get('actual_pickup', '').strip() or None
@@ -1575,7 +1579,7 @@ def pickup_delete(pickup_id):
         flash('Pickup record not found.', 'error')
     if booking_id:
         return redirect(url_for('booking_detail', booking_id=booking_id))
-    return redirect(url_for('index'))
+    return redirect(url_for('pipeline'))
 
 # ── Check New ─────────────────────────────────────────────────────────────────
 
@@ -1585,7 +1589,7 @@ def check_new(booking_id):
     booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
     if not booking:
         flash('Booking not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         try:
             db.execute('''INSERT INTO ChkRegNote
@@ -1617,7 +1621,7 @@ def check_edit(check_id):
     check = db.execute('SELECT * FROM ChkRegNote WHERE ChkRegID = ?', (check_id,)).fetchone()
     if not check:
         flash('Payment record not found.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     booking_id = check['BookingID']
     if request.method == 'POST':
         try:
@@ -1649,10 +1653,10 @@ def report_commission():
     who_param = request.args.get('who', 'team')
     if who_param == 'kristin' and not has_permission(user, 'reports_commission_kristin'):
         flash('You do not have access to that report.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if who_param == 'team' and not has_permission(user, 'reports_commission_team'):
         flash('You do not have access to that report.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     date_from = request.args.get('date_from', '').strip()
     date_to   = request.args.get('date_to', '').strip()
     who       = who_param
@@ -1745,7 +1749,7 @@ def report_payments():
     user = get_current_user()
     if not has_permission(user, 'reports_payments'):
         flash('You do not have access to the Payment Report.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     date_from = request.args.get('date_from', '').strip()
     date_to   = request.args.get('date_to', '').strip()
     today     = datetime.now().strftime('%Y-%m-%d')
@@ -2473,7 +2477,7 @@ def report_customer_summary():
     user = get_current_user()
     if not has_permission(user, 'reports_customer_summary'):
         flash('You do not have access to the Customer Summary report.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     export = request.args.get('export', '').lower()
     conn   = get_db()
 
@@ -2955,7 +2959,7 @@ def import_hhr():
     user = get_current_user()
     if not has_permission(user, 'import_hhr'):
         flash('You do not have access to this import tool.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'POST':
         files = request.files.getlist('files')
         if not files or not any(f.filename for f in files):
@@ -4193,7 +4197,7 @@ def inject_user():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if session.get('user_id'):
-        return redirect(url_for('index'))
+        return redirect(url_for('status_board'))
     error = None
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -4231,7 +4235,7 @@ def admin_users():
     user = get_current_user()
     if not has_permission(user, 'admin_panel'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     db = get_db()
     users = db.execute('SELECT * FROM Users ORDER BY role DESC, name').fetchall()
     all_perms_rows = db.execute('SELECT user_id, permission, enabled FROM UserPermissions').fetchall()
@@ -4360,7 +4364,7 @@ def admin_activity_log():
     user = get_current_user()
     if not user or user['role'] != 'admin':
         flash('Admin access required.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
 
     db = get_db()
 
@@ -4780,7 +4784,7 @@ def status_board():
     user = get_current_user()
     if not has_permission(user, 'pickups_payments'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
 
     db          = get_db()
     today       = datetime.today().strftime('%Y-%m-%d')
@@ -5388,7 +5392,7 @@ def pickup_fill_missing():
     user = get_current_user()
     if not has_permission(user, 'pickups_payments'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
 
     db           = get_db()
     today        = datetime.today().strftime('%Y-%m-%d')
@@ -9924,7 +9928,7 @@ def contract_templates():
     user = get_current_user()
     if not has_permission(user, 'contracts'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     db = get_db()
     templates = db.execute(
         "SELECT * FROM contract_template WHERE is_active=1 ORDER BY chain, template_name"
@@ -9941,7 +9945,7 @@ def contract_template_upload():
     user = get_current_user()
     if not has_permission(user, 'contracts'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     from pickup_utils import extract_template_metadata
     if request.method == 'GET':
         return render_template('contract_template_upload.html')
@@ -9976,7 +9980,7 @@ def contract_template_download(tid):
     user = get_current_user()
     if not has_permission(user, 'contracts'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     import io as _io
     db = get_db()
     tmpl = db.execute("SELECT * FROM contract_template WHERE id=?", (tid,)).fetchone()
@@ -9993,7 +9997,7 @@ def contract_template_delete(tid):
     user = get_current_user()
     if not has_permission(user, 'contracts'):
         flash('Access denied.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     db = get_db()
     db.execute("UPDATE contract_template SET is_active=0 WHERE id=?", (tid,))
     db.commit()
@@ -10850,7 +10854,7 @@ def _run_assistant_tool(tool_name, tool_input):
 def assistant():
     if not _ANTHROPIC_AVAILABLE:
         flash('AI Assistant is not configured (no API key).', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     if request.method == 'GET':
         return render_template('assistant.html')
 
@@ -10900,7 +10904,7 @@ def _outlook_redirect_uri():
 def outlook_status():
     if not _OUTLOOK_AVAILABLE:
         flash('Outlook connector not available.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     connected = _oc.is_connected()
     user_info = None
     if connected:
@@ -10914,7 +10918,7 @@ def outlook_status():
 @app.route('/outlook/auth')
 def outlook_auth():
     if not _OUTLOOK_AVAILABLE:
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     import urllib.parse
     try:
         from config import MS_CLIENT_ID, MS_TENANT_ID
@@ -10937,7 +10941,7 @@ def outlook_auth():
 @app.route('/outlook/callback')
 def outlook_callback():
     if not _OUTLOOK_AVAILABLE:
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     code = request.args.get('code')
     error = request.args.get('error_description') or request.args.get('error')
     if error:
@@ -11121,7 +11125,7 @@ def admin_change_log():
     user = get_current_user()
     if not user or user['role'] != 'admin':
         flash('Admin access required.', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('pipeline'))
     db = get_db()
     filter_cid  = request.args.get('cid', '').strip()
     filter_user = request.args.get('user', '').strip()
