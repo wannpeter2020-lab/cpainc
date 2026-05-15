@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Rebate Scan Results{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="{{ url_for('pickup_dashboard') }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Pickup Dashboard
+  </a>
+  <h4 class="mt-1">Contract Rebate Scan</h4>
+  <div class="text-muted small">Scanned {{ total }} stored contract{{ 's' if total != 1 else '' }}</div>
+</div>
+
+{# Summary badges #}
+<div class="d-flex gap-3 mb-4 flex-wrap">
+  <span class="badge bg-success fs-6 px-3 py-2">
+    <i class="bi bi-check-circle me-1"></i>{{ updated|length }} rebate{{ 's' if updated|length != 1 else '' }} found & saved
+  </span>
+  <span class="badge bg-secondary fs-6 px-3 py-2">
+    {{ no_rebate|length }} no rebate
+  </span>
+  {% if errors %}
+  <span class="badge bg-danger fs-6 px-3 py-2">
+    {{ errors|length }} error{{ 's' if errors|length != 1 else '' }}
+  </span>
+  {% endif %}
+</div>
+
+{% if updated %}
+<div class="card mb-4" style="max-width:760px">
+  <div class="card-header bg-success bg-opacity-10 fw-semibold text-success">
+    <i class="bi bi-check-circle-fill me-1"></i>Rebates Found & Saved
+  </div>
+  <table class="table table-sm mb-0">
+    <thead class="table-light">
+      <tr><th>Hotel</th><th>Rebate / Room / Night</th><th>Net Rate</th><th>Method</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in updated %}
+      <tr class="table-success">
+        <td>{{ r.hotel }}</td>
+        <td class="fw-semibold">${{ "%.2f"|format(r.rebate) }}</td>
+        <td>—</td>
+        <td><span class="badge bg-secondary">{{ r.method }}</span></td>
+        <td>
+          <a href="{{ url_for('pickup_event', cid=r.id) }}" class="btn btn-sm btn-outline-success">View Card</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if errors %}
+<div class="card mb-4" style="max-width:760px">
+  <div class="card-header bg-danger bg-opacity-10 fw-semibold text-danger">
+    <i class="bi bi-exclamation-triangle me-1"></i>Errors
+  </div>
+  <table class="table table-sm mb-0">
+    <thead class="table-light">
+      <tr><th>Hotel</th><th>Error</th></tr>
+    </thead>
+    <tbody>
+      {% for r in errors %}
+      <tr class="table-danger">
+        <td>{{ r.hotel }}</td>
+        <td class="small">{{ r.get('error', '—') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card mb-4" style="max-width:760px">
+  <div class="card-header fw-semibold">All Contracts Scanned</div>
+  <table class="table table-sm mb-0">
+    <thead class="table-light">
+      <tr><th>Hotel</th><th>Result</th><th>Method</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+      <tr class="{{ 'table-success' if r.status == 'updated' else ('table-danger' if r.status == 'error' else '') }}">
+        <td>{{ r.hotel }}</td>
+        <td>
+          {% if r.status == 'updated' %}
+            <span class="text-success fw-semibold">${{ "%.2f"|format(r.rebate) }}/room rebate</span>
+          {% elif r.status == 'error' %}
+            <span class="text-danger">Error: {{ r.get('error','') }}</span>
+          {% else %}
+            <span class="text-muted">No rebate</span>
+          {% endif %}
+        </td>
+        <td><span class="badge bg-secondary">{{ r.method }}</span></td>
+        <td>
+          <a href="{{ url_for('pickup_event', cid=r.id) }}" class="btn btn-sm btn-outline-secondary btn-sm">View</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<a href="{{ url_for('admin_scan_rebates') }}" class="btn btn-outline-secondary">
+  <i class="bi bi-arrow-clockwise me-1"></i>Run Scan Again
+</a>
+{% endblock %}

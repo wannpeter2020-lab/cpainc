@@ -4335,6 +4335,137 @@ def admin_reset_password(uid):
     return jsonify({'ok': True})
 
 
+@app.route('/admin/scan-rebates', methods=['GET', 'POST'])
+def admin_scan_rebates():
+    """Scan all stored contracts for rebate clauses and update pickup_config.rebate_per_room."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        flash('Admin access required.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    from pickup_utils import _extract_text_from_contract, _pdf_pages_to_images, _ai_parse_contract_vision
+    import io, re, time as _time
+
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, hotel, event_name, contract_filename, contract_data, contracted_rate, rebate_per_room "
+        "FROM pickup_config WHERE contract_data IS NOT NULL AND status='active'"
+    ).fetchall()
+
+    CONTRACT_KEYWORDS = {'rate','room','block','arrival','departure','cutoff','night','hotel',
+                         'group','suite','meeting','attrition','reservation','check','guest',
+                         'contract','agreement'}
+    REBATE_KEYWORDS   = ['rebate','commission rebate','net rate','rebate per room',
+                         'per room rebate','allowance','credit per room']
+
+    # Get API key
+    api_key = ''
+    try:
+        import importlib, sys as _sys
+        if 'config' in _sys.modules:
+            importlib.reload(_sys.modules['config'])
+        else:
+            import config as _cfg; _sys.modules['config'] = _cfg
+        api_key = _sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        import os as _os
+        api_key = _os.environ.get('ANTHROPIC_API_KEY','').strip()
+
+    results = []
+
+    for r in rows:
+        hotel   = r['hotel'] or r['event_name'] or f"id={r['id']}"
+        cid     = r['id']
+        already = r['rebate_per_room']
+        blob    = bytes(r['contract_data'])
+
+        # Extract text
+        text   = _extract_text_from_contract(blob, r['contract_filename'] or 'contract.pdf')
+        tl     = (text or '').lower()
+        words  = tl.split()
+        meaningful = len(words) >= 50 and any(k in tl for k in CONTRACT_KEYWORDS)
+
+        rebate_amount = None
+        method = ''
+
+        if meaningful:
+            if not any(kw in tl for kw in REBATE_KEYWORDS):
+                results.append({'id': cid, 'hotel': hotel, 'status': 'no_rebate',
+                                'rebate': None, 'already': already, 'method': 'text'})
+                continue
+            # Text has rebate keywords — parse with Claude text
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=api_key)
+                msg = client.messages.create(
+                    model='claude-haiku-4-5', max_tokens=200,
+                    messages=[{'role':'user','content':
+                        f"Hotel contract for {hotel} (rate: ${r['contracted_rate']}). "
+                        f"Find any per-room-per-night rebate, credit, or allowance paid back to the group. "
+                        f"Return ONLY JSON: {{\"rebate_per_room\": 10.00}} or {{\"rebate_per_room\": null}}\n\n{text[:3000]}"}])
+                raw = msg.content[0].text.strip()
+                m2 = re.search(r'\{.*?\}', raw, re.DOTALL)
+                if m2:
+                    rebate_amount = json.loads(m2.group()).get('rebate_per_room')
+                method = 'text+claude'
+            except Exception as e:
+                results.append({'id': cid, 'hotel': hotel, 'status': 'error',
+                                'rebate': None, 'already': already, 'method': 'text', 'error': str(e)})
+                continue
+        else:
+            # Image-only — use vision
+            fname = (r['contract_filename'] or '').lower()
+            if not fname.endswith('.pdf'):
+                results.append({'id': cid, 'hotel': hotel, 'status': 'no_rebate',
+                                'rebate': None, 'already': already, 'method': 'non-pdf'})
+                continue
+            try:
+                images = _pdf_pages_to_images(blob, max_pages=10, dpi=100)
+                if not images:
+                    results.append({'id': cid, 'hotel': hotel, 'status': 'error',
+                                    'rebate': None, 'already': already, 'method': 'vision', 'error': 'no images'})
+                    continue
+                import anthropic, base64
+                client = anthropic.Anthropic(api_key=api_key)
+                content = []
+                for img_b64 in images:
+                    content.append({'type':'image','source':{'type':'base64','media_type':'image/jpeg','data':img_b64}})
+                content.append({'type':'text','text':
+                    f"This is a hotel contract for {hotel} (contracted rate: ${r['contracted_rate']}). "
+                    f"Look for any rebate, credit, or allowance per room per night paid back to the group/client. "
+                    f"Return ONLY JSON: {{\"rebate_per_room\": 10.00}} or {{\"rebate_per_room\": null}}"})
+                msg = client.messages.create(model='claude-opus-4-5', max_tokens=200, messages=[{'role':'user','content':content}])
+                raw = msg.content[0].text.strip()
+                m2 = re.search(r'\{.*?\}', raw, re.DOTALL)
+                if m2:
+                    rebate_amount = json.loads(m2.group()).get('rebate_per_room')
+                method = 'vision'
+                _time.sleep(1)
+            except Exception as e:
+                results.append({'id': cid, 'hotel': hotel, 'status': 'error',
+                                'rebate': None, 'already': already, 'method': 'vision', 'error': str(e)})
+                continue
+
+        if rebate_amount:
+            db.execute("UPDATE pickup_config SET rebate_per_room=? WHERE id=?", (rebate_amount, cid))
+            db.commit()
+            results.append({'id': cid, 'hotel': hotel, 'status': 'updated',
+                            'rebate': rebate_amount, 'already': already, 'method': method})
+        else:
+            results.append({'id': cid, 'hotel': hotel, 'status': 'no_rebate',
+                            'rebate': None, 'already': already, 'method': method})
+
+    updated  = [r for r in results if r['status'] == 'updated']
+    no_rebate= [r for r in results if r['status'] == 'no_rebate']
+    errors   = [r for r in results if r['status'] == 'error']
+    return render_template('admin_scan_rebates.html',
+                           results=results, updated=updated,
+                           no_rebate=no_rebate, errors=errors,
+                           total=len(rows))
+
+
 @app.route('/admin/download-db')
 def admin_download_db():
     """Stream a consistent snapshot of the live SQLite database (admin only)."""
