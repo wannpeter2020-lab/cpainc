@@ -28,6 +28,12 @@
           <i class="bi bi-archive me-1"></i>Archive
         </button>
       </form>
+      <form method="post" action="{{ url_for('pickup_cancel_meeting', cid=config['id']) }}"
+            onsubmit="return confirm('Cancel this meeting?\n\nThis will mark the booking as Cancelled in the pipeline and archive this pickup card.\n\nThis cannot be undone.')">
+        <button class="btn btn-sm btn-outline-danger">
+          <i class="bi bi-x-circle me-1"></i>Cancel Meeting
+        </button>
+      </form>
       {% endif %}
     </div>
   </div>

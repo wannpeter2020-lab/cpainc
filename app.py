@@ -10018,6 +10018,37 @@ def pickup_archive(cid):
     return redirect(url_for('pickup_dashboard'))
 
 
+@app.route('/pickup/<int:cid>/cancel-meeting', methods=['POST'])
+def pickup_cancel_meeting(cid):
+    import datetime as _dt
+    db = get_db()
+    config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+    # Cancel the linked pipeline booking
+    if config['booking_id']:
+        db.execute(
+            "UPDATE ReportPipeline SET BookingStatus='Cancelled' WHERE CAST(BookingId AS TEXT)=CAST(? AS TEXT)",
+            (config['booking_id'],)
+        )
+        db.execute(
+            "UPDATE ChkRegNote SET Cancelled=1 WHERE BookingID=? AND (Cancelled IS NULL OR Cancelled=0)",
+            (config['booking_id'],)
+        )
+    # Archive the pickup card with a cancellation note
+    cancel_note = f"CANCELLED — {_dt.date.today().strftime('%Y-%m-%d')}"
+    existing = (config['notes'] or '').strip()
+    new_notes = cancel_note + ('\n' + existing if existing else '')
+    db.execute(
+        "UPDATE pickup_config SET status='archived', notes=? WHERE id=?",
+        (new_notes, cid)
+    )
+    db.commit()
+    flash('Meeting cancelled and pickup card archived.', 'success')
+    return redirect(url_for('pickup_dashboard'))
+
+
 @app.route('/pickup/<int:cid>/unarchive', methods=['POST'])
 def pickup_unarchive(cid):
     db = get_db()
