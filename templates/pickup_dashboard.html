@@ -275,6 +275,10 @@
           {# ── Render group header + collapsible hotel rows ── #}
           {% set rendered_keys.keys = rendered_keys.keys + [ekey] %}
           {% set grp = groups[ekey] %}
+          {# Count how many hotels in this group have a contract uploaded #}
+          {% set _ctr = namespace(n=0) %}
+          {% for hr in grp.hotels %}{% if hr.config['contract_filename'] %}{% set _ctr.n = _ctr.n + 1 %}{% endif %}{% endfor %}
+          {% set all_contracts_uploaded = (_ctr.n == grp.hotels|length) %}
           {# Group header row #}
           <tr class="table-primary">
             <td colspan="2" style="cursor:pointer"
@@ -299,10 +303,16 @@
             </td>
             {% if show_history %}<td></td>{% endif %}
             <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;">
-              <a href="{{ url_for('pickup_bulk_upload', primary_cid=grp.primary_cid) }}"
-                 class="btn btn-sm btn-outline-secondary me-1">
-                <i class="bi bi-cloud-upload me-1"></i>Bulk Upload Contracts
-              </a>
+              {% if all_contracts_uploaded %}
+                <span class="text-success small fw-semibold me-2">
+                  <i class="bi bi-file-earmark-check-fill me-1"></i>All Contracts Uploaded
+                </span>
+              {% else %}
+                <a href="{{ url_for('pickup_bulk_upload', primary_cid=grp.primary_cid) }}"
+                   class="btn btn-sm btn-outline-secondary me-1">
+                  <i class="bi bi-cloud-upload me-1"></i>Bulk Upload Contracts
+                </a>
+              {% endif %}
               <a href="{{ url_for('pickup_event_report', primary_cid=grp.primary_cid) }}"
                  class="btn btn-sm btn-outline-primary">
                 <i class="bi bi-bar-chart me-1"></i>Event Report
