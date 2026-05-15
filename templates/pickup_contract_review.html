@@ -23,12 +23,23 @@
 
   {# ── Room Block Fields ── #}
   <div class="row g-3 mb-4" style="max-width:720px">
-    <div class="col-md-4">
+    <div class="col-md-3">
       <label class="form-label fw-semibold">Contracted Rate ($)</label>
       <input type="number" step="0.01" name="contracted_rate" class="form-control"
              value="{{ extracted.contracted_rate or config['contracted_rate'] or '' }}">
     </div>
-    <div class="col-md-4">
+    <div class="col-md-2">
+      <label class="form-label fw-semibold">Rebate ($/room)</label>
+      <input type="number" step="0.01" min="0" name="rebate_per_room" class="form-control"
+             value="{{ extracted.rebate_per_room or config['rebate_per_room'] or '' }}"
+             placeholder="0.00">
+      {% if extracted.rebate_per_room %}
+      <div class="form-text text-warning">
+        <i class="bi bi-arrow-right-circle me-1"></i>${{ "%.2f"|format(extracted.rebate_per_room) }} rebate found
+      </div>
+      {% endif %}
+    </div>
+    <div class="col-md-3">
       <label class="form-label fw-semibold">Cut-off Date</label>
       <input type="date" name="cutoff_date" class="form-control"
              value="{{ extracted.cutoff_date or config['cutoff_date'] or '' }}">

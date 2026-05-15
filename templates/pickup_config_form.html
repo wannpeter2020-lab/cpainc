@@ -71,8 +71,8 @@
                  value="{{ pipeline_rate if pipeline_rate else (config['contracted_rate'] if config and config['contracted_rate'] else '') }}">
         </div>
         {% if pipeline_rate %}
-        <div class="form-text text-success">
-          <i class="bi bi-check-circle me-1"></i>Pulled from Booking #{{ config['booking_id'] if config else '' }} in pipeline
+        <div class="form-text text-warning">
+          <i class="bi bi-info-circle me-1"></i>This is a blended rate from the CD Office — enter the actual contracted rate from the contract
         </div>
         {% else %}
         <div class="form-text" id="rateNote"></div>

@@ -3210,6 +3210,9 @@ Return ONLY a valid JSON object — no markdown fences, no explanation, nothing 
 
 The JSON object must have exactly these keys:
   contracted_rate       — nightly room rate as a number (e.g. 219.00), or null if not found
+  rebate_per_room       — per-room per-night rebate/credit/allowance paid back to the group
+                          (e.g. if contract says "$10 rebate per room per night", return 10.00),
+                          or null if no rebate clause exists
   cutoff_date           — room block cutoff/release date in YYYY-MM-DD format, or null
   attrition_pct         — attrition percentage as a decimal 0–1 (e.g. 0.80 for 80%), or null
   hotel                 — hotel name as it appears in the contract, or null
@@ -3230,6 +3233,8 @@ Rules:
 - Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
 - Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
 - Group contact is the client or meeting planner who signed or is listed as the customer.
+- rebate_per_room: look for language like "rebate", "commission rebate", "credit per room",
+  "net rate", "$X per room per night rebate/allowance/credit". Return the dollar amount only.
 - If a field genuinely cannot be found, use null (not empty string, not 0)."""
 
     content = [{'type': 'text', 'text': contract_extraction_prompt}]
@@ -3282,6 +3287,14 @@ Rules:
                 data['contracted_rate'] = round(float(rate), 2)
             except Exception:
                 data['contracted_rate'] = None
+
+        # Normalise rebate
+        rebate = data.get('rebate_per_room')
+        if rebate is not None:
+            try:
+                data['rebate_per_room'] = round(float(rebate), 2)
+            except Exception:
+                data['rebate_per_room'] = None
 
         data.setdefault('error', None)
         return data
@@ -3375,6 +3388,9 @@ Return ONLY a valid JSON object — no markdown fences, no explanation, nothing 
 
 The JSON object must have exactly these keys:
   contracted_rate       — nightly room rate as a number (e.g. 219.00), or null if not found
+  rebate_per_room       — per-room per-night rebate/credit/allowance paid back to the group
+                          (e.g. if contract says "$10 rebate per room per night", return 10.00),
+                          or null if no rebate clause exists
   cutoff_date           — room block cutoff/release date in YYYY-MM-DD format, or null
   attrition_pct         — attrition percentage as a decimal 0–1 (e.g. 0.80 for 80%), or null
   hotel                 — hotel name as it appears in the contract, or null
@@ -3395,6 +3411,8 @@ Rules:
 - Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
 - Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
 - Group contact is the client or meeting planner who signed or is listed as the customer.
+- rebate_per_room: look for language like "rebate", "commission rebate", "credit per room",
+  "net rate", "$X per room per night rebate/allowance/credit". Return the dollar amount only.
 - If a field genuinely cannot be found, use null (not empty string, not 0).
 
 Contract text:
@@ -3445,6 +3463,14 @@ Contract text:
                 data['contracted_rate'] = round(float(rate), 2)
             except Exception:
                 data['contracted_rate'] = None
+
+        # Normalise rebate
+        rebate = data.get('rebate_per_room')
+        if rebate is not None:
+            try:
+                data['rebate_per_room'] = round(float(rebate), 2)
+            except Exception:
+                data['rebate_per_room'] = None
 
         data.setdefault('error', None)
         return data

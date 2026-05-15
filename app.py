@@ -8031,11 +8031,13 @@ def pickup_upload_contract(cid):
             try:
                 raw_block = request.form.get('contracted_block', '{}')
                 block     = json.loads(raw_block)
-                rate_str  = request.form.get('contracted_rate', '').strip()
-                cutoff    = request.form.get('cutoff_date', '').strip() or None
-                atr_str   = request.form.get('attrition_pct', '').strip()
-                rate      = float(rate_str) if rate_str else config['contracted_rate']
-                atr       = float(atr_str)  if atr_str  else config['attrition_pct']
+                rate_str   = request.form.get('contracted_rate', '').strip()
+                cutoff     = request.form.get('cutoff_date', '').strip() or None
+                atr_str    = request.form.get('attrition_pct', '').strip()
+                rebate_str = request.form.get('rebate_per_room', '').strip()
+                rate       = float(rate_str)   if rate_str   else config['contracted_rate']
+                atr        = float(atr_str)    if atr_str    else config['attrition_pct']
+                rebate     = float(rebate_str) if rebate_str else None
                 hotel_contact       = request.form.get('hotel_contact', '').strip() or None
                 hotel_contact_email = request.form.get('hotel_contact_email', '').strip() or None
                 # Secondary hotel contact — defaults to same as primary (the sales person)
@@ -8053,6 +8055,7 @@ def pickup_upload_contract(cid):
                     UPDATE pickup_config
                     SET contracted_block     = ?,
                         contracted_rate      = ?,
+                        rebate_per_room      = COALESCE(?, rebate_per_room),
                         cutoff_date          = ?,
                         attrition_pct        = ?,
                         block_is_estimated   = 0,
@@ -8065,7 +8068,7 @@ def pickup_upload_contract(cid):
                         group_contact        = COALESCE(?, group_contact),
                         group_contact_email  = COALESCE(?, group_contact_email)
                     WHERE id = ?
-                ''', (json.dumps(block), rate, cutoff, atr,
+                ''', (json.dumps(block), rate, rebate, cutoff, atr,
                       contract_filename or None, file_blob,
                       hotel_contact, hotel_contact_email,
                       hotel_contact2, hotel_contact2_email,
