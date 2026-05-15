@@ -3591,16 +3591,55 @@ def _seed_pickup_placeholders(db):
          '2030 ESA Annual Meeting', 'Hyatt Regency Salt Lake City'),
     ]
     for booking_id, org, event_name, hotel in placeholders:
-        db.execute('''
-            INSERT OR IGNORE INTO pickup_config
-                (booking_id, organization, event_name, hotel,
-                 contracted_block, status,
-                 hotel_contacts, cc_emails, force_current, force_past,
-                 shoulder_pre, shoulder_post)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        ''', (booking_id, org, event_name, hotel,
-              '{}', 'active', '[]', '[]', 0, 0, 3, 3))
+        exists = db.execute(
+            'SELECT 1 FROM pickup_config WHERE booking_id=? AND hotel=?',
+            (booking_id, hotel)
+        ).fetchone()
+        if not exists:
+            db.execute('''
+                INSERT INTO pickup_config
+                    (booking_id, organization, event_name, hotel,
+                     contracted_block, status,
+                     hotel_contacts, cc_emails, force_current, force_past,
+                     shoulder_pre, shoulder_post)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ''', (booking_id, org, event_name, hotel,
+                  '{}', 'active', '[]', '[]', 0, 0, 3, 3))
     db.commit()
+    # ── Remove duplicate (booking_id, hotel) rows created by prior bug ──
+    # Keep the row with the most data (non-empty block, or rate, or lowest id).
+    # Safe: never deletes rows that have pickup history or contact logs.
+    dupes = db.execute('''
+        SELECT booking_id, hotel, COUNT(*) AS cnt
+        FROM pickup_config
+        WHERE booking_id IS NOT NULL
+        GROUP BY booking_id, hotel
+        HAVING COUNT(*) > 1
+    ''').fetchall()
+    deleted = 0
+    for d in dupes:
+        rows = db.execute('''
+            SELECT id,
+                   CASE WHEN contracted_block IS NOT NULL AND contracted_block NOT IN ('{}','')
+                        THEN 1 ELSE 0 END AS has_block,
+                   CASE WHEN contracted_rate IS NOT NULL THEN 1 ELSE 0 END AS has_rate
+            FROM pickup_config
+            WHERE booking_id=? AND hotel=?
+            ORDER BY has_block DESC, has_rate DESC, id ASC
+        ''', (d['booking_id'], d['hotel'])).fetchall()
+        # Keep the first (best) row, delete the rest if they have no history
+        keep_id = rows[0]['id']
+        for r in rows[1:]:
+            has_history = db.execute(
+                'SELECT 1 FROM pickup_weekly WHERE config_id=? UNION '
+                'SELECT 1 FROM pickup_contact_log WHERE config_id=?',
+                (r['id'], r['id'])
+            ).fetchone()
+            if not has_history:
+                db.execute('DELETE FROM pickup_config WHERE id=?', (r['id'],))
+                deleted += 1
+    if deleted:
+        db.commit()
 
 
 def _hash_password(password):
@@ -5058,6 +5097,7 @@ def create_pickup_configs_from_pipeline(conn=None):
           )
     ''', (today,)).fetchall()
     created = 0
+    seen_bids = set()  # guard against duplicate booking_ids in ReportPipeline
     for r in rows:
         try:
             start_str = (r['start_date'] or '')[:10]
@@ -5080,6 +5120,9 @@ def create_pickup_configs_from_pipeline(conn=None):
             event_name = r['event_name'] or r['booking_name'] or org
             hotel      = r['hotel'] or ''
             booking_id = str(r['booking_id']).split('.')[0]
+            if booking_id in seen_bids:
+                continue
+            seen_bids.add(booking_id)
             conn.execute('''
                 INSERT INTO pickup_config
                     (booking_id, organization, event_name, hotel, contracted_block,
