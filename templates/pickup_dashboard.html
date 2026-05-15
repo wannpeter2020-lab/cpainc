@@ -591,13 +591,13 @@ document.querySelectorAll('[data-bs-toggle="collapse"]').forEach(function(btn) {
 });
 
 // ── Group chevron toggle ───────────────────────────────────────────────────────
-document.querySelectorAll('tr[data-bs-toggle="collapse"]').forEach(function(tr) {
-  const targetSel = tr.dataset.bsTarget;
+document.querySelectorAll('td[data-bs-toggle="collapse"]').forEach(function(td) {
+  const targetSel = td.dataset.bsTarget;
   if (!targetSel) return;
   const target = document.querySelector(targetSel);
   if (!target) return;
-  // Find the chevron icon inside this tr
-  const chevron = tr.querySelector('.group-chevron');
+  // Find the chevron icon inside the parent tr
+  const chevron = td.closest('tr').querySelector('.group-chevron');
   target.addEventListener('show.bs.collapse', function() {
     if (chevron) chevron.className = 'bi bi-chevron-down me-1 group-chevron';
   });
