@@ -1014,6 +1014,24 @@ def import_cancelled():
 
             db = get_db()
             updated, inserted, skipped = 0, 0, 0
+            pickups_archived = 0
+            import datetime as _dt
+            cancel_note = f"CANCELLED — imported {_dt.date.today().strftime('%Y-%m-%d')}"
+
+            def archive_pickup_cards(bid):
+                nonlocal pickups_archived
+                cards = db.execute(
+                    "SELECT id, notes FROM pickup_config WHERE CAST(booking_id AS TEXT)=CAST(? AS TEXT) AND status != 'archived'",
+                    (bid,)
+                ).fetchall()
+                for card in cards:
+                    existing_notes = (card['notes'] or '').strip()
+                    new_notes = cancel_note + ('\n' + existing_notes if existing_notes else '')
+                    db.execute(
+                        "UPDATE pickup_config SET status='archived', notes=? WHERE id=?",
+                        (new_notes, card['id'])
+                    )
+                    pickups_archived += len(cards)
 
             for _, row in df.iterrows():
                 bid = str(row.get('Booking Id', '')).strip().split('.')[0]
@@ -1037,6 +1055,7 @@ def import_cancelled():
                         'UPDATE ChkRegNote SET Cancelled = 1 WHERE BookingID = ? AND (Cancelled IS NULL OR Cancelled = 0)',
                         (bid,)
                     )
+                    archive_pickup_cards(bid)
                     updated += 1
                 else:
                     db.execute('''INSERT INTO ReportPipeline
@@ -1079,12 +1098,14 @@ def import_cancelled():
                         clean(row.get('Commission Percent')),
                         clean(row.get('USD Commissionable Amount'), True),
                     ))
+                    archive_pickup_cards(bid)
                     inserted += 1
 
             db.commit()
+            pickup_msg = f', {pickups_archived} pickup card{"s" if pickups_archived != 1 else ""} archived' if pickups_archived else ''
             flash(
                 f'Cancelled import complete: {updated} updated to Cancelled, '
-                f'{inserted} new bookings added, {skipped} already Cancelled (skipped).',
+                f'{inserted} new bookings added, {skipped} already Cancelled (skipped){pickup_msg}.',
                 'success'
             )
         except Exception as e:
