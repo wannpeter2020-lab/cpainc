@@ -3507,12 +3507,15 @@ def parse_contract_document(file_bytes, filename=''):
 
     # Treat as image-only if text is empty, too short, or contains no contract keywords
     # (some PDFs only extract e-signature boilerplate like Sertifi overlay text)
+    # Use whole-word matching to avoid false positives like "millenniumhotels.com"
+    # containing "hotel" as a substring.
     _CONTRACT_KEYWORDS = {'rate', 'room', 'block', 'arrival', 'departure', 'cutoff',
                           'night', 'hotel', 'group', 'suite', 'meeting', 'attrition',
                           'reservation', 'check', 'guest', 'contract', 'agreement'}
+    import re as _re_kw
     text_lower = (text or '').lower()
     text_words = text_lower.split()
-    has_keywords = any(kw in text_lower for kw in _CONTRACT_KEYWORDS)
+    has_keywords = any(_re_kw.search(r'\b' + kw + r'\b', text_lower) for kw in _CONTRACT_KEYWORDS)
     text_meaningful = text and len(text_words) >= 50 and has_keywords
     if not text_meaningful:
         # Scanned / image-only PDF — fall back to vision-based extraction
@@ -3741,12 +3744,15 @@ def parse_amendment_document(file_bytes, filename=''):
 
     # Treat as image-only if text is empty, too short, or contains no contract keywords
     # (some PDFs only extract e-signature boilerplate like Sertifi overlay text)
+    # Use whole-word matching to avoid false positives like "millenniumhotels.com"
+    # containing "hotel" as a substring.
     _CONTRACT_KEYWORDS = {'rate', 'room', 'block', 'arrival', 'departure', 'cutoff',
                           'night', 'hotel', 'group', 'suite', 'meeting', 'attrition',
                           'reservation', 'check', 'guest', 'contract', 'agreement'}
+    import re as _re_kw
     text_lower = (text or '').lower()
     text_words = text_lower.split()
-    has_keywords = any(kw in text_lower for kw in _CONTRACT_KEYWORDS)
+    has_keywords = any(_re_kw.search(r'\b' + kw + r'\b', text_lower) for kw in _CONTRACT_KEYWORDS)
     text_meaningful = text and len(text_words) >= 50 and has_keywords
     if not text_meaningful:
         if fname.endswith('.pdf'):
