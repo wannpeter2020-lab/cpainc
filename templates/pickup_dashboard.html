@@ -269,9 +269,9 @@
           {% set rendered_keys.keys = rendered_keys.keys + [ekey] %}
           {% set grp = groups[ekey] %}
           {# Group header row #}
-          <tr class="table-primary" style="cursor:pointer"
-              data-bs-toggle="collapse" data-bs-target="#group-{{ grp.safe_id }}-{{ table_id }}">
-            <td colspan="2">
+          <tr class="table-primary">
+            <td colspan="2" style="cursor:pointer"
+                data-bs-toggle="collapse" data-bs-target="#group-{{ grp.safe_id }}-{{ table_id }}">
               <i class="bi bi-chevron-down me-1 group-chevron" id="chev-{{ grp.safe_id }}-{{ table_id }}"></i>
               <strong>{{ grp.event_name }}</strong>
               <span class="text-muted small ms-2">{{ grp.organization }}</span>
@@ -291,8 +291,7 @@
               <span class="badge bg-{{ grp.badge }}">{{ grp.badge_label }}</span>
             </td>
             {% if show_history %}<td></td>{% endif %}
-            <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;"
-                onclick="event.stopPropagation()">
+            <td style="position:sticky;right:0;background:#cfe2ff;z-index:1;white-space:nowrap;">
               <a href="{{ url_for('pickup_bulk_upload', primary_cid=grp.primary_cid) }}"
                  class="btn btn-sm btn-outline-secondary me-1">
                 <i class="bi bi-cloud-upload me-1"></i>Bulk Upload Contracts
