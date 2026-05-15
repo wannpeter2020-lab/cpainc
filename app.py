@@ -983,15 +983,23 @@ def import_cancelled():
         try:
             df = pd.read_excel(tmp_path, engine='xlrd' if ext == 'xls' else 'openpyxl', header=None)
             header_row = None
+            bid_col = None
             for i, row in df.iterrows():
-                if any(str(v).strip() == 'Booking Id' for v in row.values):
-                    header_row = i
+                for v in row.values:
+                    if str(v).strip().lower() == 'booking id':
+                        header_row = i
+                        bid_col = str(v).strip()
+                        break
+                if header_row is not None:
                     break
             if header_row is None:
-                flash('Could not find header row with "Booking Id" in the file.', 'error')
+                flash('Could not find header row with "Booking ID" in the file.', 'error')
                 return redirect(url_for('import_cancelled'))
             df.columns = df.iloc[header_row]
             df = df.iloc[header_row + 1:].reset_index(drop=True)
+            # Normalise column name to 'Booking Id' regardless of capitalisation
+            col_map = {c: 'Booking Id' for c in df.columns if str(c).strip().lower() == 'booking id'}
+            df = df.rename(columns=col_map)
             df = df.dropna(subset=['Booking Id'])
             df['Booking Id'] = df['Booking Id'].astype(str).str.strip()
             df = df[df['Booking Id'] != '']
