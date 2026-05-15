@@ -3592,6 +3592,8 @@ def _seed_pickup_placeholders(db):
         # ── Geosynthetics 2027 Reno ──────────────────────────────────────────
         ('211781', 'Advanced Textiles Association (Former IFAI)',
          'Geosynthetics Conference 2027', 'Atlantis Casino Resort Spa - Reno'),
+        ('211782', 'Advanced Textiles Association (Former IFAI)',
+         'Geosynthetics Conference 2027', 'Peppermill Resort Spa Casino'),
     ]
     for booking_id, org, event_name, hotel in placeholders:
         exists = db.execute(
