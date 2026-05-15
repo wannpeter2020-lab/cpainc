@@ -3518,6 +3518,18 @@ def ensure_auth_tables():
             changes_json  TEXT DEFAULT '{}',
             applied       INTEGER DEFAULT 1
         );
+        CREATE TABLE IF NOT EXISTS pickup_bulk_pending (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id      TEXT NOT NULL,
+            config_id     INTEGER NOT NULL,
+            hotel         TEXT,
+            filename      TEXT,
+            extracted_json TEXT,
+            contract_data  BLOB,
+            status        TEXT DEFAULT 'ok',
+            error_msg     TEXT,
+            created_at    TEXT DEFAULT (datetime('now'))
+        );
     ''')
     db.commit()
     _seed_users(db)
@@ -7958,6 +7970,188 @@ def pickup_contract_download(cid):
     buf = io.BytesIO(row['contract_data'])
     return send_file(buf, as_attachment=True,
                      download_name=row['contract_filename'] or f'contract_{cid}.pdf')
+
+
+@app.route('/pickup/bulk-upload/<int:primary_cid>', methods=['GET', 'POST'])
+def pickup_bulk_upload(primary_cid):
+    """Bulk contract upload for multi-hotel events."""
+    import uuid
+    from pickup_utils import parse_contract_document
+    db = get_db()
+    primary = db.execute("SELECT * FROM pickup_config WHERE id=?", (primary_cid,)).fetchone()
+    if not primary:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    event_name = primary['event_name'] or primary['organization']
+
+    # All siblings (same event_name, active)
+    siblings = db.execute(
+        """SELECT id, hotel, contract_filename FROM pickup_config
+           WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active'
+           ORDER BY hotel""",
+        (event_name,)
+    ).fetchall()
+
+    if request.method == 'POST':
+        batch_id = uuid.uuid4().hex
+        for sib in siblings:
+            cid = sib['id']
+            f = request.files.get(f'file_{cid}')
+            if not f or not f.filename:
+                continue
+            file_bytes = f.read()
+            extracted = parse_contract_document(file_bytes, filename=f.filename)
+            if extracted.get('error'):
+                db.execute(
+                    """INSERT INTO pickup_bulk_pending
+                       (batch_id, config_id, hotel, filename, status, error_msg)
+                       VALUES (?,?,?,?,?,?)""",
+                    (batch_id, cid, sib['hotel'], f.filename, 'failed', extracted['error'])
+                )
+            else:
+                db.execute(
+                    """INSERT INTO pickup_bulk_pending
+                       (batch_id, config_id, hotel, filename, extracted_json, contract_data, status)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (batch_id, cid, sib['hotel'], f.filename,
+                     json.dumps(extracted), file_bytes, 'ok')
+                )
+        db.commit()
+        return redirect(url_for('pickup_bulk_review', batch_id=batch_id))
+
+    return render_template('pickup_bulk_upload.html',
+                           primary=primary,
+                           event_name=event_name,
+                           siblings=siblings,
+                           primary_cid=primary_cid)
+
+
+@app.route('/pickup/bulk-review')
+def pickup_bulk_review():
+    """Review extracted contracts from a bulk upload batch."""
+    batch_id = request.args.get('batch_id', '')
+    if not batch_id:
+        flash('No batch ID provided.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM pickup_bulk_pending WHERE batch_id=? ORDER BY hotel",
+        (batch_id,)
+    ).fetchall()
+
+    if not rows:
+        flash('Batch not found or already processed.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    ok_items = []
+    failed_items = []
+    primary_cid = None
+
+    for row in rows:
+        config = db.execute("SELECT * FROM pickup_config WHERE id=?", (row['config_id'],)).fetchone()
+        item = dict(row)
+        item['config'] = config
+        if row['status'] == 'ok':
+            item['extracted'] = json.loads(row['extracted_json'] or '{}')
+            ok_items.append(item)
+        else:
+            failed_items.append(item)
+        if primary_cid is None and config:
+            # Find the primary cid for the event
+            event_name = config['event_name'] or config['organization']
+            pc = db.execute(
+                """SELECT MIN(id) as pid FROM pickup_config
+                   WHERE LOWER(TRIM(event_name))=LOWER(TRIM(?)) AND status='active'""",
+                (event_name,)
+            ).fetchone()
+            primary_cid = pc['pid'] if pc else config['id']
+
+    # Determine event_name from first row
+    event_name = ''
+    if rows:
+        first_config = db.execute("SELECT * FROM pickup_config WHERE id=?", (rows[0]['config_id'],)).fetchone()
+        if first_config:
+            event_name = first_config['event_name'] or first_config['organization']
+
+    return render_template('pickup_bulk_review.html',
+                           batch_id=batch_id,
+                           event_name=event_name,
+                           ok_items=ok_items,
+                           failed_items=failed_items,
+                           primary_cid=primary_cid)
+
+
+@app.route('/pickup/bulk-confirm', methods=['POST'])
+def pickup_bulk_confirm():
+    """Confirm and save all bulk-uploaded contracts."""
+    db = get_db()
+    batch_id = request.form.get('batch_id', '')
+    primary_cid = request.form.get('primary_cid', '')
+
+    if not batch_id:
+        flash('Missing batch ID.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    rows = db.execute(
+        "SELECT * FROM pickup_bulk_pending WHERE batch_id=? AND status='ok'",
+        (batch_id,)
+    ).fetchall()
+
+    saved_count = 0
+    for row in rows:
+        pending_id = row['id']
+        # Skip if checkbox checked
+        if request.form.get(f'skip_{pending_id}'):
+            continue
+
+        try:
+            extracted = json.loads(row['extracted_json'] or '{}')
+
+            rate_str = request.form.get(f'rate_{pending_id}', '').strip()
+            cutoff   = request.form.get(f'cutoff_{pending_id}', '').strip() or None
+            block_raw = request.form.get(f'block_json_{pending_id}', '{}')
+            block    = json.loads(block_raw)
+
+            rate = float(rate_str) if rate_str else extracted.get('contracted_rate') or None
+
+            hotel_contact       = request.form.get(f'hotel_contact_{pending_id}', '').strip() or None
+            hotel_contact_email = request.form.get(f'hotel_contact_email_{pending_id}', '').strip() or None
+            group_contact       = request.form.get(f'group_contact_{pending_id}', '').strip() or None
+            group_contact_email = request.form.get(f'group_contact_email_{pending_id}', '').strip() or None
+
+            db.execute('''
+                UPDATE pickup_config SET
+                    contracted_block      = ?,
+                    contracted_rate       = ?,
+                    cutoff_date           = ?,
+                    attrition_pct         = 0.8,
+                    block_is_estimated    = 0,
+                    contract_filename     = ?,
+                    contract_data         = ?,
+                    hotel_contact         = COALESCE(?, hotel_contact),
+                    hotel_contact_email   = COALESCE(?, hotel_contact_email),
+                    group_contact         = COALESCE(?, group_contact),
+                    group_contact_email   = COALESCE(?, group_contact_email)
+                WHERE id = ?
+            ''', (json.dumps(block), rate, cutoff,
+                  row['filename'], row['contract_data'],
+                  hotel_contact, hotel_contact_email,
+                  group_contact, group_contact_email,
+                  row['config_id']))
+            saved_count += 1
+        except Exception as e:
+            flash(f'Error saving contract for {row["hotel"]}: {e}', 'error')
+
+    # Clean up pending rows
+    db.execute("DELETE FROM pickup_bulk_pending WHERE batch_id=?", (batch_id,))
+    db.commit()
+
+    flash(f'{saved_count} contract(s) saved successfully.', 'success')
+    if primary_cid:
+        return redirect(url_for('pickup_event', cid=int(primary_cid)))
+    return redirect(url_for('pickup_dashboard'))
 
 
 @app.route('/pickup/<int:cid>/import-amendment', methods=['GET', 'POST'])

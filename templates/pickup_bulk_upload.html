@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Bulk Contract Upload — {{ event_name }}{% endblock %}
+{% block content %}
+
+<div class="mb-3">
+  <a href="{{ url_for('pickup_event', cid=primary_cid) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to Event
+  </a>
+  <h4 class="mt-1">Bulk Contract Upload</h4>
+  <div class="text-muted small">{{ event_name }}</div>
+</div>
+
+<div class="alert alert-info d-flex align-items-center gap-2 mb-4" style="max-width:760px">
+  <i class="bi bi-info-circle fs-5"></i>
+  <span>Upload contracts for multiple hotels at once. You can leave hotels blank if you don't have the contract yet.</span>
+</div>
+
+<form method="post"
+      action="{{ url_for('pickup_bulk_upload', primary_cid=primary_cid) }}"
+      enctype="multipart/form-data"
+      style="max-width:760px">
+
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Hotels in This Event</div>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Hotel</th>
+            <th>Current Contract</th>
+            <th>Upload New Contract</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sib in siblings %}
+          <tr>
+            <td>{{ sib['hotel'] or '—' }}</td>
+            <td>
+              {% if sib['contract_filename'] %}
+                <span class="text-success small"><i class="bi bi-check-circle me-1"></i>{{ sib['contract_filename'] }}</span>
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <input type="file" name="file_{{ sib['id'] }}"
+                     class="form-control form-control-sm"
+                     accept=".pdf,.doc,.docx">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-cloud-upload me-1"></i>Process All Contracts
+    </button>
+    <a href="{{ url_for('pickup_event', cid=primary_cid) }}" class="btn btn-outline-secondary">
+      Cancel
+    </a>
+  </div>
+</form>
+
+{% endblock %}

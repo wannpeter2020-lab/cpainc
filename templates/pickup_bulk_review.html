@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}Review Bulk Contract Import — {{ event_name }}{% endblock %}
+{% block content %}
+
+<div class="mb-3">
+  <h4 class="mt-1">Review Bulk Contract Import</h4>
+  <div class="text-muted small">{{ event_name }}</div>
+</div>
+
+{% if ok_items %}
+<div class="alert alert-success d-flex align-items-center gap-2 mb-3">
+  <i class="bi bi-check-circle fs-5"></i>
+  <span><strong>{{ ok_items|length }}</strong> contract(s) extracted successfully. Review and correct before saving.</span>
+</div>
+{% endif %}
+
+{% if failed_items %}
+<div class="card border-danger mb-4" style="max-width:760px">
+  <div class="card-header bg-danger text-white fw-semibold">
+    <i class="bi bi-exclamation-triangle me-1"></i>Failed Extractions ({{ failed_items|length }})
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead class="table-light">
+        <tr><th>Hotel</th><th>File</th><th>Error</th></tr>
+      </thead>
+      <tbody>
+        {% for item in failed_items %}
+        <tr>
+          <td>{{ item['hotel'] or '—' }}</td>
+          <td class="text-muted small">{{ item['filename'] or '—' }}</td>
+          <td class="text-danger small">{{ item['error_msg'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer text-muted small">
+    You can upload these individually from each hotel's pickup card.
+  </div>
+</div>
+{% endif %}
+
+{% if ok_items %}
+<form method="post" action="{{ url_for('pickup_bulk_confirm') }}">
+  <input type="hidden" name="batch_id" value="{{ batch_id }}">
+  <input type="hidden" name="primary_cid" value="{{ primary_cid }}">
+
+  {% for item in ok_items %}
+  {% set pid = item['id'] %}
+  {% set ex  = item['extracted'] %}
+  {% set cfg = item['config'] %}
+
+  <div class="card mb-4" style="max-width:860px">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold"><i class="bi bi-building me-1"></i>{{ item['hotel'] or cfg['hotel'] or '—' }}</span>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="checkbox"
+               name="skip_{{ pid }}" id="skip_{{ pid }}"
+               onchange="toggleCard({{ pid }}, this.checked)">
+        <label class="form-check-label text-muted small" for="skip_{{ pid }}">Skip this hotel</label>
+      </div>
+    </div>
+    <div class="card-body" id="card_body_{{ pid }}">
+      <div class="text-muted small mb-3">File: {{ item['filename'] }}</div>
+
+      {# Key fields #}
+      <div class="row g-3 mb-3">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Contracted Rate ($)</label>
+          <input type="number" step="0.01" name="rate_{{ pid }}" class="form-control"
+                 value="{{ ex.contracted_rate or cfg['contracted_rate'] or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Cut-off Date</label>
+          <input type="date" name="cutoff_{{ pid }}" class="form-control"
+                 value="{{ ex.cutoff_date or cfg['cutoff_date'] or '' }}">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Block Nights</label>
+          <div class="form-control-plaintext text-muted small" id="block_total_{{ pid }}">—</div>
+        </div>
+      </div>
+
+      {# Hidden block JSON — editable via table below #}
+      <input type="hidden" name="block_json_{{ pid }}" id="block_json_{{ pid }}"
+             value="{{ ex.contracted_block | tojson }}">
+
+      {# Night-by-night table #}
+      <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-1 small">
+          <span>Room Block (Night-by-Night)</span>
+          <span class="text-muted" id="block_total_label_{{ pid }}"></span>
+        </div>
+        <div class="card-body p-0" style="max-height:220px;overflow-y:auto;">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light sticky-top">
+              <tr><th>Date</th><th>Day</th><th>Rooms</th></tr>
+            </thead>
+            <tbody id="block_tbody_{{ pid }}"></tbody>
+          </table>
+        </div>
+      </div>
+
+      {# Contact fields #}
+      <details class="mb-0">
+        <summary class="fw-semibold small text-muted mb-2" style="cursor:pointer">
+          <i class="bi bi-person me-1"></i>Contact Information
+        </summary>
+        <div class="row g-2 mt-1">
+          <div class="col-md-6">
+            <label class="form-label small">Hotel Contact Name</label>
+            <input type="text" name="hotel_contact_{{ pid }}" class="form-control form-control-sm"
+                   value="{{ ex.hotel_contact or cfg['hotel_contact'] or '' }}"
+                   placeholder="Hotel sales contact">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Hotel Contact Email</label>
+            <input type="text" name="hotel_contact_email_{{ pid }}" class="form-control form-control-sm"
+                   value="{{ ex.hotel_contact_email or cfg['hotel_contact_email'] or '' }}"
+                   placeholder="hotel@example.com">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Client Contact Name</label>
+            <input type="text" name="group_contact_{{ pid }}" class="form-control form-control-sm"
+                   value="{{ ex.group_contact or cfg['group_contact'] or '' }}"
+                   placeholder="Client contact">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Client Contact Email</label>
+            <input type="text" name="group_contact_email_{{ pid }}" class="form-control form-control-sm"
+                   value="{{ ex.group_contact_email or cfg['group_contact_email'] or '' }}"
+                   placeholder="client@example.com">
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    const pid = {{ pid }};
+    const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let block = {{ ex.contracted_block | tojson }};
+
+    function syncJson() {
+      document.getElementById('block_json_' + pid).value = JSON.stringify(block);
+    }
+
+    function renderBlock() {
+      const dates = Object.keys(block).sort();
+      const tbody = document.getElementById('block_tbody_' + pid);
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      let total = 0;
+      dates.forEach(function(d) {
+        const dt = new Date(d + 'T12:00:00');
+        const rooms = block[d] || 0;
+        total += rooms;
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + d + '</td>' +
+          '<td>' + DAYS[dt.getDay()] + '</td>' +
+          '<td><input type="number" min="0" class="form-control form-control-sm" ' +
+               'style="width:80px" value="' + rooms + '" ' +
+               'onchange="updateBlock_' + pid + '(\'' + d + '\', parseInt(this.value)||0)"></td>';
+        tbody.appendChild(tr);
+      });
+      const lbl = document.getElementById('block_total_label_' + pid);
+      const tot2 = document.getElementById('block_total_' + pid);
+      if (lbl) lbl.textContent = 'Total: ' + total.toLocaleString() + ' room nights';
+      if (tot2) tot2.textContent = total.toLocaleString() + ' room nights';
+      syncJson();
+    }
+
+    window['updateBlock_' + pid] = function(date, val) {
+      block[date] = val;
+      const total = Object.values(block).reduce(function(s,v){return s+(parseInt(v)||0);}, 0);
+      const lbl = document.getElementById('block_total_label_' + pid);
+      const tot2 = document.getElementById('block_total_' + pid);
+      if (lbl) lbl.textContent = 'Total: ' + total.toLocaleString() + ' room nights';
+      if (tot2) tot2.textContent = total.toLocaleString() + ' room nights';
+      syncJson();
+    };
+
+    renderBlock();
+  })();
+
+  function toggleCard(pid, skipped) {
+    const body = document.getElementById('card_body_' + pid);
+    if (body) body.style.opacity = skipped ? '0.4' : '1';
+  }
+  </script>
+
+  {% endfor %}
+
+  <div class="d-flex gap-2 mb-5" style="max-width:860px">
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-check-circle me-1"></i>Apply All
+    </button>
+    {% if primary_cid %}
+    <a href="{{ url_for('pickup_event', cid=primary_cid) }}" class="btn btn-outline-secondary">
+      Cancel
+    </a>
+    {% else %}
+    <a href="{{ url_for('pickup_dashboard') }}" class="btn btn-outline-secondary">
+      Cancel
+    </a>
+    {% endif %}
+  </div>
+
+</form>
+{% elif not failed_items %}
+<div class="alert alert-warning">No items found in this batch.</div>
+{% endif %}
+
+{% endblock %}
