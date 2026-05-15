@@ -141,6 +141,15 @@
             <li><a class="dropdown-item" href="/admin/change-log"><i class="bi bi-pencil-square me-2"></i>Change Log</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="/admin/download-db"><i class="bi bi-download me-2"></i>Download Database</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li>
+              <form method="post" action="{{ url_for('admin_archive_cancelled_pickups') }}" class="d-inline">
+                <button type="submit" class="dropdown-item text-warning"
+                        onclick="return confirm('Archive all pickup cards for cancelled bookings?')">
+                  <i class="bi bi-archive me-2"></i>Archive Cancelled Pickup Cards
+                </button>
+              </form>
+            </li>
           </ul>
         </li>
         {% endif %}

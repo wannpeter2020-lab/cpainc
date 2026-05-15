@@ -4495,6 +4495,36 @@ def admin_scan_rebates():
                            total=len(rows))
 
 
+@app.route('/admin/archive-cancelled-pickups', methods=['POST'])
+def admin_archive_cancelled_pickups():
+    user = get_current_user()
+    if not has_permission(user, 'admin'):
+        return 'Forbidden', 403
+    import datetime as _dt
+    db = get_db()
+    cancel_note = f"CANCELLED — archived {_dt.date.today().strftime('%Y-%m-%d')}"
+    rows = db.execute("""
+        SELECT pc.id, pc.notes
+        FROM pickup_config pc
+        JOIN ReportPipeline rp
+          ON CAST(pc.booking_id AS TEXT) = CAST(rp.BookingId AS TEXT)
+        WHERE pc.status != 'archived'
+          AND LOWER(rp.BookingStatus) = 'cancelled'
+    """).fetchall()
+    count = 0
+    for r in rows:
+        existing = (r['notes'] or '').strip()
+        new_notes = cancel_note + ('\n' + existing if existing else '')
+        db.execute(
+            "UPDATE pickup_config SET status='archived', notes=? WHERE id=?",
+            (new_notes, r['id'])
+        )
+        count += 1
+    db.commit()
+    flash(f'{count} pickup card{"s" if count != 1 else ""} archived for cancelled bookings.', 'success')
+    return redirect(url_for('pickup_dashboard'))
+
+
 @app.route('/admin/download-db')
 def admin_download_db():
     """Stream a consistent snapshot of the live SQLite database (admin only)."""
