@@ -44,7 +44,17 @@
       <div class="col-md-4">
         <div class="section-label">Contracted Rate</div>
         <div>
-          {% if config['contracted_rate'] %}${{ "%.2f"|format(config['contracted_rate']) }}{% else %}—{% endif %}
+          {% if config['contracted_rate'] %}
+            ${{ "%.2f"|format(config['contracted_rate']) }}
+            {% if config['rebate_per_room'] %}
+              <span class="text-muted small ms-1">(gross)</span>
+              <span class="ms-2 text-success fw-semibold">
+                ${{ "%.2f"|format(config['contracted_rate'] - config['rebate_per_room']) }}
+                <span class="text-muted fw-normal small">net</span>
+              </span>
+              <div class="text-muted small">${{ "%.2f"|format(config['rebate_per_room']) }}/room rebate</div>
+            {% endif %}
+          {% else %}—{% endif %}
           {% if config['hotel_booking_link'] %}
             <a href="{{ config['hotel_booking_link'] }}" target="_blank" class="ms-2 small">Hotel Portal</a>
           {% endif %}

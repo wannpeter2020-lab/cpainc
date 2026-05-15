@@ -3352,6 +3352,12 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add rebate_per_room to pickup_config if not present
+    try:
+        db.execute('ALTER TABLE pickup_config ADD COLUMN rebate_per_room REAL')
+        db.commit()
+    except Exception:
+        pass
     # Add BookingName to ReportPipeline if not present
     try:
         db.execute('ALTER TABLE ReportPipeline ADD COLUMN BookingName TEXT')
@@ -8511,12 +8517,15 @@ def pickup_edit_event(cid):
             if n.strip() or e.strip():
                 cc_emails.append({'name': n.strip(), 'email': e.strip()})
         rooming_list_required = 1 if f.get('rooming_list_required') else 0
+        rebate_raw = f.get('rebate_per_room', '').strip()
+        rebate = float(rebate_raw) if rebate_raw else None
         _changes = [
             ('organization',          config['organization'],          f['organization']),
             ('event_name',            config['event_name'],            f.get('event_name')),
             ('hotel',                 config['hotel'],                 f.get('hotel')),
             ('cutoff_date',           config['cutoff_date'],           f.get('cutoff_date')),
             ('contracted_rate',       config['contracted_rate'],       f.get('contracted_rate')),
+            ('rebate_per_room',       config['rebate_per_room'],       rebate),
             ('attrition_pct',         config['attrition_pct'],        attrition),
             ('contracted_block',      config['contracted_block'],      json.dumps(contracted_block)),
             ('hotel_contact',         config['hotel_contact'],        hc_name),
@@ -8533,7 +8542,7 @@ def pickup_edit_event(cid):
             booking_id=?, tab_name=?, organization=?, event_name=?, hotel=?,
             hotel_contact=?, hotel_contact_email=?, hotel_contact2=?, hotel_contact2_email=?,
             hotel_contacts=?, group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
-            contracted_block=?, contracted_rate=?, shoulder_pre=?,
+            contracted_block=?, contracted_rate=?, rebate_per_room=?, shoulder_pre=?,
             shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?,
             event_start=?, event_end=?, rooming_list_required=?
             WHERE id=?
@@ -8544,6 +8553,7 @@ def pickup_edit_event(cid):
             gc_email, f.get('cutoff_date'),
             attrition, json.dumps(contracted_block),
             float(f['contracted_rate']) if f.get('contracted_rate') else None,
+            rebate,
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
             f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails),
             f.get('event_start') or None, f.get('event_end') or None,

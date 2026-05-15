@@ -78,6 +78,17 @@
         <div class="form-text" id="rateNote"></div>
         {% endif %}
       </div>
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Rebate ($/room/night)</label>
+        <div class="input-group">
+          <span class="input-group-text">$</span>
+          <input type="number" step="0.01" min="0" name="rebate_per_room" id="rebate_per_room"
+                 class="form-control"
+                 value="{{ config['rebate_per_room'] if config and config['rebate_per_room'] else '' }}"
+                 placeholder="0.00">
+        </div>
+        <div class="form-text">Net rate = Contracted − Rebate</div>
+      </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Hotel Booking Link</label>
         <input type="text" name="hotel_booking_link" class="form-control"
