@@ -3479,7 +3479,10 @@ def parse_contract_document(file_bytes, filename=''):
     text = _extract_text_from_contract(file_bytes, filename)
     fname = (filename or '').lower()
 
-    if not text or not text.strip():
+    # Treat as image-only if text is empty OR too short to be a real contract
+    # (some PDFs render text as vector graphics — pdfplumber extracts nothing useful)
+    text_meaningful = text and len(text.split()) >= 50
+    if not text_meaningful:
         # Scanned / image-only PDF — fall back to vision-based extraction
         if fname.endswith('.pdf'):
             api_key = ''
@@ -3704,7 +3707,10 @@ def parse_amendment_document(file_bytes, filename=''):
     text = _extract_text_from_contract(file_bytes, filename)
     fname = (filename or '').lower()
 
-    if not text or not text.strip():
+    # Treat as image-only if text is empty OR too short to be a real amendment
+    # (some PDFs render text as vector graphics — pdfplumber extracts nothing useful)
+    text_meaningful = text and len(text.split()) >= 50
+    if not text_meaningful:
         if fname.endswith('.pdf'):
             api_key = ''
             try:
