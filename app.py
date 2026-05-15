@@ -3589,6 +3589,9 @@ def _seed_pickup_placeholders(db):
          '2030 ESA Annual Meeting', 'AC Hotel Salt Lake City Downtown'),
         ('231267', 'Entomological Society of America (ESA)',
          '2030 ESA Annual Meeting', 'Hyatt Regency Salt Lake City'),
+        # ── Geosynthetics 2027 Reno ──────────────────────────────────────────
+        ('211781', 'Advanced Textiles Association (Former IFAI)',
+         'Geosynthetics Conference 2027', 'Atlantis Casino Resort Spa - Reno'),
     ]
     for booking_id, org, event_name, hotel in placeholders:
         exists = db.execute(
