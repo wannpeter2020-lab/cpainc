@@ -1,6 +1,35 @@
 {% extends "base.html" %}
 {% block title %}Bulk Contract Upload — {{ event_name }}{% endblock %}
+
 {% block content %}
+<style>
+  .drop-zone {
+    border: 2px dashed #adb5bd;
+    border-radius: 8px;
+    padding: 14px 18px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+    background: #f8f9fa;
+    color: #6c757d;
+    font-size: 0.85rem;
+    user-select: none;
+  }
+  .drop-zone:hover,
+  .drop-zone.dragover {
+    border-color: #0d6efd;
+    background: #e8f0fe;
+    color: #0d6efd;
+  }
+  .drop-zone.has-file {
+    border-color: #198754;
+    background: #d1e7dd;
+    color: #0f5132;
+  }
+  .drop-zone .drop-icon { font-size: 1.3rem; display: block; margin-bottom: 4px; }
+  .drop-zone .drop-filename { font-weight: 600; word-break: break-all; }
+  .drop-zone input[type="file"] { display: none; }
+</style>
 
 <div class="mb-3">
   <a href="{{ url_for('pickup_event', cid=primary_cid) }}" class="text-decoration-none text-muted small">
@@ -10,31 +39,35 @@
   <div class="text-muted small">{{ event_name }}</div>
 </div>
 
-<div class="alert alert-info d-flex align-items-center gap-2 mb-4" style="max-width:760px">
+<div class="alert alert-info d-flex align-items-center gap-2 mb-4" style="max-width:800px">
   <i class="bi bi-info-circle fs-5"></i>
-  <span>Upload contracts for multiple hotels at once. You can leave hotels blank if you don't have the contract yet.</span>
+  <span>Drag a PDF onto each hotel or click the drop zone to browse. Leave hotels blank if you don't have the contract yet.</span>
 </div>
 
 <form method="post"
       action="{{ url_for('pickup_bulk_upload', primary_cid=primary_cid) }}"
       enctype="multipart/form-data"
-      style="max-width:760px">
+      id="bulkUploadForm"
+      style="max-width:800px">
 
   <div class="card mb-4">
-    <div class="card-header fw-semibold">Hotels in This Event</div>
-    <div class="table-responsive">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold">Hotels in This Event</span>
+      <span class="text-muted small" id="fileCountLabel"></span>
+    </div>
+    <div class="card-body p-0">
       <table class="table table-sm align-middle mb-0">
         <thead class="table-light">
           <tr>
-            <th>Hotel</th>
-            <th>Current Contract</th>
-            <th>Upload New Contract</th>
+            <th style="width:38%">Hotel</th>
+            <th style="width:22%">Current Contract</th>
+            <th>Drop Contract Here</th>
           </tr>
         </thead>
         <tbody>
           {% for sib in siblings %}
           <tr>
-            <td>{{ sib['hotel'] or '—' }}</td>
+            <td class="fw-semibold small">{{ sib['hotel'] or '—' }}</td>
             <td>
               {% if sib['contract_filename'] %}
                 <span class="text-success small"><i class="bi bi-check-circle me-1"></i>{{ sib['contract_filename'] }}</span>
@@ -43,9 +76,14 @@
               {% endif %}
             </td>
             <td>
-              <input type="file" name="file_{{ sib['id'] }}"
-                     class="form-control form-control-sm"
-                     accept=".pdf,.doc,.docx">
+              <div class="drop-zone" id="dz_{{ sib['id'] }}"
+                   onclick="document.getElementById('file_{{ sib['id'] }}').click()">
+                <i class="bi bi-cloud-upload drop-icon"></i>
+                <span class="drop-label">Drag PDF here or click to browse</span>
+                <input type="file" id="file_{{ sib['id'] }}" name="file_{{ sib['id'] }}"
+                       accept=".pdf,.doc,.docx"
+                       onchange="handleFileSelect(this, '{{ sib['id'] }}')">
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -54,14 +92,81 @@
     </div>
   </div>
 
-  <div class="d-flex gap-2">
-    <button type="submit" class="btn btn-primary">
+  <div class="d-flex gap-2 align-items-center">
+    <button type="submit" class="btn btn-primary" id="submitBtn">
       <i class="bi bi-cloud-upload me-1"></i>Process All Contracts
     </button>
     <a href="{{ url_for('pickup_event', cid=primary_cid) }}" class="btn btn-outline-secondary">
       Cancel
     </a>
+    <span class="text-muted small ms-2" id="processingMsg" style="display:none">
+      <span class="spinner-border spinner-border-sm me-1"></span>Processing — this may take a minute…
+    </span>
   </div>
 </form>
 
+<script>
+// ── Drag & drop logic ─────────────────────────────────────────────────────────
+let fileCount = 0;
+
+function setDropZoneFile(configId, file) {
+  const dz = document.getElementById('dz_' + configId);
+  const input = document.getElementById('file_' + configId);
+  const label = dz.querySelector('.drop-label');
+
+  if (file) {
+    // Transfer the file to the hidden input via DataTransfer
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    dz.classList.add('has-file');
+    dz.querySelector('.drop-icon').className = 'bi bi-file-earmark-check drop-icon';
+    label.innerHTML = `<span class="drop-filename">${file.name}</span><br>
+      <span style="font-size:0.75rem;font-weight:400">Click to replace</span>`;
+    fileCount++;
+  } else {
+    dz.classList.remove('has-file');
+    dz.querySelector('.drop-icon').className = 'bi bi-cloud-upload drop-icon';
+    label.textContent = 'Drag PDF here or click to browse';
+  }
+  updateFileCount();
+}
+
+function handleFileSelect(input, configId) {
+  if (input.files && input.files[0]) {
+    setDropZoneFile(configId, input.files[0]);
+  }
+}
+
+function updateFileCount() {
+  const inputs = document.querySelectorAll('input[type="file"]');
+  let n = 0;
+  inputs.forEach(i => { if (i.files && i.files.length) n++; });
+  const label = document.getElementById('fileCountLabel');
+  label.textContent = n > 0 ? `${n} file${n !== 1 ? 's' : ''} ready` : '';
+}
+
+// Wire up drag events on each drop zone
+document.querySelectorAll('.drop-zone').forEach(dz => {
+  const configId = dz.id.replace('dz_', '');
+
+  dz.addEventListener('dragover', e => {
+    e.preventDefault();
+    dz.classList.add('dragover');
+  });
+  dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (file) setDropZoneFile(configId, file);
+  });
+});
+
+// Show spinner on submit
+document.getElementById('bulkUploadForm').addEventListener('submit', function() {
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('processingMsg').style.display = 'inline';
+});
+</script>
 {% endblock %}
