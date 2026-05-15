@@ -6324,6 +6324,7 @@ def pickup_new_event():
                                    pipeline_rate=pipeline_rate,
                                    pipeline_org=pipeline_org,
                                    pipeline_event=pipeline_event,
+                                   pipeline_booking_id=new_bid,
                                    duplicate_warnings=duplicates,
                                    form_data=f)
 
@@ -6368,7 +6369,8 @@ def pickup_new_event():
                            cancel_url=url_for('pickup_dashboard'),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
-                           pipeline_event=pipeline_event)
+                           pipeline_event=pipeline_event,
+                           pipeline_booking_id=booking_id_qs)
 
 
 @app.route('/pickup/<int:cid>')
@@ -8715,7 +8717,8 @@ def pickup_edit_event(cid):
                            cancel_url=url_for('pickup_event', cid=cid),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
-                           pipeline_event=pipeline_event)
+                           pipeline_event=pipeline_event,
+                           pipeline_booking_id=config['booking_id'])
 
 
 @app.route('/pickup/<int:cid>/weekly/new', methods=['GET', 'POST'])

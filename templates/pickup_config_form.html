@@ -72,7 +72,13 @@
         </div>
         {% if pipeline_rate %}
         <div class="form-text text-warning">
-          <i class="bi bi-info-circle me-1"></i>This is a blended rate from the CD Office — enter the actual contracted rate from the contract
+          <i class="bi bi-info-circle me-1"></i>This is a blended rate for
+          {% if pipeline_booking_id %}
+            <a href="{{ url_for('booking_detail', booking_id=pipeline_booking_id) }}" target="_blank">Booking #{{ pipeline_booking_id }}</a>
+          {% else %}
+            this booking
+          {% endif %}
+          — <strong>DO NOT change this rate.</strong>
         </div>
         {% else %}
         <div class="form-text" id="rateNote"></div>
