@@ -269,7 +269,13 @@
           <td>{{ c.EntryDate | us_date if c.EntryDate else '—' }}</td>
           <td>{% if c.Cancelled %}<span class="badge bg-danger">Yes</span>{% else %}No{% endif %}</td>
           <td>{{ c.SpecialNotes or '—' }}</td>
-          <td><a href="/check/{{ c.ChkRegID }}/edit" class="btn btn-sm btn-outline-secondary">Edit</a></td>
+          <td class="text-nowrap">
+            <a href="/check/{{ c.ChkRegID }}/edit" class="btn btn-sm btn-outline-secondary">Edit</a>
+            <form method="post" action="/check/{{ c.ChkRegID }}/delete" class="d-inline"
+                  onsubmit="return confirm('Delete this payment record? This cannot be undone.')">
+              <button class="btn btn-sm btn-outline-danger ms-1">Delete</button>
+            </form>
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="8" class="text-muted text-center py-3">No payment records yet.</td></tr>

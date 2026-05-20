@@ -1683,6 +1683,20 @@ def check_edit(check_id):
             flash(f'Error updating payment: {e}', 'error')
     return render_template('check_edit.html', check=check)
 
+@app.route('/check/<int:check_id>/delete', methods=['POST'])
+def check_delete(check_id):
+    db = get_db()
+    check = db.execute('SELECT * FROM ChkRegNote WHERE ChkRegID = ?', (check_id,)).fetchone()
+    if not check:
+        flash('Payment record not found.', 'error')
+        return redirect(url_for('pipeline'))
+    booking_id = check['BookingID']
+    db.execute('DELETE FROM ChkRegNote WHERE ChkRegID = ?', (check_id,))
+    db.commit()
+    flash('Payment record deleted.', 'success')
+    return redirect(url_for('booking_detail', booking_id=booking_id))
+
+
 # ── Commission Report ─────────────────────────────────────────────────────────
 
 @app.route('/reports/commission')
