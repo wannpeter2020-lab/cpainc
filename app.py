@@ -1333,6 +1333,15 @@ def import_voucher():
             next_pos = positions[idx + 1][0] if idx + 1 < len(positions) else len(all_text)
             segment  = all_text[pos:next_pos]
 
+            # Truncate at any page-header boundary so that the repeated
+            # "Amount Paid 15674.72" header on continuation pages is never
+            # mistaken for the line-item amount.
+            for _marker in ('Payment Voucher', 'Amount Paid', 'Amount Paid in USD'):
+                _mi = segment.find(_marker)
+                if _mi != -1:
+                    segment = segment[:_mi]
+                    break
+
             # Last two decimal amounts in the segment = amount, amt_paid
             amounts = amt_re.findall(segment)
             if len(amounts) < 2:
