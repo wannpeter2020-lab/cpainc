@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}{{ program.chain_name }} — Web Form Helper{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-link-45deg me-2"></i>{{ program.chain_name }} Web Form Helper</h4>
+  <a href="{{ url_for('points_request_detail', rid=req.id) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Request
+  </a>
+</div>
+
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-1"></i>
+  Open the {{ program.chain_name }} form in a new tab, then use the
+  <strong>Copy</strong> buttons below to paste each field's value into the corresponding form field.
+  When done, paste the confirmation URL back into "Rewards Form Link" on the request.
+</div>
+
+<div class="text-center mb-4">
+  <a href="{{ program.form_url }}" target="_blank" class="btn btn-lg btn-success">
+    <i class="bi bi-box-arrow-up-right me-1"></i>Open {{ program.chain_name }} Form
+  </a>
+</div>
+
+<div class="card">
+  <div class="card-header">Field Values</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr>
+          <th style="width:35%">Form Field</th>
+          <th>Value</th>
+          <th style="width:90px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for label, data_key in mapping.items() %}
+        {% set val = field_values.get(data_key, '') %}
+        <tr>
+          <td><small class="text-muted">{{ label }}</small></td>
+          <td><code id="val-{{ loop.index }}">{{ val or '' }}</code></td>
+          <td>
+            <button type="button" class="btn btn-sm btn-outline-primary"
+                    onclick="copyVal('val-{{ loop.index }}', this)" {% if not val %}disabled{% endif %}>
+              <i class="bi bi-clipboard"></i> Copy
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-muted text-center small py-3">
+          No fields mapped for this chain — configure them in
+          <a href="{{ url_for('points_program_edit', pid=program.id) }}">Program Edit</a>.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function copyVal(elId, btn) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const txt = el.textContent || '';
+  navigator.clipboard.writeText(txt).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check"></i> Copied';
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-success');
+    setTimeout(() => {
+      btn.innerHTML = orig;
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-outline-primary');
+    }, 1500);
+  });
+}
+</script>
+
+{% endblock %}

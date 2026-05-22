@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}Points Request — {{ field_values.event_name or 'Detail' }}{% endblock %}
+{% block content %}
+
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>
+      <i class="bi bi-award me-2"></i>
+      {{ program.chain_name if program else 'Hotel' }} Points Request
+      — {{ field_values.event_name or 'Untitled' }}
+    </span>
+    <div class="d-flex gap-2">
+      {% if pickup_cfg %}
+      <a href="{{ url_for('pickup_event', cid=pickup_cfg.id) }}" class="btn btn-sm btn-info text-white">
+        <i class="bi bi-calendar-check me-1"></i>Pickup Event
+      </a>
+      {% endif %}
+      <a href="{{ url_for('points_dashboard') }}" class="btn btn-sm btn-outline-light">
+        <i class="bi bi-arrow-left me-1"></i>Dashboard
+      </a>
+    </div>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="section-label">Chain</div>
+        <div>{{ program.chain_name if program else '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Member #</div>
+        <div>{{ program.member_number if program else '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Hotel</div>
+        <div>{{ field_values.hotel or '—' }}</div>
+      </div>
+      <div class="col-md-3">
+        <div class="section-label">Status</div>
+        <div>
+          {% if req.status == 'received' %}<span class="badge bg-success">Received</span>
+          {% elif req.status == 'submitted' %}<span class="badge bg-warning text-dark">Submitted</span>
+          {% elif req.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>
+          {% elif req.status == 'disallowed' %}<span class="badge bg-danger">Disallowed</span>
+          {% else %}<span class="badge bg-light text-dark">Pending</span>{% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Actions bar #}
+<div class="card mb-3">
+  <div class="card-body d-flex flex-wrap gap-2">
+    {% if program and program.submission_type == 'docx_template' and program.form_template_filename %}
+    <a href="{{ url_for('points_request_download', rid=req.id) }}" class="btn btn-success">
+      <i class="bi bi-file-earmark-word me-1"></i>Generate &amp; Download .docx
+    </a>
+    {% elif program and program.submission_type == 'weblink' and program.form_url %}
+    <a href="{{ url_for('points_weblink_helper', rid=req.id) }}" class="btn btn-success">
+      <i class="bi bi-link-45deg me-1"></i>Open Web Form Helper
+    </a>
+    {% endif %}
+
+    {% if req.sent_to_email %}
+    <a href="{{ url_for('points_request_mailto', rid=req.id) }}" class="btn btn-primary">
+      <i class="bi bi-envelope me-1"></i>Open Email to Hotel
+    </a>
+    {% endif %}
+
+    {% if req.form_sent_date and req.status != 'received' %}
+    <form method="post" action="{{ url_for('points_request_resend', rid=req.id) }}" class="d-inline">
+      <button type="submit" class="btn btn-outline-warning">
+        <i class="bi bi-arrow-repeat me-1"></i>Log Resend
+        {% if req.resend_count %}<span class="badge bg-warning text-dark ms-1">{{ req.resend_count }}</span>{% endif %}
+      </button>
+    </form>
+    {% endif %}
+
+    {% if req.status != 'cancelled' %}
+    <form method="post" action="{{ url_for('points_request_delete', rid=req.id) }}" class="d-inline ms-auto"
+          onsubmit="return confirm('Mark this request as cancelled?');">
+      <button type="submit" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-x-circle me-1"></i>Cancel Request
+      </button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" action="{{ url_for('points_request_edit', rid=req.id) }}">
+<div class="row g-3">
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header">Submission</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Hotel Salesperson Name</label>
+          <input type="text" name="sent_to_name" class="form-control"
+                 value="{{ req.sent_to_name or '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Hotel Salesperson Email</label>
+          <input type="email" name="sent_to_email" class="form-control"
+                 value="{{ req.sent_to_email or '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Form Sent Date</label>
+          <input type="date" name="form_sent_date" class="form-control"
+                 value="{{ req.form_sent_date or '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Cvent RFP Code</label>
+          <input type="text" name="cvent_rfp_code" class="form-control"
+                 value="{{ req.cvent_rfp_code or '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Contract Signature Date</label>
+          <input type="date" name="contract_signature_date" class="form-control"
+                 value="{{ req.contract_signature_date or '' }}">
+        </div>
+        {% if program and program.chain_name == 'Marriott' %}
+        <div class="mb-3">
+          <label class="form-label">Incentive Type</label>
+          <select name="incentive_type" class="form-select">
+            <option value="">—</option>
+            {% for opt in ['Incentive', 'Promotional', 'Signing Bonus'] %}
+            <option value="{{ opt }}" {% if req.incentive_type == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Award Timing</label>
+          <select name="award_timing" class="form-select">
+            <option value="">—</option>
+            <option value="at_signing"    {% if req.award_timing == 'at_signing' %}selected{% endif %}>At Contract Signature</option>
+            <option value="at_conclusion" {% if req.award_timing == 'at_conclusion' %}selected{% endif %}>Upon Conclusion</option>
+          </select>
+        </div>
+        {% endif %}
+        <div class="mb-3">
+          <label class="form-label">Rewards Form Link / Confirmation</label>
+          <input type="url" name="rewards_form_link" class="form-control"
+                 value="{{ req.rewards_form_link or '' }}"
+                 placeholder="Confirmation URL (web form) or note">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card mb-3">
+      <div class="card-header">Receipt</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Points Received Date</label>
+          <input type="date" name="points_received_date" class="form-control"
+                 value="{{ req.points_received_date or '' }}">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Points Awarded</label>
+          <input type="number" name="points_awarded" class="form-control"
+                 value="{{ req.points_awarded or '' }}" step="1" min="0">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Status</label>
+          <select name="status" class="form-select">
+            {% for s in ['pending', 'submitted', 'received', 'cancelled', 'disallowed'] %}
+            <option value="{{ s }}" {% if (req.status or 'pending') == s %}selected{% endif %}>{{ s|capitalize }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header">2nd Recipient (Point Splitting — Optional)</div>
+      <div class="card-body">
+        <div class="row g-2">
+          <div class="col-md-6">
+            <label class="form-label small">Name</label>
+            <input type="text" name="second_recipient_name" class="form-control form-control-sm"
+                   value="{{ req.second_recipient_name or '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Email</label>
+            <input type="email" name="second_recipient_email" class="form-control form-control-sm"
+                   value="{{ req.second_recipient_email or '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Phone</label>
+            <input type="text" name="second_recipient_phone" class="form-control form-control-sm"
+                   value="{{ req.second_recipient_phone or '' }}">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small">Member #</label>
+            <input type="text" name="second_recipient_number" class="form-control form-control-sm"
+                   value="{{ req.second_recipient_number or '' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Notes</div>
+      <div class="card-body">
+        <textarea name="notes" class="form-control" rows="4">{{ req.notes or '' }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save me-1"></i>Save Changes
+    </button>
+  </div>
+
+</div>
+</form>
+
+{# Field values preview — what gets put into the form #}
+<div class="card mt-4">
+  <div class="card-header">Form Field Preview <small class="text-muted">(values that will be filled into the {{ program.chain_name if program else 'form' }})</small></div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr><th style="width:40%">Form Label</th><th>Value</th></tr>
+      </thead>
+      <tbody>
+        {% for label, data_key in mapping.items() %}
+        <tr>
+          <td><small class="text-muted">{{ label }}</small></td>
+          <td>{{ field_values.get(data_key, '') or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="2" class="text-muted text-center small py-3">
+          No field mapping configured for this chain — edit it in
+          <a href="{{ url_for('points_program_edit', pid=program.id) if program else '#' }}">Manage Programs</a>.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{{ program.chain_name }} — Edit Program{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-award me-2"></i>{{ program.chain_name }} Points Program</h4>
+  <a href="{{ url_for('points_programs') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Programs
+  </a>
+</div>
+
+<form method="post" enctype="multipart/form-data">
+  <div class="row g-3">
+
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">General</div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Member Number</label>
+            <input type="text" name="member_number" class="form-control"
+                   value="{{ program.member_number or '' }}"
+                   placeholder="e.g. Bonvoy 009986902">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Submission Type</label>
+            <select name="submission_type" class="form-select">
+              <option value="docx_template" {% if program.submission_type == 'docx_template' %}selected{% endif %}>.docx auto-fill (Marriott, Hyatt, etc.)</option>
+              <option value="weblink"       {% if program.submission_type == 'weblink' %}selected{% endif %}>Web form (Hilton, IHG)</option>
+              <option value="manual"        {% if program.submission_type == 'manual' %}selected{% endif %}>Manual (no template / no URL)</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Form URL <small class="text-muted">(for weblink type)</small></label>
+            <input type="url" name="form_url" class="form-control"
+                   value="{{ program.form_url or '' }}"
+                   placeholder="https://...">
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Submission Window (days)</label>
+              <input type="number" name="submission_window_days" class="form-control"
+                     value="{{ program.submission_window_days or 90 }}" min="1">
+              <small class="text-muted">Days after event end before request is overdue.</small>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Receipt Window (days)</label>
+              <input type="number" name="receipt_window_days" class="form-control"
+                     value="{{ program.receipt_window_days or 60 }}" min="1">
+              <small class="text-muted">Days after sent before posting expected.</small>
+            </div>
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="active" id="active_chk"
+                   {% if program.active %}checked{% endif %}>
+            <label class="form-check-label" for="active_chk">Active</label>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Notes</label>
+            <textarea name="notes" class="form-control" rows="2">{{ program.notes or '' }}</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header">Form Template (.docx)</div>
+        <div class="card-body">
+          {% if program.form_template_filename %}
+          <div class="alert alert-success small mb-3">
+            <i class="bi bi-file-earmark-word me-1"></i>
+            Current template: <strong>{{ program.form_template_filename }}</strong>
+            <a href="{{ url_for('points_program_template_download', pid=program.id) }}" class="ms-2">Download</a>
+          </div>
+          {% else %}
+          <div class="alert alert-warning small mb-3">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            No template uploaded yet.
+          </div>
+          {% endif %}
+
+          <label class="form-label">Upload new template (.docx)</label>
+          <input type="file" name="template_file" class="form-control mb-3" accept=".docx">
+
+          <label class="form-label">Field Mapping (JSON)</label>
+          <textarea name="field_mapping_json" class="form-control font-monospace" rows="14"
+                    spellcheck="false">{{ mapping_pretty }}</textarea>
+          <small class="text-muted">
+            Keys are the label text in the .docx form. Values are data keys:
+            <code>user_full_name</code>, <code>user_email</code>, <code>user_phone</code>,
+            <code>member_number</code>, <code>today</code>, <code>hotel</code>,
+            <code>event_name</code>, <code>client_organization</code>,
+            <code>hotel_contact_name</code>, <code>cvent_rfp_code</code>,
+            <code>meeting_dates_formatted</code>, <code>event_start</code>,
+            <code>event_end</code>, <code>total_contracted_rooms</code>,
+            <code>peak_rooms</code>, <code>total_room_nights</code>,
+            <code>contract_signature_date</code>.
+          </small>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save me-1"></i>Save Program
+      </button>
+      <a href="{{ url_for('points_programs') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+
+  </div>
+</form>
+
+{% endblock %}

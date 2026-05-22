@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Import Hotel Points Tracking{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-upload me-2"></i>Import Hotel Points Tracking</h4>
+  <a href="{{ url_for('points_dashboard') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+  </a>
+</div>
+
+{% if not preview %}
+{# Step 1: upload #}
+<div class="card">
+  <div class="card-header">Upload a Tracking Workbook</div>
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="action" value="preview">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Chain</label>
+          <select name="chain_name" class="form-select" required>
+            <option value="">— select —</option>
+            {% for p in programs %}
+            <option value="{{ p.chain_name }}">{{ p.chain_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Tracking Workbook (.xlsx)</label>
+          <input type="file" name="file" class="form-control" accept=".xlsx" required>
+        </div>
+        <div class="col-md-3">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-search me-1"></i>Preview</button>
+        </div>
+      </div>
+      <div class="form-text mt-2">
+        Parses each year tab. Matches rows to existing bookings/pickup events by event name and start date.
+      </div>
+    </form>
+  </div>
+</div>
+{% else %}
+{# Step 2: preview #}
+<div class="alert alert-info">
+  <strong>Preview — {{ chain_name }}:</strong>
+  {{ preview|length }} rows · {{ matched }} matched · {{ unmatched }} unmatched ·
+  {{ skipped }} duplicate (skipped)
+</div>
+
+<form method="post">
+  <input type="hidden" name="action" value="commit">
+  <input type="hidden" name="chain_name" value="{{ chain_name }}">
+  <input type="hidden" name="payload_json" value='{{ preview|tojson }}'>
+  <button type="submit" class="btn btn-success mb-3">
+    <i class="bi bi-check-circle me-1"></i>Import {{ matched + unmatched }} Records
+  </button>
+  <a href="{{ url_for('points_import') }}" class="btn btn-outline-secondary mb-3">Cancel</a>
+</form>
+
+<div class="card">
+  <div class="card-header">Preview Rows</div>
+  <div class="card-body p-0">
+    <div style="max-height:60vh; overflow:auto;">
+      <table class="table table-sm mb-0">
+        <thead style="position:sticky; top:0;">
+          <tr>
+            <th>Sheet</th>
+            <th>Event</th>
+            <th>Hotel</th>
+            <th>Dates</th>
+            <th>Sent</th>
+            <th>Posted</th>
+            <th class="text-end">Points</th>
+            <th>Status</th>
+            <th>Match</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in preview %}
+          <tr {% if p.duplicate %}class="table-secondary"{% elif not p.pickup_config_id %}class="table-warning"{% endif %}>
+            <td><small>{{ p.row.sheet }}</small></td>
+            <td>{{ p.row.event_name }}</td>
+            <td><small class="text-muted">{{ p.row.hotel }}</small></td>
+            <td><small>{{ p.row.start_date|us_date }} – {{ p.row.end_date|us_date }}</small></td>
+            <td><small>{{ p.row.form_sent_date|us_date if p.row.form_sent_date else '—' }}</small></td>
+            <td><small>{{ p.row.points_received_date|us_date if p.row.points_received_date else '—' }}</small></td>
+            <td class="text-end">{% if p.row.points_awarded %}{{ '{:,}'.format(p.row.points_awarded) }}{% else %}—{% endif %}</td>
+            <td><small>{{ p.row.status }}</small></td>
+            <td>
+              {% if p.duplicate %}<span class="badge bg-secondary">Dup</span>
+              {% elif p.pickup_config_id %}
+                <small><a href="{{ url_for('pickup_event', cid=p.pickup_config_id) }}">cfg #{{ p.pickup_config_id }}</a></small>
+              {% else %}<span class="badge bg-warning text-dark">Unmatched</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -71,6 +71,36 @@
     </div>
   </div>
 
+  <div class="col-md-8">
+    <div class="card mb-4">
+      <div class="card-header">User Profile — Hotel Points Forms</div>
+      <div class="card-body">
+        <form method="post" class="row g-2">
+          <input type="hidden" name="action" value="save_user_profile">
+          <div class="col-md-4">
+            <label class="form-label small">Full Name</label>
+            <input type="text" name="user_full_name" class="form-control form-control-sm"
+                   value="{{ user_profile.user_full_name or '' }}" placeholder="Your name">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small">Email Address</label>
+            <input type="email" name="user_email" class="form-control form-control-sm"
+                   value="{{ user_profile.user_email or '' }}" placeholder="you@conferencedirect.com">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Business Phone</label>
+            <input type="text" name="user_phone" class="form-control form-control-sm"
+                   value="{{ user_profile.user_phone or '' }}" placeholder="(303) 555-1212">
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save Profile</button>
+            <span class="text-muted small ms-2">Used to auto-fill Marriott Bonvoy, Hyatt, Hilton, IHG and Omni points request forms.</span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <div class="col-md-4">
     <div class="card mb-4">
       <div class="card-header">Date Display Format</div>

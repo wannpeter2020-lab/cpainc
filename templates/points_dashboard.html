@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Hotel Points — Promagent{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-award me-2"></i>Hotel Planner Points</h4>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('points_programs') }}" class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-gear me-1"></i>Manage Programs
+    </a>
+    <a href="{{ url_for('points_import') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-upload me-1"></i>Import Tracking XLS
+    </a>
+  </div>
+</div>
+
+{# KPI cards #}
+<div class="row g-3 mb-4">
+  <div class="col-md-2">
+    <div class="card text-center">
+      <div class="card-body p-3">
+        <div class="section-label">Total Requests</div>
+        <div class="h3 mb-0">{{ kpi.total }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center" style="border-left:4px solid #6c757d;">
+      <div class="card-body p-3">
+        <div class="section-label">Pending</div>
+        <div class="h3 mb-0">{{ kpi.pending }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center" style="border-left:4px solid #fd7e14;">
+      <div class="card-body p-3">
+        <div class="section-label">Submitted</div>
+        <div class="h3 mb-0">{{ kpi.submitted }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center" style="border-left:4px solid #198754;">
+      <div class="card-body p-3">
+        <div class="section-label">Received</div>
+        <div class="h3 mb-0">{{ kpi.received }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center" style="border-left:4px solid #dc3545;">
+      <div class="card-body p-3">
+        <div class="section-label">Overdue</div>
+        <div class="h3 mb-0">{{ kpi.overdue }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center" style="border-left:4px solid #1a3a5c;">
+      <div class="card-body p-3">
+        <div class="section-label">Points YTD</div>
+        <div class="h3 mb-0">{{ '{:,}'.format(kpi.points_ytd) }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# By chain summary #}
+<div class="card mb-4">
+  <div class="card-header">By Chain</div>
+  <div class="card-body p-2">
+    <div class="row g-2">
+      {% for chain, agg in by_chain.items() %}
+      <div class="col-md-3">
+        <a href="?chain={{ chain }}" class="text-decoration-none text-dark">
+          <div class="border rounded p-2 small">
+            <div class="fw-bold">{{ chain }}</div>
+            <div class="text-muted">{{ agg.count }} requests · {{ agg.received }} received</div>
+            <div class="text-end">{{ '{:,}'.format(agg.points) }} pts</div>
+          </div>
+        </a>
+      </div>
+      {% else %}
+      <div class="col-12"><p class="text-muted small mb-0">No points requests yet.</p></div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# Filters #}
+<form method="get" class="row g-2 align-items-end mb-3">
+  <div class="col-md-3">
+    <label class="form-label small">Chain</label>
+    <select name="chain" class="form-select form-select-sm">
+      <option value="">All chains</option>
+      {% for chain in by_chain.keys() %}
+      <option value="{{ chain }}" {% if chain == chain_filter %}selected{% endif %}>{{ chain }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small">Status</label>
+    <select name="status" class="form-select form-select-sm">
+      <option value="">All</option>
+      {% for s in ['pending', 'submitted', 'received', 'cancelled', 'disallowed'] %}
+      <option value="{{ s }}" {% if s == status_filter %}selected{% endif %}>{{ s|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-primary btn-sm">Filter</button>
+    {% if chain_filter or status_filter %}
+    <a href="{{ url_for('points_dashboard') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+    {% endif %}
+  </div>
+</form>
+
+{# Requests table #}
+<div class="card">
+  <div class="card-header">Points Requests</div>
+  <div class="card-body p-0">
+    <div style="max-height:60vh; overflow:auto;">
+      <table class="table table-sm table-hover mb-0">
+        <thead style="position:sticky; top:0; z-index:1;">
+          <tr>
+            <th>Chain</th>
+            <th>Event</th>
+            <th>Hotel</th>
+            <th>Event Dates</th>
+            <th>Sent</th>
+            <th>Received</th>
+            <th class="text-end">Points</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in requests %}
+          {% set is_overdue = r.pickup_event_end and r.status not in ['received', 'cancelled', 'disallowed'] %}
+          <tr {% if is_overdue %}style="background:#fff5f5;"{% endif %}>
+            <td><span class="badge bg-secondary">{{ r.chain_name }}</span></td>
+            <td>{{ r.pickup_event_name or r.pickup_org or '—' }}</td>
+            <td><small class="text-muted">{{ r.pickup_hotel or '—' }}</small></td>
+            <td><small>{{ r.pickup_event_start|us_date }} – {{ r.pickup_event_end|us_date }}</small></td>
+            <td><small>{{ r.form_sent_date|us_date if r.form_sent_date else '—' }}</small></td>
+            <td><small>{{ r.points_received_date|us_date if r.points_received_date else '—' }}</small></td>
+            <td class="text-end">{% if r.points_awarded %}{{ '{:,}'.format(r.points_awarded) }}{% else %}—{% endif %}</td>
+            <td>
+              {% if r.status == 'received' %}<span class="badge bg-success">Received</span>
+              {% elif r.status == 'submitted' %}<span class="badge bg-warning text-dark">Submitted</span>
+              {% elif r.status == 'cancelled' %}<span class="badge bg-secondary">Cancelled</span>
+              {% elif r.status == 'disallowed' %}<span class="badge bg-danger">Disallowed</span>
+              {% else %}<span class="badge bg-light text-dark">Pending</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <a href="{{ url_for('points_request_detail', rid=r.id) }}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-eye"></i>
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="9" class="text-center text-muted py-3">No points requests match the filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

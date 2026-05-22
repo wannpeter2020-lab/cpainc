@@ -43,7 +43,7 @@ MAIL_FROM     = os.environ.get('MAIL_FROM',     MAIL_USERNAME)
 MAIL_TO       = os.environ.get('MAIL_TO',       '')   # comma-separated alert recipients
 DAILY_TASK_KEY= os.environ.get('DAILY_TASK_KEY','')   # secret key for /admin/run-daily-tasks
 
-SESSION_TIMEOUT_SECONDS = 3600  # 1 hour
+SESSION_TIMEOUT_SECONDS = 28800  # 8 hours
 
 
 def send_email(to_addrs, subject, body_html, attachments=None):
@@ -2722,6 +2722,12 @@ def settings():
                 db.commit()
                 label = next((o[1] for o in DATE_FORMAT_OPTIONS if o[0] == fmt), fmt)
                 flash(f'Date format updated to {label}.', 'success')
+        elif action == 'save_user_profile':
+            for key in ('user_full_name', 'user_email', 'user_phone'):
+                val = request.form.get(key, '').strip()
+                db.execute('INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)', (key, val))
+            db.commit()
+            flash('User profile saved — used on Hotel Points forms.', 'success')
         return redirect(url_for('settings'))
 
     current       = get_commission_split()
@@ -2732,12 +2738,17 @@ def settings():
     today_preview    = datetime.today().strftime(current_date_fmt)
     overrides = db.execute('SELECT id, account_name, split_rate, countries FROM AccountSplits ORDER BY account_name').fetchall()
     accounts  = [r[0] for r in db.execute('SELECT DISTINCT AccountName FROM ReportPipeline WHERE AccountName IS NOT NULL ORDER BY AccountName').fetchall()]
+    user_profile = {}
+    for key in ('user_full_name', 'user_email', 'user_phone'):
+        row = db.execute('SELECT value FROM Settings WHERE key=?', (key,)).fetchone()
+        user_profile[key] = row[0] if row else ''
     return render_template('settings.html', commission_split=current, tolerance=tolerance,
                            kristin_split=kristin_split, kristin_cut=kristin_cut,
                            overrides=overrides, accounts=accounts,
                            date_format_options=DATE_FORMAT_OPTIONS,
                            current_date_fmt=current_date_fmt,
-                           today_preview=today_preview)
+                           today_preview=today_preview,
+                           user_profile=user_profile)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
@@ -3430,6 +3441,91 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+
+    _ensure_hotel_points_tables(db)
+
+
+def _ensure_hotel_points_tables(db):
+    """Create hotel_points_program + hotel_points_request tables and seed chains."""
+    db.executescript('''
+        CREATE TABLE IF NOT EXISTS hotel_points_program (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            chain_name              TEXT UNIQUE NOT NULL,
+            member_number           TEXT,
+            submission_type         TEXT NOT NULL DEFAULT 'manual',
+            form_template_data      BLOB,
+            form_template_filename  TEXT,
+            form_url                TEXT,
+            field_mapping_json      TEXT DEFAULT '{}',
+            submission_window_days  INTEGER DEFAULT 90,
+            receipt_window_days     INTEGER DEFAULT 60,
+            notes                   TEXT,
+            active                  INTEGER DEFAULT 1,
+            created_at              TEXT DEFAULT (datetime('now')),
+            updated_at              TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS hotel_points_request (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            pickup_config_id            INTEGER,
+            program_id                  INTEGER NOT NULL REFERENCES hotel_points_program(id),
+            booking_id                  TEXT,
+            form_generated_at           TEXT,
+            form_sent_date              TEXT,
+            sent_to_name                TEXT,
+            sent_to_email               TEXT,
+            generated_doc_data          BLOB,
+            generated_doc_filename      TEXT,
+            points_received_date        TEXT,
+            points_awarded              INTEGER,
+            status                      TEXT DEFAULT 'pending',
+            cvent_rfp_code              TEXT,
+            contract_signature_date     TEXT,
+            incentive_type              TEXT,
+            award_timing                TEXT,
+            second_recipient_name       TEXT,
+            second_recipient_email      TEXT,
+            second_recipient_phone      TEXT,
+            second_recipient_number     TEXT,
+            resend_count                INTEGER DEFAULT 0,
+            last_resend_date            TEXT,
+            rewards_form_link           TEXT,
+            notes                       TEXT,
+            created_at                  TEXT DEFAULT (datetime('now')),
+            updated_at                  TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_hpr_status     ON hotel_points_request(status);
+        CREATE INDEX IF NOT EXISTS idx_hpr_booking    ON hotel_points_request(booking_id);
+        CREATE INDEX IF NOT EXISTS idx_hpr_pickup_cfg ON hotel_points_request(pickup_config_id);
+        CREATE INDEX IF NOT EXISTS idx_hpr_program    ON hotel_points_request(program_id);
+    ''')
+    db.commit()
+
+    # Seed seven default chain rows on first run
+    existing = db.execute("SELECT COUNT(*) FROM hotel_points_program").fetchone()[0]
+    if existing == 0:
+        from points_utils import default_chain_seeds
+        for seed in default_chain_seeds():
+            db.execute('''
+                INSERT INTO hotel_points_program
+                    (chain_name, submission_type, form_url, field_mapping_json,
+                     submission_window_days, receipt_window_days, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (seed['chain_name'], seed['submission_type'], seed['form_url'],
+                  seed['field_mapping_json'], seed['submission_window_days'],
+                  seed['receipt_window_days'], seed['notes']))
+        db.commit()
+
+    # Seed user profile settings if absent (defaults can be edited via /settings)
+    for key, default in [('user_full_name', ''),
+                         ('user_email',     ''),
+                         ('user_phone',     '')]:
+        row = db.execute('SELECT 1 FROM Settings WHERE key=?', (key,)).fetchone()
+        if not row:
+            db.execute('INSERT INTO Settings (key, value) VALUES (?, ?)',
+                       (key, default))
+    db.commit()
 
 
 try:
@@ -5215,9 +5311,22 @@ def status_board():
         'missing_client_contact':('info',    'Missing Client Name or Email',                   'bi-person-x-fill'),
         'missing_cutoff':        ('info',    'No Cutoff Date Set',                             'bi-calendar-minus-fill'),
         'missing_rate':          ('info',    'No Contracted Room Rate',                        'bi-currency-dollar'),
+        'points_overdue':        ('warning', 'Hotel Points Not Received',                      'bi-award-fill'),
     }
 
     issues_by_type = {k: [] for k in ISSUE_META}
+
+    # Preload hotel-points programs and existing requests for fast lookup
+    from points_utils import detect_chain as _detect_chain_sb
+    hp_programs = {row['chain_name']: row for row in db.execute(
+        'SELECT id, chain_name, active, receipt_window_days FROM hotel_points_program WHERE active=1'
+    ).fetchall()}
+    hp_requests = {}
+    for r in db.execute(
+        'SELECT pickup_config_id, program_id, status, points_received_date '
+        'FROM hotel_points_request WHERE pickup_config_id IS NOT NULL'
+    ).fetchall():
+        hp_requests[(r['pickup_config_id'], r['program_id'])] = r
 
     for cfg in configs:
         cid   = cfg['id']
@@ -5327,6 +5436,27 @@ def status_board():
                            url_for('pickup_event', cid=cid))
             except Exception:
                 pass
+
+        # 2d. Hotel points overdue — event ended 60+ days ago, points not received
+        if is_ended and event_end:
+            chain = _detect_chain_sb(cfg['hotel'])
+            if chain and chain in hp_programs:
+                prog = hp_programs[chain]
+                try:
+                    days_since_end = (datetime.strptime(today, '%Y-%m-%d') -
+                                      datetime.strptime(event_end, '%Y-%m-%d')).days
+                except Exception:
+                    days_since_end = None
+                if days_since_end is not None and days_since_end >= 60:
+                    req = hp_requests.get((cid, prog['id']))
+                    if not req:
+                        _issue('points_overdue',
+                               f'Event ended {days_since_end} days ago — no {chain} points request created.',
+                               url_for('points_generate', cid=cid))
+                    elif req['status'] not in ('received', 'cancelled', 'disallowed'):
+                        _issue('points_overdue',
+                               f'Event ended {days_since_end} days ago — {chain} points still not received '
+                               f'(status: {req["status"] or "pending"}).')
 
         # 3. No hotel contact in 21+ days (current events only)
         if is_current:
@@ -6856,6 +6986,22 @@ def pickup_event(cid):
         "SELECT * FROM pickup_amendments WHERE config_id=? ORDER BY uploaded_at DESC", (cid,)
     ).fetchall()
 
+    # Hotel Points integration
+    from points_utils import detect_chain
+    points_program = None
+    points_request = None
+    if config['contract_data']:
+        chain = detect_chain(config['hotel'])
+        if chain:
+            points_program = db.execute(
+                'SELECT * FROM hotel_points_program WHERE chain_name=? AND active=1',
+                (chain,)).fetchone()
+            if points_program:
+                points_request = db.execute(
+                    'SELECT * FROM hotel_points_request WHERE pickup_config_id=? AND program_id=? '
+                    'ORDER BY id DESC LIMIT 1',
+                    (cid, points_program['id'])).fetchone()
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -6872,7 +7018,9 @@ def pickup_event(cid):
                            tasks=tasks, event_notes=event_notes, all_users=all_users,
                            last_ota_rate=last_ota_rate, last_ota_url=last_ota_url,
                            show_rate_issue=show_rate_issue,
-                           amendments=amendments)
+                           amendments=amendments,
+                           points_program=points_program,
+                           points_request=points_request)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -11842,6 +11990,501 @@ def admin_test_email():
     if ok:
         return f'Test email sent to {to} ✓'
     return f'Failed: {err}', 500
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Hotel Planner Points — module
+# ════════════════════════════════════════════════════════════════════════════
+
+def _get_user_profile(db):
+    """Return dict of user profile settings for points form filling."""
+    out = {}
+    for key in ('user_full_name', 'user_email', 'user_phone'):
+        row = db.execute('SELECT value FROM Settings WHERE key=?', (key,)).fetchone()
+        out[key] = row[0] if row else ''
+    return out
+
+
+def _get_program(db, chain_name=None, program_id=None):
+    if program_id:
+        return db.execute('SELECT * FROM hotel_points_program WHERE id=?',
+                          (program_id,)).fetchone()
+    if chain_name:
+        return db.execute('SELECT * FROM hotel_points_program WHERE chain_name=?',
+                          (chain_name,)).fetchone()
+    return None
+
+
+def _build_field_values_for_request(db, request_row):
+    """Helper: assemble field_values from a request row."""
+    from points_utils import build_field_values
+    program = _get_program(db, program_id=request_row['program_id'])
+    pickup_cfg = None
+    if request_row['pickup_config_id']:
+        pickup_cfg = db.execute('SELECT * FROM pickup_config WHERE id=?',
+                                (request_row['pickup_config_id'],)).fetchone()
+    booking = None
+    if request_row['booking_id']:
+        booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId=?',
+                             (request_row['booking_id'],)).fetchone()
+    user_profile = _get_user_profile(db)
+    pickup_cfg_d = dict(pickup_cfg) if pickup_cfg else None
+    booking_d    = dict(booking)    if booking    else None
+    return build_field_values(user_profile, dict(program) if program else None,
+                              dict(request_row), pickup_cfg_d, booking_d), program, pickup_cfg, booking
+
+
+@app.route('/points')
+def points_dashboard():
+    """List all hotel points requests across chains."""
+    db = get_db()
+    today = datetime.today().strftime('%Y-%m-%d')
+
+    requests_rows = db.execute('''
+        SELECT r.*, p.chain_name, p.member_number, p.submission_type,
+               pc.event_name AS pickup_event_name, pc.hotel AS pickup_hotel,
+               pc.organization AS pickup_org,
+               pc.event_start AS pickup_event_start,
+               pc.event_end   AS pickup_event_end
+        FROM hotel_points_request r
+        LEFT JOIN hotel_points_program p ON p.id = r.program_id
+        LEFT JOIN pickup_config pc       ON pc.id = r.pickup_config_id
+        ORDER BY COALESCE(r.points_received_date, r.form_sent_date, r.created_at) DESC
+    ''').fetchall()
+
+    kpi = {
+        'total':     len(requests_rows),
+        'pending':   sum(1 for r in requests_rows if r['status'] == 'pending'),
+        'submitted': sum(1 for r in requests_rows if r['status'] == 'submitted'),
+        'received':  sum(1 for r in requests_rows if r['status'] == 'received'),
+        'overdue':   0,
+        'points_ytd': 0,
+    }
+    current_year = datetime.today().strftime('%Y')
+    for r in requests_rows:
+        if r['points_awarded'] and r['points_received_date'] and \
+           str(r['points_received_date']).startswith(current_year):
+            kpi['points_ytd'] += int(r['points_awarded'] or 0)
+        ev_end = r['pickup_event_end']
+        if ev_end and r['status'] not in ('received', 'cancelled', 'disallowed'):
+            try:
+                d = datetime.strptime(str(ev_end)[:10], '%Y-%m-%d')
+                if (datetime.today() - d).days > 60:
+                    kpi['overdue'] += 1
+            except Exception:
+                pass
+
+    by_chain = {}
+    for r in requests_rows:
+        cn = r['chain_name'] or 'Other'
+        if cn not in by_chain:
+            by_chain[cn] = {'count': 0, 'points': 0, 'received': 0}
+        by_chain[cn]['count'] += 1
+        if r['status'] == 'received':
+            by_chain[cn]['received'] += 1
+        if r['points_awarded']:
+            by_chain[cn]['points'] += int(r['points_awarded'] or 0)
+
+    chain_filter  = request.args.get('chain', '').strip()
+    status_filter = request.args.get('status', '').strip()
+    filtered = requests_rows
+    if chain_filter:
+        filtered = [r for r in filtered if (r['chain_name'] or '') == chain_filter]
+    if status_filter:
+        filtered = [r for r in filtered if (r['status'] or '') == status_filter]
+
+    return render_template('points_dashboard.html',
+                           requests=filtered, kpi=kpi, by_chain=by_chain,
+                           chain_filter=chain_filter, status_filter=status_filter,
+                           today=today)
+
+
+@app.route('/points/programs')
+def points_programs():
+    db = get_db()
+    programs = db.execute('SELECT * FROM hotel_points_program ORDER BY chain_name').fetchall()
+    return render_template('points_programs.html', programs=programs)
+
+
+@app.route('/points/programs/<int:pid>/edit', methods=['GET', 'POST'])
+def points_program_edit(pid):
+    db = get_db()
+    program = db.execute('SELECT * FROM hotel_points_program WHERE id=?', (pid,)).fetchone()
+    if not program:
+        flash('Program not found.', 'error')
+        return redirect(url_for('points_programs'))
+
+    if request.method == 'POST':
+        member_number = request.form.get('member_number', '').strip() or None
+        submission_type = request.form.get('submission_type', 'manual').strip()
+        form_url = request.form.get('form_url', '').strip() or None
+        submission_window_days = request.form.get('submission_window_days', '90').strip()
+        receipt_window_days    = request.form.get('receipt_window_days', '60').strip()
+        notes = request.form.get('notes', '').strip() or None
+        field_mapping_raw = request.form.get('field_mapping_json', '').strip()
+        try:
+            json.loads(field_mapping_raw) if field_mapping_raw else {}
+            field_mapping_json = field_mapping_raw or '{}'
+        except Exception:
+            flash('Field mapping JSON is invalid — not saved.', 'error')
+            field_mapping_json = program['field_mapping_json']
+        active = 1 if request.form.get('active') == 'on' else 0
+
+        f = request.files.get('template_file')
+        template_data = program['form_template_data']
+        template_filename = program['form_template_filename']
+        if f and f.filename:
+            if not f.filename.lower().endswith('.docx'):
+                flash('Template must be a .docx file.', 'error')
+            else:
+                template_data = f.read()
+                template_filename = f.filename
+
+        db.execute('''UPDATE hotel_points_program
+            SET member_number=?, submission_type=?, form_url=?,
+                submission_window_days=?, receipt_window_days=?,
+                notes=?, field_mapping_json=?, active=?,
+                form_template_data=?, form_template_filename=?,
+                updated_at=datetime('now')
+            WHERE id=?''',
+            (member_number, submission_type, form_url,
+             int(submission_window_days or 90), int(receipt_window_days or 60),
+             notes, field_mapping_json, active,
+             template_data, template_filename, pid))
+        db.commit()
+        flash(f'{program["chain_name"]} program saved.', 'success')
+        return redirect(url_for('points_programs'))
+
+    try:
+        mapping_pretty = json.dumps(json.loads(program['field_mapping_json'] or '{}'), indent=2)
+    except Exception:
+        mapping_pretty = program['field_mapping_json'] or '{}'
+    return render_template('points_program_edit.html', program=program,
+                           mapping_pretty=mapping_pretty)
+
+
+@app.route('/points/programs/<int:pid>/template')
+def points_program_template_download(pid):
+    db = get_db()
+    row = db.execute('SELECT chain_name, form_template_filename, form_template_data '
+                     'FROM hotel_points_program WHERE id=?', (pid,)).fetchone()
+    if not row or not row['form_template_data']:
+        flash('No template on file for this program.', 'error')
+        return redirect(url_for('points_program_edit', pid=pid))
+    return send_file(io.BytesIO(row['form_template_data']),
+                     as_attachment=True,
+                     download_name=row['form_template_filename'] or f'{row["chain_name"]}_template.docx')
+
+
+@app.route('/pickup/<int:cid>/points/generate', methods=['GET', 'POST'])
+def points_generate(cid):
+    from points_utils import detect_chain
+    db = get_db()
+    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
+    if not config:
+        flash('Pickup event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    chain = detect_chain(config['hotel'])
+    if not chain:
+        flash(f'Could not detect a hotel chain from "{config["hotel"]}". '
+              f'Add the chain in Hotel Points → Programs and try again.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    program = _get_program(db, chain_name=chain)
+    if not program or not program['active']:
+        flash(f'No active program for {chain}.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    existing = db.execute(
+        'SELECT * FROM hotel_points_request WHERE pickup_config_id=? AND program_id=?',
+        (cid, program['id'])).fetchone()
+    if existing:
+        rid = existing['id']
+    else:
+        cur = db.execute('''INSERT INTO hotel_points_request
+            (pickup_config_id, program_id, booking_id, form_generated_at,
+             sent_to_name, sent_to_email, status)
+            VALUES (?, ?, ?, datetime('now'), ?, ?, 'pending')''',
+            (cid, program['id'], config['booking_id'],
+             config['hotel_contact'], config['hotel_contact_email']))
+        rid = cur.lastrowid
+        db.commit()
+    return redirect(url_for('points_request_detail', rid=rid))
+
+
+@app.route('/points/<int:rid>')
+def points_request_detail(rid):
+    db = get_db()
+    req = db.execute('SELECT * FROM hotel_points_request WHERE id=?', (rid,)).fetchone()
+    if not req:
+        flash('Points request not found.', 'error')
+        return redirect(url_for('points_dashboard'))
+    field_values, program, pickup_cfg, booking = _build_field_values_for_request(db, req)
+    try:
+        mapping = json.loads(program['field_mapping_json'] or '{}') if program else {}
+    except Exception:
+        mapping = {}
+    return render_template('points_request_detail.html',
+                           req=req, program=program,
+                           pickup_cfg=pickup_cfg, booking=booking,
+                           field_values=field_values, mapping=mapping)
+
+
+@app.route('/points/<int:rid>/edit', methods=['POST'])
+def points_request_edit(rid):
+    db = get_db()
+    fields = {}
+    for key in ('form_sent_date', 'sent_to_name', 'sent_to_email',
+                'points_received_date', 'points_awarded', 'status',
+                'cvent_rfp_code', 'contract_signature_date',
+                'incentive_type', 'award_timing',
+                'second_recipient_name', 'second_recipient_email',
+                'second_recipient_phone', 'second_recipient_number',
+                'rewards_form_link', 'notes'):
+        v = request.form.get(key, '').strip()
+        fields[key] = v or None
+    if fields['points_awarded']:
+        try:
+            fields['points_awarded'] = int(str(fields['points_awarded']).replace(',', ''))
+        except Exception:
+            fields['points_awarded'] = None
+    if fields['points_received_date'] and fields['status'] in ('pending', 'submitted', None):
+        fields['status'] = 'received'
+    elif fields['form_sent_date'] and fields['status'] in ('pending', None):
+        fields['status'] = 'submitted'
+
+    sets = ', '.join(f'{k}=?' for k in fields.keys())
+    params = list(fields.values()) + [rid]
+    db.execute(f'UPDATE hotel_points_request SET {sets}, updated_at=datetime("now") WHERE id=?',
+               params)
+    db.commit()
+    flash('Points request updated.', 'success')
+    return redirect(url_for('points_request_detail', rid=rid))
+
+
+@app.route('/points/<int:rid>/download')
+def points_request_download(rid):
+    from points_utils import fill_docx_template
+    db = get_db()
+    req = db.execute('SELECT * FROM hotel_points_request WHERE id=?', (rid,)).fetchone()
+    if not req:
+        flash('Points request not found.', 'error')
+        return redirect(url_for('points_dashboard'))
+    program = _get_program(db, program_id=req['program_id'])
+    if not program or not program['form_template_data']:
+        flash(f'No .docx template uploaded for {program["chain_name"] if program else "this chain"}. '
+              f'Upload one in Hotel Points → Programs.', 'error')
+        return redirect(url_for('points_request_detail', rid=rid))
+
+    field_values, _, _, _ = _build_field_values_for_request(db, req)
+    try:
+        mapping = json.loads(program['field_mapping_json'] or '{}')
+    except Exception:
+        mapping = {}
+
+    filled = fill_docx_template(program['form_template_data'], field_values, mapping)
+    fname = f'{(field_values.get("event_name") or "Event").replace("/", "-")[:60]} - {program["chain_name"]} Points Request.docx'
+    db.execute('''UPDATE hotel_points_request
+        SET generated_doc_data=?, generated_doc_filename=?,
+            form_generated_at=datetime('now'), updated_at=datetime('now')
+        WHERE id=?''', (filled, fname, rid))
+    db.commit()
+    return send_file(io.BytesIO(filled), as_attachment=True,
+                     download_name=fname,
+                     mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+
+
+@app.route('/points/<int:rid>/mailto')
+def points_request_mailto(rid):
+    from points_utils import build_mailto
+    db = get_db()
+    req = db.execute('SELECT * FROM hotel_points_request WHERE id=?', (rid,)).fetchone()
+    if not req:
+        flash('Points request not found.', 'error')
+        return redirect(url_for('points_dashboard'))
+    field_values, program, _, _ = _build_field_values_for_request(db, req)
+    profile = _get_user_profile(db)
+
+    chain = program['chain_name'] if program else 'Hotel'
+    event = field_values.get('event_name') or 'event'
+    subject = f'{event} — {chain} Planner Points Request'
+    body_lines = [
+        f"Hello {req['sent_to_name'] or field_values.get('hotel_contact_name') or ''},",
+        '',
+        f'Attached is the {chain} planner points request form for {event}.',
+        '',
+        'Event details:',
+        f"  Hotel:       {field_values.get('hotel', '')}",
+        f"  Event Dates: {field_values.get('meeting_dates_formatted') or (field_values.get('event_start','') + ' to ' + field_values.get('event_end',''))}",
+    ]
+    if field_values.get('cvent_rfp_code'):
+        body_lines.append(f"  Cvent RFP:   {field_values['cvent_rfp_code']}")
+    if field_values.get('total_contracted_rooms'):
+        body_lines.append(f"  Room Block:  {field_values['total_contracted_rooms']} total room nights")
+    body_lines += [
+        '',
+        'Please process the attached form for the planner points credit.',
+        '',
+        'Thank you,',
+        profile.get('user_full_name') or '',
+        profile.get('user_email') or '',
+        profile.get('user_phone') or '',
+        'ConferenceDirect',
+    ]
+    url = build_mailto(req['sent_to_email'] or '', subject, '\n'.join(body_lines))
+    return redirect(url)
+
+
+@app.route('/points/<int:rid>/resend', methods=['POST'])
+def points_request_resend(rid):
+    db = get_db()
+    req = db.execute('SELECT * FROM hotel_points_request WHERE id=?', (rid,)).fetchone()
+    if not req:
+        flash('Points request not found.', 'error')
+        return redirect(url_for('points_dashboard'))
+    db.execute('''UPDATE hotel_points_request
+        SET resend_count=COALESCE(resend_count,0)+1,
+            last_resend_date=date('now'),
+            updated_at=datetime('now')
+        WHERE id=?''', (rid,))
+    db.commit()
+    flash('Resend logged — generate and re-attach the form, then send.', 'success')
+    return redirect(url_for('points_request_detail', rid=rid))
+
+
+@app.route('/points/<int:rid>/delete', methods=['POST'])
+def points_request_delete(rid):
+    db = get_db()
+    db.execute('UPDATE hotel_points_request SET status="cancelled", '
+               'updated_at=datetime("now") WHERE id=?', (rid,))
+    db.commit()
+    flash('Points request marked cancelled.', 'success')
+    return redirect(url_for('points_dashboard'))
+
+
+@app.route('/points/<int:rid>/weblink-helper')
+def points_weblink_helper(rid):
+    db = get_db()
+    req = db.execute('SELECT * FROM hotel_points_request WHERE id=?', (rid,)).fetchone()
+    if not req:
+        flash('Points request not found.', 'error')
+        return redirect(url_for('points_dashboard'))
+    field_values, program, _, _ = _build_field_values_for_request(db, req)
+    try:
+        mapping = json.loads(program['field_mapping_json'] or '{}') if program else {}
+    except Exception:
+        mapping = {}
+    return render_template('points_weblink_helper.html',
+                           req=req, program=program,
+                           field_values=field_values, mapping=mapping)
+
+
+@app.route('/points/import', methods=['GET', 'POST'])
+def points_import():
+    from points_utils import import_tracking_xlsx
+    db = get_db()
+    programs = db.execute(
+        'SELECT id, chain_name FROM hotel_points_program ORDER BY chain_name'
+    ).fetchall()
+    program_by_chain = {p['chain_name']: p['id'] for p in programs}
+
+    if request.method == 'POST':
+        action = request.form.get('action', 'preview')
+
+        if action == 'preview':
+            chain_name = request.form.get('chain_name', '').strip()
+            f = request.files.get('file')
+            if not f or not f.filename or not chain_name:
+                flash('Choose a chain and an .xlsx file.', 'error')
+                return redirect(url_for('points_import'))
+            if chain_name not in program_by_chain:
+                flash(f'Unknown chain "{chain_name}".', 'error')
+                return redirect(url_for('points_import'))
+            try:
+                rows = import_tracking_xlsx(f.read(), chain_name)
+            except Exception as e:
+                flash(f'Could not parse file: {e}', 'error')
+                return redirect(url_for('points_import'))
+
+            preview = []
+            for row in rows:
+                match = db.execute('''
+                    SELECT id, booking_id, event_name, hotel, event_start, event_end
+                    FROM pickup_config
+                    WHERE LOWER(TRIM(event_name)) = LOWER(TRIM(?))
+                    ORDER BY id DESC LIMIT 1
+                ''', (row['event_name'],)).fetchone()
+                if not match and row['start_date']:
+                    match = db.execute('''
+                        SELECT id, booking_id, event_name, hotel, event_start, event_end
+                        FROM pickup_config
+                        WHERE LOWER(event_name) LIKE LOWER(?)
+                          AND event_start = ?
+                        LIMIT 1
+                    ''', ('%' + row['event_name'][:30] + '%', row['start_date'])).fetchone()
+                dup = db.execute('''
+                    SELECT id FROM hotel_points_request
+                    WHERE program_id=? AND
+                          (pickup_config_id=? OR
+                           (pickup_config_id IS NULL AND notes LIKE ?))
+                    LIMIT 1
+                ''', (program_by_chain[chain_name],
+                      match['id'] if match else -1,
+                      '%' + row['event_name'][:30] + '%')).fetchone()
+                preview.append({
+                    'row': row,
+                    'pickup_config_id': match['id'] if match else None,
+                    'pickup_booking_id': match['booking_id'] if match else None,
+                    'duplicate': bool(dup),
+                })
+
+            return render_template('points_import.html',
+                                   programs=programs, preview=preview,
+                                   chain_name=chain_name,
+                                   matched=sum(1 for p in preview if p['pickup_config_id'] and not p['duplicate']),
+                                   unmatched=sum(1 for p in preview if not p['pickup_config_id'] and not p['duplicate']),
+                                   skipped=sum(1 for p in preview if p['duplicate']))
+
+        elif action == 'commit':
+            chain_name = request.form.get('chain_name', '').strip()
+            payload = request.form.get('payload_json', '')
+            try:
+                rows = json.loads(payload)
+            except Exception:
+                flash('Invalid payload — re-run preview.', 'error')
+                return redirect(url_for('points_import'))
+            program_id = program_by_chain.get(chain_name)
+            if not program_id:
+                flash('Unknown chain.', 'error')
+                return redirect(url_for('points_import'))
+
+            inserted = 0
+            for item in rows:
+                if item.get('duplicate'):
+                    continue
+                row = item['row']
+                db.execute('''INSERT INTO hotel_points_request
+                    (pickup_config_id, program_id, booking_id,
+                     form_sent_date, points_received_date, points_awarded,
+                     status, rewards_form_link, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (item.get('pickup_config_id'), program_id,
+                     item.get('pickup_booking_id'),
+                     row.get('form_sent_date'),
+                     row.get('points_received_date'),
+                     row.get('points_awarded'),
+                     row.get('status', 'pending'),
+                     row.get('rewards_form_link'),
+                     (f"[Imported from {row.get('sheet','')} | hotel: {row.get('hotel','')}] " +
+                      (row.get('notes') or ''))[:2000]))
+                inserted += 1
+            db.commit()
+            flash(f'Imported {inserted} {chain_name} points records.', 'success')
+            return redirect(url_for('points_dashboard'))
+
+    return render_template('points_import.html', programs=programs,
+                           preview=None, chain_name=None)
 
 
 if __name__ == '__main__':

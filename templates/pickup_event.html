@@ -211,6 +211,26 @@
     <a href="{{ url_for('pickup_contract_download', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-download me-1"></i>Download Contract
     </a>
+    {% if points_program %}
+      {% if points_request %}
+      <a href="{{ url_for('points_request_detail', rid=points_request.id) }}"
+         class="btn btn-outline-success btn-sm">
+        <i class="bi bi-award me-1"></i>View {{ points_program.chain_name }} Points
+        {% if points_request.status == 'received' %}
+          <span class="badge bg-success ms-1">✓</span>
+        {% elif points_request.status == 'submitted' %}
+          <span class="badge bg-warning text-dark ms-1">Sent</span>
+        {% endif %}
+      </a>
+      {% else %}
+      <form method="post" action="{{ url_for('points_generate', cid=config['id']) }}" class="d-inline"
+            onsubmit="return confirm('Create {{ points_program.chain_name }} points request for this booking?');">
+        <button type="submit" class="btn btn-outline-success btn-sm">
+          <i class="bi bi-award me-1"></i>Generate {{ points_program.chain_name }} Points Request
+        </button>
+      </form>
+      {% endif %}
+    {% endif %}
     {% endif %}
     <button type="button" class="btn btn-outline-warning btn-sm" data-bs-toggle="modal" data-bs-target="#amendmentModal">
       <i class="bi bi-file-earmark-diff me-1"></i>Import Amendment
