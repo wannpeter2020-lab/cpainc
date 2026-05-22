@@ -5206,6 +5206,7 @@ def status_board():
         'event_ended_no_hhr':    ('danger',  'Event Ended — No HHR Uploaded',                 'bi-file-earmark-x-fill'),
         'rooming_list_due':      ('danger',  'Rooming List Due Within 15 Days',               'bi-list-check'),
         'amenity_order':         ('warning', 'Amenity Order — Meeting in 14 Days',            'bi-gift-fill'),
+        'block_review_due':      ('warning', 'Room Block Review Due',                          'bi-calendar2-check-fill'),
         'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',                  'bi-telephone-x-fill'),
         'cutoff_approaching':    ('warning', 'Cutoff Approaching — Block Not Verified',        'bi-alarm-fill'),
         'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)','bi-grid-fill'),
@@ -5257,6 +5258,19 @@ def status_board():
         last_rpt  = latest_pickup.get(cid)
         last_ctct = latest_contact.get(cid)
         cutoff    = (cfg['cutoff_date'] or '').strip()
+
+        # 0a. Room block review due — within 15 days of block_review_date
+        block_review_date = (cfg['block_review_date'] or '').strip()
+        if block_review_date and not is_ended:
+            try:
+                days_to_review = (datetime.strptime(block_review_date, '%Y-%m-%d') -
+                                  datetime.strptime(today, '%Y-%m-%d')).days
+                if 0 <= days_to_review <= 15:
+                    _issue('block_review_due',
+                           f'Block review date is {block_review_date} — {days_to_review} day{"s" if days_to_review != 1 else ""} away.',
+                           url_for('pickup_event', cid=cid))
+            except Exception:
+                pass
 
         # 0. Amenity order — meeting starts within 14 days
         if event_start and not is_started:
