@@ -8132,6 +8132,14 @@ def pickup_upload_contract(cid):
                 group_contact       = request.form.get('group_contact', '').strip() or None
                 group_contact_email = request.form.get('group_contact_email', '').strip() or None
 
+                # Don't overwrite an existing hotel contact name — pass None so
+                # COALESCE(?, existing) preserves the card's current value.
+                if (config['hotel_contact'] or '').strip():
+                    hotel_contact        = None
+                    hotel_contact_email  = None
+                    hotel_contact2       = None
+                    hotel_contact2_email = None
+
                 contract_data     = request.form.get('_contract_data_b64', '')
                 contract_filename = request.form.get('_contract_filename', '')
                 import base64
