@@ -13,7 +13,7 @@
 </div>
 
 {# ── Summary badges ── #}
-{% set severity_order = ['overdue_pickup','event_ended_no_hhr','past_cutoff_no_history','no_recent_contact','cutoff_approaching','uniform_block','empty_block','missing_hotel_email','missing_client_contact','missing_cutoff','missing_rate'] %}
+{% set severity_order = ['overdue_pickup','event_ended_no_hhr','past_cutoff_no_history','rooming_list_due','amenity_order','block_review_due','no_recent_contact','cutoff_approaching','uniform_block','empty_block','missing_hotel_email','missing_client_contact','missing_cutoff','missing_rate'] %}
 {% set total = total_issues %}
 
 {% if total == 0 %}
