@@ -1316,7 +1316,9 @@ def import_voucher():
         # the last two decimal numbers are the amount / amount-paid, and any
         # MM/DD/YYYY is the end date.  This handles rows whose hotel/account
         # text wraps across multiple lines.
-        inv_re   = re.compile(r'\d{4,9}-F\d+(?:-[A-Z0-9]+)?')
+        # Matches sourcing commission invoices (e.g. 237264-F1-TD) and
+        # housing/registration invoices (e.g. 169500-APR 2026)
+        inv_re   = re.compile(r'\d{4,9}-(?:F\d+(?:-[A-Z0-9]+)?|[A-Z]{2,4}\s+\d{4})')
         date_re  = re.compile(r'\b(\d{1,2}/\d{1,2}/\d{4})\b')
         amt_re   = re.compile(r'[\d,]+\.\d{2}')
 
