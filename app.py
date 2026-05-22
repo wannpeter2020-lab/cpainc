@@ -8552,12 +8552,33 @@ def pickup_import_amendment(cid):
             _fh.write(file_bytes)
 
         current_block = json.loads(config['contracted_block'] or '{}')
+
+        # ── Date-shift: re-key the existing block to the new dates ───────────
+        date_shift_applied = False
+        date_shift = extracted.get('date_shift') or {}
+        if date_shift and not extracted.get('contracted_block') and current_block:
+            try:
+                from datetime import date as _ddate, timedelta as _td
+                old_start = _ddate.fromisoformat(date_shift['old_start'])
+                new_start = _ddate.fromisoformat(date_shift['new_start'])
+                delta = new_start - old_start
+                shifted = {}
+                for d, rooms in sorted(current_block.items()):
+                    orig = _ddate.fromisoformat(d)
+                    shifted[(orig + delta).isoformat()] = rooms
+                extracted['contracted_block'] = shifted
+                date_shift_applied = True
+            except Exception:
+                pass  # leave contracted_block as None; user sees empty table
+
         return render_template('pickup_amendment_review.html',
                                config=config,
                                extracted=extracted,
                                current_block=current_block,
                                filename=f.filename,
-                               tmp_id=tmp_id)
+                               tmp_id=tmp_id,
+                               date_shift=date_shift,
+                               date_shift_applied=date_shift_applied)
 
     # GET — redirect back (upload happens via modal POST)
     return redirect(url_for('pickup_event', cid=cid))

@@ -3944,6 +3944,10 @@ The JSON object must have exactly these keys:
   contracted_block — an object mapping date (YYYY-MM-DD) to rooms (integer) for ONLY the nights
                      that are being changed by this amendment. Nights with 0 rooms mean that night
                      is being REMOVED from the block. Null if the block is not changed.
+  date_shift       — use this INSTEAD of contracted_block when the amendment shifts the entire
+                     date range without providing a new per-night room count table. Format:
+                     {"old_start":"YYYY-MM-DD","old_end":"YYYY-MM-DD","new_start":"YYYY-MM-DD","new_end":"YYYY-MM-DD"}
+                     Set to null if contracted_block is populated or dates are not shifting.
   contracted_rate  — the new nightly room rate as a number (e.g. 219.00), or null if rate is not changing
   hotel            — the new hotel name if it has changed (e.g. rebrand/rename), or null if not changing
   cutoff_date      — the new cutoff/release date in YYYY-MM-DD format, or null if not changing
@@ -3955,6 +3959,10 @@ Rules:
   A night with 0 rooms means it is being removed from the block.
 - If the amendment shows a flat block change (e.g. "block increased to 50 rooms per night"), include
   all affected nights using the date range stated.
+- Use date_shift (not contracted_block) when the amendment says something like "arrival changes
+  from [date] to [date]" or "dates are moved from [range] to [range]" with no new per-night
+  room count table. The room counts stay the same, only the dates change.
+- Never populate both contracted_block and date_shift — use one or the other.
 - The description field is always required — summarize what this amendment does.
 
 Contract amendment text:
@@ -4019,6 +4027,10 @@ The JSON object must have exactly these keys:
   description      — a short plain-English summary of what this amendment changes (1-2 sentences), required
   contracted_block — an object mapping date (YYYY-MM-DD) to rooms (integer) for ONLY the nights
                      being changed. Nights with 0 rooms mean removal from block. Null if not changed.
+  date_shift       — use this INSTEAD of contracted_block when the amendment shifts the entire
+                     date range without a new per-night room count table. Format:
+                     {"old_start":"YYYY-MM-DD","old_end":"YYYY-MM-DD","new_start":"YYYY-MM-DD","new_end":"YYYY-MM-DD"}
+                     Null if contracted_block is populated or dates are not shifting.
   contracted_rate  — the new nightly room rate as a number, or null if rate is not changing
   hotel            — the new hotel name if it has changed (rebrand/rename), or null
   cutoff_date      — the new cutoff/release date in YYYY-MM-DD format, or null
@@ -4026,6 +4038,9 @@ The JSON object must have exactly these keys:
 Rules:
 - ONLY populate a field if the amendment explicitly changes that value. Null = not changing.
 - For contracted_block: only include nights being added, changed, or removed.
+- Use date_shift (not contracted_block) when the amendment says arrival/departure dates are
+  moving from one range to another, with no new per-night room count table provided.
+- Never populate both contracted_block and date_shift — use one or the other.
 - The description field is always required."""
 
     content = [{'type': 'text', 'text': amendment_prompt}]
@@ -4087,8 +4102,8 @@ def parse_amendment_document(file_bytes, filename=''):
       error             — str or None
     """
     empty = {
-        'description': '', 'contracted_block': None, 'contracted_rate': None,
-        'hotel': None, 'cutoff_date': None, 'error': None,
+        'description': '', 'contracted_block': None, 'date_shift': None,
+        'contracted_rate': None, 'hotel': None, 'cutoff_date': None, 'error': None,
     }
 
     text = _extract_text_from_contract(file_bytes, filename)

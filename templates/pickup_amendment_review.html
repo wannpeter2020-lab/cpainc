@@ -14,6 +14,21 @@
   <span>Changes extracted from <strong>{{ filename }}</strong> — review and correct before applying.</span>
 </div>
 
+{% if date_shift_applied %}
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-3" style="max-width:760px">
+  <i class="bi bi-calendar-arrows fs-5"></i>
+  <span>
+    <strong>Date shift detected.</strong>
+    The amendment moves the group dates from
+    <strong>{{ date_shift.old_start | us_date }} – {{ date_shift.old_end | us_date }}</strong>
+    to
+    <strong>{{ date_shift.new_start | us_date }} – {{ date_shift.new_end | us_date }}</strong>
+    with no new room count table — the existing block has been shifted to the new dates below.
+    <em>Review the nights and verify the counts are still correct before applying.</em>
+  </span>
+</div>
+{% endif %}
+
 <form method="post" action="{{ url_for('pickup_import_amendment', cid=config['id']) }}">
   <input type="hidden" name="action" value="confirm">
   <input type="hidden" name="_amend_filename" value="{{ filename }}">
@@ -128,7 +143,8 @@
       </div>
       <div class="form-check mb-0">
         <input class="form-check-input" type="checkbox" name="replace_block" id="replaceBlockCheck"
-               value="1" onchange="toggleReplaceMode(this.checked)">
+               value="1" onchange="toggleReplaceMode(this.checked)"
+               {% if date_shift_applied %}checked{% endif %}>
         <label class="form-check-label fw-semibold small" for="replaceBlockCheck">
           This is the complete new block — remove all other nights
         </label>
@@ -315,5 +331,8 @@ function toggleReplaceMode(on) {
 }
 
 renderTable();
+// If replace-mode was pre-checked (date shift), show the dropped-nights panel
+const replaceChk = document.getElementById('replaceBlockCheck');
+if (replaceChk && replaceChk.checked) toggleReplaceMode(true);
 </script>
 {% endblock %}
