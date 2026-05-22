@@ -17,7 +17,7 @@
 <form method="post" action="{{ url_for('pickup_import_amendment', cid=config['id']) }}">
   <input type="hidden" name="action" value="confirm">
   <input type="hidden" name="_amend_filename" value="{{ filename }}">
-  <input type="hidden" name="_amend_data_b64" value="{{ file_b64 }}">
+  <input type="hidden" name="_tmp_id" value="{{ tmp_id }}">
   <input type="hidden" name="block_changes_json" id="block_changes_json"
          value="{{ (extracted.contracted_block or {}) | tojson }}">
 

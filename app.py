@@ -8433,8 +8433,16 @@ def pickup_import_amendment(cid):
                 block_changes   = json.loads(request.form.get('block_changes_json', '{}'))
 
                 filename_stored = request.form.get('_amend_filename', '')
-                file_b64        = request.form.get('_amend_data_b64', '')
-                file_blob       = base64.b64decode(file_b64) if file_b64 else None
+                tmp_id   = request.form.get('_tmp_id', '')
+                tmp_path = os.path.join(tempfile.gettempdir(), f'amend_{tmp_id}') if tmp_id else ''
+                file_blob = None
+                if tmp_path and os.path.exists(tmp_path):
+                    with open(tmp_path, 'rb') as _fh:
+                        file_blob = _fh.read()
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
 
                 # Build audit diff
                 changes = {}
@@ -8536,8 +8544,12 @@ def pickup_import_amendment(cid):
             flash(f'Could not parse amendment: {extracted["error"]}', 'error')
             return redirect(url_for('pickup_event', cid=cid))
 
-        import base64
-        file_b64 = base64.b64encode(file_bytes).decode('ascii')
+        # Write file to temp — avoids round-tripping large PDFs through the form
+        import uuid as _uuid
+        tmp_id   = _uuid.uuid4().hex
+        tmp_path = os.path.join(tempfile.gettempdir(), f'amend_{tmp_id}')
+        with open(tmp_path, 'wb') as _fh:
+            _fh.write(file_bytes)
 
         current_block = json.loads(config['contracted_block'] or '{}')
         return render_template('pickup_amendment_review.html',
@@ -8545,7 +8557,7 @@ def pickup_import_amendment(cid):
                                extracted=extracted,
                                current_block=current_block,
                                filename=f.filename,
-                               file_b64=file_b64)
+                               tmp_id=tmp_id)
 
     # GET — redirect back (upload happens via modal POST)
     return redirect(url_for('pickup_event', cid=cid))
