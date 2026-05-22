@@ -8567,6 +8567,13 @@ def pickup_import_amendment(cid):
                     orig = _ddate.fromisoformat(d)
                     shifted[(orig + delta).isoformat()] = rooms
                 extracted['contracted_block'] = shifted
+                # Also shift the cutoff date by the same offset
+                if config['cutoff_date'] and not extracted.get('cutoff_date'):
+                    try:
+                        shifted_cutoff = (_ddate.fromisoformat(config['cutoff_date']) + delta).isoformat()
+                        extracted['cutoff_date'] = shifted_cutoff
+                    except Exception:
+                        pass
                 date_shift_applied = True
             except Exception:
                 pass  # leave contracted_block as None; user sees empty table
