@@ -5265,10 +5265,12 @@ def status_board():
             try:
                 days_to_review = (datetime.strptime(block_review_date, '%Y-%m-%d') -
                                   datetime.strptime(today, '%Y-%m-%d')).days
-                if 0 <= days_to_review <= 15:
-                    _issue('block_review_due',
-                           f'Block review date is {block_review_date} — {days_to_review} day{"s" if days_to_review != 1 else ""} away.',
-                           url_for('pickup_event', cid=cid))
+                if days_to_review <= 15:
+                    if days_to_review >= 0:
+                        detail = f'Block review date is {block_review_date} — {days_to_review} day{"s" if days_to_review != 1 else ""} away.'
+                    else:
+                        detail = f'Block review date was {block_review_date} — {abs(days_to_review)} day{"s" if abs(days_to_review) != 1 else ""} ago.'
+                    _issue('block_review_due', detail, url_for('pickup_event', cid=cid))
             except Exception:
                 pass
 
