@@ -5205,6 +5205,7 @@ def status_board():
         'past_cutoff_no_history':('danger',  'Past Cutoff',                                   'bi-exclamation-triangle-fill'),
         'event_ended_no_hhr':    ('danger',  'Event Ended — No HHR Uploaded',                 'bi-file-earmark-x-fill'),
         'rooming_list_due':      ('danger',  'Rooming List Due Within 15 Days',               'bi-list-check'),
+        'amenity_order':         ('warning', 'Amenity Order — Meeting in 14 Days',            'bi-gift-fill'),
         'no_recent_contact':     ('warning', 'No Hotel Contact in 21+ Days',                  'bi-telephone-x-fill'),
         'cutoff_approaching':    ('warning', 'Cutoff Approaching — Block Not Verified',        'bi-alarm-fill'),
         'uniform_block':         ('warning', 'Block Needs Verification (All Nights Identical)','bi-grid-fill'),
@@ -5256,6 +5257,18 @@ def status_board():
         last_rpt  = latest_pickup.get(cid)
         last_ctct = latest_contact.get(cid)
         cutoff    = (cfg['cutoff_date'] or '').strip()
+
+        # 0. Amenity order — meeting starts within 14 days
+        if event_start and not is_started:
+            try:
+                days_to_start = (datetime.strptime(event_start, '%Y-%m-%d') -
+                                 datetime.strptime(today, '%Y-%m-%d')).days
+                if days_to_start <= 14:
+                    _issue('amenity_order',
+                           f'Meeting starts {event_start} — {days_to_start} day{"s" if days_to_start != 1 else ""} away. Order client amenity.',
+                           url_for('pickup_event', cid=cid))
+            except Exception:
+                pass
 
         # 1. Overdue pickup report (current events only)
         if is_current:
