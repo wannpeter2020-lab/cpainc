@@ -223,8 +223,18 @@ document.querySelectorAll('.ignore-btn').forEach(function(btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ config_id: parseInt(cid), issue_type: itype, mode: mode, custom_date: customDate })
     })
-    .then(r => r.json())
+    .then(function(r) {
+      if (r.status === 401) {
+        if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
+        if (confirm('Your session has expired. Click OK to log in again — your changes will not be lost.')) {
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        }
+        return null;
+      }
+      return r.json();
+    })
     .then(function(data) {
+      if (!data) return;
       if (data.ok) {
         if (row) {
           row.style.transition = 'opacity .3s, max-height .4s';
@@ -361,8 +371,19 @@ document.querySelectorAll('.ignore-btn').forEach(function(btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: items, mode: mode, custom_date: customDate })
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (r.status === 401) {
+        bulkBtn.disabled = false;
+        bulkBtn.innerHTML = '<i class="bi bi-eye-slash me-1"></i>Ignore Selected';
+        if (confirm('Your session has expired. Click OK to log in again — your changes will not be lost.')) {
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+        }
+        return null;
+      }
+      return r.json();
+    })
     .then(function(data) {
+      if (!data) return;
       if (data.ok) {
         checked.forEach(function(cb) {
           const row = cb.closest('tr');
