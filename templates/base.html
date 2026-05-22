@@ -150,6 +150,14 @@
                 </button>
               </form>
             </li>
+            <li>
+              <form method="post" action="{{ url_for('admin_scan_block_review_dates') }}" class="d-inline">
+                <button type="submit" class="dropdown-item text-info"
+                        onclick="return confirm('Scan all uploaded contracts for block review dates? This may take a minute.')">
+                  <i class="bi bi-calendar-check me-2"></i>Scan Contracts for Block Review Dates
+                </button>
+              </form>
+            </li>
           </ul>
         </li>
         {% endif %}

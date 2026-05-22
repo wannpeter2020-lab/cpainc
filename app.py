@@ -4526,6 +4526,122 @@ def admin_scan_rebates():
                            total=len(rows))
 
 
+@app.route('/admin/scan-block-review-dates', methods=['POST'])
+def admin_scan_block_review_dates():
+    """Scan all uploaded contracts and populate block_review_date where found."""
+    user = get_current_user()
+    if not has_permission(user, 'admin'):
+        return 'Forbidden', 403
+
+    import anthropic as _ant
+    from pickup_utils import _extract_text_from_contract, _pdf_pages_to_images
+
+    api_key = ''
+    try:
+        api_key = app.config.get('ANTHROPIC_API_KEY', '').strip()
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        flash('Anthropic API key not configured.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, contract_filename, contract_data FROM pickup_config "
+        "WHERE contract_data IS NOT NULL AND (block_review_date IS NULL OR block_review_date = '')"
+    ).fetchall()
+
+    updated = skipped = errors = 0
+
+    for row in rows:
+        try:
+            file_bytes = bytes(row['contract_data'])
+            filename   = row['contract_filename'] or 'contract.pdf'
+
+            # Try text extraction first; fall back to vision for image-only PDFs
+            text = _extract_text_from_contract(file_bytes, filename)
+            review_date = None
+
+            if text and len(text.split()) >= 30:
+                prompt = (
+                    "You are reading a hotel group sales contract. "
+                    "Find the room block review clause — a clause that specifies a date when the hotel "
+                    "will review group pickup and may reduce the contracted block. "
+                    "It may be labeled 'block review date', 'pickup review date', 'review date', "
+                    "'room block review', or similar.\n\n"
+                    "Return ONLY a valid JSON object with one key:\n"
+                    "  block_review_date — the review date in YYYY-MM-DD format, or null if not found\n\n"
+                    "No markdown fences, no explanation — just the JSON.\n\n"
+                    "Contract text:\n" + text[:12000]
+                )
+                client  = _ant.Anthropic(api_key=api_key)
+                message = client.messages.create(
+                    model='claude-haiku-4-5',
+                    max_tokens=64,
+                    messages=[{'role': 'user', 'content': prompt}]
+                )
+                raw = message.content[0].text.strip()
+                raw = re.sub(r'^```[a-z]*\s*', '', raw)
+                raw = re.sub(r'\s*```$', '', raw)
+                data = json.loads(raw)
+                review_date = data.get('block_review_date') or None
+            else:
+                # Vision fallback for scanned PDFs
+                images = _pdf_pages_to_images(file_bytes, max_pages=8, dpi=80)
+                if images:
+                    content = [{
+                        'type': 'text',
+                        'text': (
+                            "Find the room block review clause in this hotel contract — a date when "
+                            "the hotel will review group pickup and may reduce the contracted block. "
+                            "Return ONLY JSON: {\"block_review_date\": \"YYYY-MM-DD\"} or "
+                            "{\"block_review_date\": null} if not found."
+                        )
+                    }]
+                    for b64 in images:
+                        content.append({
+                            'type': 'image',
+                            'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': b64}
+                        })
+                    client  = _ant.Anthropic(api_key=api_key)
+                    message = client.messages.create(
+                        model='claude-opus-4-5',
+                        max_tokens=64,
+                        messages=[{'role': 'user', 'content': content}]
+                    )
+                    raw = message.content[0].text.strip()
+                    raw = re.sub(r'^```[a-z]*\s*', '', raw)
+                    raw = re.sub(r'\s*```$', '', raw)
+                    data = json.loads(raw)
+                    review_date = data.get('block_review_date') or None
+
+            if review_date:
+                # Validate YYYY-MM-DD format
+                from datetime import datetime as _dtt
+                _dtt.strptime(review_date, '%Y-%m-%d')
+                db.execute(
+                    "UPDATE pickup_config SET block_review_date=? WHERE id=?",
+                    (review_date, row['id'])
+                )
+                db.commit()
+                updated += 1
+            else:
+                skipped += 1
+
+        except Exception:
+            errors += 1
+
+    parts = [f'{updated} contract{"s" if updated != 1 else ""} updated with block review date']
+    if skipped:
+        parts.append(f'{skipped} had no review clause')
+    if errors:
+        parts.append(f'{errors} error{"s" if errors != 1 else ""}')
+    flash(' — '.join(parts) + '.', 'success' if not errors else 'warning')
+    return redirect(url_for('pickup_dashboard'))
+
+
 @app.route('/admin/archive-cancelled-pickups', methods=['POST'])
 def admin_archive_cancelled_pickups():
     user = get_current_user()
