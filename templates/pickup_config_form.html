@@ -42,12 +42,12 @@
       <div class="col-md-3">
         <label class="form-label fw-semibold">Event Start Date</label>
         <input type="date" name="event_start" class="form-control"
-               value="{{ (config['event_start'] or '') if config else '' }}">
+               value="{{ (config['event_start'] or pipeline_start or '') if config else (pipeline_start or '') }}">
       </div>
       <div class="col-md-3">
         <label class="form-label fw-semibold">Event End Date</label>
         <input type="date" name="event_end" class="form-control"
-               value="{{ (config['event_end'] or '') if config else '' }}">
+               value="{{ (config['event_end'] or pipeline_end or '') if config else (pipeline_end or '') }}">
       </div>
     </div>
   </div>

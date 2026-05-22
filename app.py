@@ -6393,15 +6393,20 @@ def pickup_new_event():
         if duplicates and not f.get('confirm_duplicate'):
             # Re-render the form with warnings — user must tick confirm to proceed
             pipeline_rate = pipeline_org = pipeline_event = None
+            pipeline_start = pipeline_end = None
             if new_bid:
                 row = db.execute(
-                    'SELECT RoomRate, AccountName, EventName FROM ReportPipeline WHERE CAST(BookingId AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',
+                    'SELECT RoomRate, AccountName, EventName, StartDate, EndDate FROM ReportPipeline WHERE CAST(BookingId AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',
                     (new_bid,)
                 ).fetchone()
                 if row:
                     pipeline_rate  = round(float(row['RoomRate']), 2) if row['RoomRate'] else None
                     pipeline_org   = row['AccountName'] or None
                     pipeline_event = row['EventName'] or None
+                    if row['StartDate']:
+                        pipeline_start = str(row['StartDate'])[:10]
+                    if row['EndDate']:
+                        pipeline_end = str(row['EndDate'])[:10]
             return render_template('pickup_config_form.html', config=None,
                                    action=url_for('pickup_new_event'),
                                    cancel_url=url_for('pickup_dashboard'),
@@ -6409,6 +6414,8 @@ def pickup_new_event():
                                    pipeline_org=pipeline_org,
                                    pipeline_event=pipeline_event,
                                    pipeline_booking_id=new_bid,
+                                   pipeline_start=pipeline_start,
+                                   pipeline_end=pipeline_end,
                                    duplicate_warnings=duplicates,
                                    form_data=f)
 
@@ -6436,11 +6443,12 @@ def pickup_new_event():
         flash('Event created.', 'success')
         return redirect(url_for('pickup_dashboard'))
     pipeline_rate = pipeline_org = pipeline_event = None
+    pipeline_start = pipeline_end = None
     booking_id_qs = request.args.get('booking_id')
     if booking_id_qs:
         db = get_db()
         row = db.execute(
-            'SELECT RoomRate, AccountName, EventName FROM ReportPipeline WHERE CAST(BookingId AS INTEGER) = CAST(? AS INTEGER) LIMIT 1',
+            'SELECT RoomRate, AccountName, EventName, StartDate, EndDate FROM ReportPipeline WHERE CAST(BookingId AS INTEGER) = CAST(? AS INTEGER) LIMIT 1',
             (booking_id_qs,)
         ).fetchone()
         if row:
@@ -6448,13 +6456,19 @@ def pickup_new_event():
                 pipeline_rate = round(float(row['RoomRate']), 2)
             pipeline_org   = row['AccountName'] or None
             pipeline_event = row['EventName'] or None
+            if row['StartDate']:
+                pipeline_start = str(row['StartDate'])[:10]
+            if row['EndDate']:
+                pipeline_end = str(row['EndDate'])[:10]
     return render_template('pickup_config_form.html', config=None,
                            action=url_for('pickup_new_event'),
                            cancel_url=url_for('pickup_dashboard'),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
                            pipeline_event=pipeline_event,
-                           pipeline_booking_id=booking_id_qs)
+                           pipeline_booking_id=booking_id_qs,
+                           pipeline_start=pipeline_start,
+                           pipeline_end=pipeline_end)
 
 
 @app.route('/pickup/<int:cid>')
@@ -8794,9 +8808,10 @@ def pickup_edit_event(cid):
         flash('Event updated.', 'success')
         return redirect(url_for('pickup_event', cid=cid))
     pipeline_rate = pipeline_org = pipeline_event = None
+    pipeline_start = pipeline_end = None
     if config['booking_id']:
         row = db.execute(
-            'SELECT RoomRate, AccountName, EventName FROM ReportPipeline WHERE CAST(BookingId AS INTEGER) = CAST(? AS INTEGER) LIMIT 1',
+            'SELECT RoomRate, AccountName, EventName, StartDate, EndDate FROM ReportPipeline WHERE CAST(BookingId AS INTEGER) = CAST(? AS INTEGER) LIMIT 1',
             (config['booking_id'],)
         ).fetchone()
         if row:
@@ -8804,13 +8819,20 @@ def pickup_edit_event(cid):
                 pipeline_rate = round(float(row['RoomRate']), 2)
             pipeline_org   = row['AccountName'] or None
             pipeline_event = row['EventName'] or None
+            # Convert ISO timestamp to YYYY-MM-DD for the date input
+            if row['StartDate']:
+                pipeline_start = str(row['StartDate'])[:10]
+            if row['EndDate']:
+                pipeline_end = str(row['EndDate'])[:10]
     return render_template('pickup_config_form.html', config=config,
                            action=url_for('pickup_edit_event', cid=cid),
                            cancel_url=url_for('pickup_event', cid=cid),
                            pipeline_rate=pipeline_rate,
                            pipeline_org=pipeline_org,
                            pipeline_event=pipeline_event,
-                           pipeline_booking_id=config['booking_id'])
+                           pipeline_booking_id=config['booking_id'],
+                           pipeline_start=pipeline_start,
+                           pipeline_end=pipeline_end)
 
 
 @app.route('/pickup/<int:cid>/weekly/new', methods=['GET', 'POST'])
