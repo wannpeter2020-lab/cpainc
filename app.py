@@ -8998,7 +8998,9 @@ def pickup_rooming_upload(cid):
             flash('No file uploaded.', 'error')
             return redirect(request.url)
         all_guests, combined_nights, filenames, errors = [], {}, [], []
+        generated_pdfs = []   # (pdf_filename, pdf_bytes) when parser auto-generates PDF
         any_ai_parsed = False
+        primary_file_bytes = None   # bytes of first successfully parsed file, for storage
         for i, f in enumerate(uploaded_files):
             label = labels[i].strip() if i < len(labels) and labels[i].strip() else f.filename
             file_bytes = f.read()
@@ -9020,6 +9022,13 @@ def pickup_rooming_upload(cid):
             if parsed.get('ai_error'):
                 errors.append(f"AI parsing failed for {f.filename}: {parsed['ai_error']}")
             filenames.append(f.filename)
+            if primary_file_bytes is None:
+                primary_file_bytes = file_bytes
+            # If the parser generated a clean PDF (e.g. Omni XLSX → PDF), capture it
+            if parsed.get('pdf_bytes') and not generated_pdfs:
+                pdf_name = f.filename.rsplit('.', 1)[0] + '_rooming_list.pdf'
+                generated_pdfs.append((pdf_name, parsed['pdf_bytes']))
+                primary_file_bytes = parsed['pdf_bytes']
             for g in parsed['guests']:
                 g['source'] = label
             all_guests.extend(parsed['guests'])
@@ -9038,14 +9047,18 @@ def pickup_rooming_upload(cid):
         combined_result = _bgr(all_guests)
         unique_rooms  = combined_result['unique_rooms']
         combined_nights = combined_result['nights_by_date']
-        combined_filename = ', '.join(filenames)
+        # Use the generated PDF filename if available
+        if generated_pdfs:
+            combined_filename = generated_pdfs[0][0]
+        else:
+            combined_filename = ', '.join(filenames)
         rl_id = db.execute('''
             INSERT INTO pickup_rooming_list
-            (config_id, weekly_id, filename, total_guests,
+            (config_id, weekly_id, filename, file_data, total_guests,
              nights_by_date, reconciliation_status, discrepancy_notes, guests_json)
-            VALUES (?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?)
         ''', (cid, last['id'] if last else None, combined_filename,
-              unique_rooms, json.dumps(combined_nights),
+              primary_file_bytes, unique_rooms, json.dumps(combined_nights),
               recon['status'], recon.get('notes', ''),
               json.dumps(all_guests))).lastrowid
         db.commit()
@@ -9770,6 +9783,19 @@ def _get_post_report_data(cid):
             pass  # fall back to unstripped file if anything goes wrong
     config_dict['_hhr_file_data'] = raw_bytes
 
+    # Find a rooming list uploaded within 2 days of the HHR (for email attachment)
+    hhr_date = hhr_row['upload_date'][:10] if (hhr_row and hhr_row.get('upload_date')) else None
+    if not hhr_date:
+        import datetime as _dt
+        hhr_date = _dt.date.today().strftime('%Y-%m-%d')
+    rl_concurrent = db.execute('''
+        SELECT file_data, filename FROM pickup_rooming_list
+        WHERE config_id=? AND file_data IS NOT NULL
+          AND ABS(julianday(upload_date) - julianday(?)) <= 2
+        ORDER BY upload_date DESC LIMIT 1
+    ''', (cid, hhr_date)).fetchone()
+    config_dict['_rl_concurrent'] = rl_concurrent
+
     return config_dict, stats, fh
 
 
@@ -9812,6 +9838,7 @@ def pickup_email_post_report_outlook(cid):
             to_addr      = email.get('to', '')
             file_data    = config_dict.get('_hhr_file_data')
             hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
+            rl_row       = config_dict.get('_rl_concurrent')
             from pickup_utils import _build_cc_recipients
             cc_list = [r['email'] for r in _build_cc_recipients(config_dict) if r.get('email')]
             draft_id, err = _create_outlook_draft(
@@ -9819,8 +9846,23 @@ def pickup_email_post_report_outlook(cid):
                 to_addr=to_addr, cc_list=cc_list, body_html=html_body,
                 attachment_bytes=file_data, attachment_filename=hhr_filename,
             )
+            if draft_id and rl_row and rl_row['file_data']:
+                # Attach rooming list as a second file
+                import base64, requests as _req
+                token_row = db.execute('SELECT access_token FROM UserMicrosoftTokens WHERE user_id=?', (user['id'],)).fetchone()
+                if token_row:
+                    rl_filename = rl_row['filename'] or 'rooming_list.pdf'
+                    rl_ct = 'application/pdf' if rl_filename.lower().endswith('.pdf') else 'application/octet-stream'
+                    _req.post(
+                        f'https://graph.microsoft.com/v1.0/me/messages/{draft_id}/attachments',
+                        headers={'Authorization': f'Bearer {token_row["access_token"]}', 'Content-Type': 'application/json'},
+                        json={'@odata.type': '#microsoft.graph.fileAttachment', 'name': rl_filename,
+                              'contentBytes': base64.b64encode(bytes(rl_row['file_data'])).decode('ascii'),
+                              'contentType': rl_ct}
+                    )
             if draft_id:
-                flash('Post Report draft created in your Outlook Drafts folder with HHR attached. Open Outlook to review and send.', 'success')
+                rl_note = ' with rooming list attached' if (rl_row and rl_row['file_data']) else ''
+                flash(f'Post Report draft created in your Outlook Drafts folder with HHR{rl_note}. Open Outlook to review and send.', 'success')
                 return redirect(url_for('pickup_event', cid=config_dict['id']))
             else:
                 flash(f'Could not create Outlook draft: {err}', 'error')
@@ -9838,6 +9880,7 @@ def pickup_email_post_report_outlook(cid):
 
     file_data    = config_dict.get('_hhr_file_data')
     hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
+    rl_row       = config_dict.get('_rl_concurrent')
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
         t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
@@ -9861,6 +9904,10 @@ def pickup_email_post_report_outlook(cid):
             att_path = ''
             if file_data:
                 att_path = write_named_att(file_data, hhr_filename).replace('\\', '\\\\')
+            rl_att_path = ''
+            if rl_row and rl_row['file_data']:
+                rl_filename = rl_row['filename'] or 'rooming_list.pdf'
+                rl_att_path = write_named_att(bytes(rl_row['file_data']), rl_filename).replace('\\', '\\\\')
 
             cc_str = '; '.join(r['email'] for r in cc_recipients if r.get('email'))
 
@@ -9877,6 +9924,8 @@ def pickup_email_post_report_outlook(cid):
                 ps_lines.append(f'$mail.CC = \'{cc_str.replace(chr(39), chr(39)*2)}\'')
             if att_path:
                 ps_lines.append(f'$mail.Attachments.Add(\'{att_path}\') | Out-Null')
+            if rl_att_path:
+                ps_lines.append(f'$mail.Attachments.Add(\'{rl_att_path}\') | Out-Null')
             ps_lines.append('$mail.Display()')
 
             ps_script = '\r\n'.join(ps_lines)
@@ -9902,6 +9951,11 @@ def pickup_email_post_report_outlook(cid):
             if file_data:
                 att_path = write_named_att(file_data, hhr_filename)
                 attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{att_path}"}}'
+            rl_attach_line = ''
+            if rl_row and rl_row['file_data']:
+                rl_filename = rl_row['filename'] or 'rooming_list.pdf'
+                rl_att_path = write_named_att(bytes(rl_row['file_data']), rl_filename)
+                rl_attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{rl_att_path}"}}'
 
             to_line = (
                 f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(to_addr)}"}}}}'
@@ -9918,6 +9972,7 @@ def pickup_email_post_report_outlook(cid):
                 + (f'    {to_line}\n' if to_line else '')
                 + (f'    {cc_lines}\n' if cc_lines else '')
                 + (f'    {attach_line}\n' if attach_line else '')
+                + (f'    {rl_attach_line}\n' if rl_attach_line else '')
                 + '    open theMsg\n'
                 + '    activate\n'
                 + 'end tell\n'

@@ -576,6 +576,24 @@ _GUEST_RE_SONESTA = re.compile(
     re.MULTILINE
 )
 
+# Holiday Inn / IHG "Group Rooming List" format:
+#   RoomNo  Last,First  Conf#(7-10 digits)  Arrival(MM-DD-YY)  Departure(MM-DD-YY)  RoomType  [Status]  Adl  Chl  Nts  Rms
+# Same column layout as Sonesta but with a REQUIRED leading room number.
+_GUEST_RE_HOLIDAY_INN = re.compile(
+    r'^\d+[ \t]+'                                    # Room number (required, e.g. 101)
+    r'([A-Za-z][A-Za-z,\'\-\.\ \t]{1,40}?)[ \t]+'  # Last,First name
+    r'(\d{7,10})[ \t]+'                              # Conf# (7-10 digits)
+    r'(\d{2}-\d{2}-\d{2})[ \t]+'                    # Arrival   MM-DD-YY (dashes)
+    r'(\d{2}-\d{2}-\d{2})[ \t]+'                    # Departure MM-DD-YY (dashes)
+    r'\S+[ \t]+'                                     # Room type token
+    r'(?:[A-Za-z/]+[ \t]+)?'                         # Optional status / carrier code
+    r'\d+[ \t]+'                                     # Adults
+    r'\d+[ \t]+'                                     # Children
+    r'(\d+)[ \t]+'                                   # Nights (explicit)
+    r'(\d+)',                                         # Rooms
+    re.MULTILINE
+)
+
 # Hilton/Embassy Suites GPRMLSTS "Group Member Status Report" format
 _GUEST_RE_HILTON_PMS = re.compile(
     r'^([A-Za-z][A-Za-z/\-\'\s.,]{1,50}?)'   # Guest name (Last/First or First Last)
@@ -949,6 +967,31 @@ def parse_rooming_list_pdf(file_bytes):
                     'rooms':     1,
                 })
 
+        # ── Fallback: Holiday Inn / IHG "Group Rooming List" (room# prefix, MM-DD-YY dashes) ──
+        if not guests:
+            for m in _GUEST_RE_HOLIDAY_INN.finditer(all_text):
+                name_raw = m.group(1).strip().rstrip(',')
+                conf_no  = m.group(2)
+                arr_raw  = m.group(3)
+                dep_raw  = m.group(4)
+                nights   = int(m.group(5))
+                rooms    = int(m.group(6))
+                try:
+                    arrival   = _mmddyy_dashes_to_iso(arr_raw)
+                    departure = _mmddyy_dashes_to_iso(dep_raw)
+                except Exception:
+                    continue
+                if nights <= 0:
+                    continue
+                guests.append({
+                    'name':      name_raw,
+                    'conf_no':   conf_no,
+                    'arrival':   arrival,
+                    'departure': departure,
+                    'nights':    nights,
+                    'rooms':     rooms,
+                })
+
         # ── Final fallback: AI parser for unrecognized formats ──
         ai_parsed = False
         ai_error  = None
@@ -1021,8 +1064,8 @@ def _parse_date_flexible(val):
     if val is None:
         return None
     s = str(val).strip()
-    for fmt in ('%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d', '%d-%b-%Y', '%d/%m/%Y',
-                '%B %d, %Y', '%b %d, %Y'):
+    for fmt in ('%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d', '%d-%b-%Y', '%b-%d-%Y',
+                '%d/%m/%Y', '%B %d, %Y', '%b %d, %Y', '%B-%d-%Y'):
         try:
             from datetime import datetime as _dt
             return _dt.strptime(s, fmt).strftime('%Y-%m-%d')
@@ -1235,6 +1278,299 @@ def parse_rooming_list_csv(file_bytes):
                 'error': str(e)}
 
 
+# ── Omni / IHG multi-tab rooming list XLSX ───────────────────────────────────
+
+def _parse_omni_rooming_list_xlsx(wb):
+    """
+    Detect and parse the Omni/IHG multi-tab rooming list workbook.
+
+    Layout:
+      Sheet 1  (Pick-up)       — pickup report; used only for hotel name / date
+      Sheet 2+ (Rooming List)  — guest table starting at row 4:
+        A: section label or None  B: Last Name  C: First Name
+        D: Conf #                 E: Status      F: Arrival (datetime)
+        G: Departure (datetime)   H: Nights      I: Adults
+        J: Children               K: Rate        L: Billing notes
+
+    Returns a dict with keys: guests, hotel_name, report_date
+    — or None if the workbook does not match this layout.
+    """
+    rl_ws = None
+    for name in wb.sheetnames:
+        if 'rooming' in name.lower():
+            rl_ws = wb[name]
+            break
+    if rl_ws is None:
+        return None
+
+    hotel_name  = str(wb.worksheets[0].cell(1, 1).value or '').strip()
+    report_date = wb.worksheets[0].cell(2, 1).value
+
+    guests = []
+    current_section = ''
+
+    for row in rl_ws.iter_rows(min_row=4, values_only=True):
+        r = (list(row) + [None] * 12)[:12]
+        col_a, last, first, conf, status, arr, dep, nts, adults, children, rate, notes = r
+
+        if not conf and not last:
+            continue
+
+        if col_a:
+            parts = [p.strip() for p in str(col_a).split('\n') if p.strip()]
+            current_section = parts[-1] if parts else str(col_a).strip()
+            if not conf:
+                continue
+
+        if not arr or not dep:
+            continue
+
+        last_s  = str(last  or '').strip()
+        first_s = str(first or '').strip()
+        name = f"{last_s}, {first_s}".strip(', ') if first_s else last_s
+        if not name:
+            continue
+
+        arrival   = arr.strftime('%Y-%m-%d') if hasattr(arr, 'strftime') else _parse_date_flexible(str(arr))
+        departure = dep.strftime('%Y-%m-%d') if hasattr(dep, 'strftime') else _parse_date_flexible(str(dep))
+        if not arrival or not departure:
+            continue
+
+        nights = int(nts) if nts and str(nts).strip().isdigit() else 0
+        if nights <= 0:
+            try:
+                nights = (datetime.strptime(departure, '%Y-%m-%d') -
+                          datetime.strptime(arrival,   '%Y-%m-%d')).days
+            except Exception:
+                continue
+        if nights <= 0:
+            continue
+
+        guests.append({
+            'name':      name,
+            'conf_no':   str(conf or '').strip(),
+            'arrival':   arrival,
+            'departure': departure,
+            'nights':    nights,
+            'rooms':     1,
+            'section':   current_section,
+            'rate':      float(rate) if rate else None,
+        })
+
+    if not guests:
+        return None
+
+    return {
+        'guests':      guests,
+        'hotel_name':  hotel_name,
+        'report_date': report_date,
+    }
+
+
+def generate_rooming_list_pdf(guests, title='Group Rooming List',
+                               hotel_name='', report_date=None):
+    """
+    Render a clean rooming-list PDF from a parsed guest list (reportlab).
+
+    guests: list of dicts with keys: name, conf_no, arrival, departure,
+            nights, rooms, section (optional), rate (optional)
+
+    Returns bytes (PDF), or None if reportlab is not installed.
+    """
+    try:
+        from reportlab.lib.pagesizes import landscape, letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                         Paragraph, Spacer)
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+    except ImportError:
+        return None
+
+    import io as _io
+    from collections import OrderedDict
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=landscape(letter),
+        leftMargin=0.45 * inch, rightMargin=0.45 * inch,
+        topMargin=0.45 * inch, bottomMargin=0.45 * inch,
+        title=title,
+    )
+
+    styles = getSampleStyleSheet()
+    title_sty = ParagraphStyle('rl_title', parent=styles['Heading1'],
+                               fontSize=13, spaceAfter=3, alignment=TA_CENTER)
+    sub_sty   = ParagraphStyle('rl_sub',   parent=styles['Normal'],
+                               fontSize=9,  spaceAfter=2, alignment=TA_CENTER)
+    sec_sty   = ParagraphStyle('rl_sec',   parent=styles['Normal'],
+                               fontSize=8,  leading=10)
+
+    NAVY   = colors.HexColor('#1A3C5E')
+    STRIPE = colors.HexColor('#F0F5FB')
+    SEC_BG = colors.HexColor('#D9E8F5')
+    TOT_BG = colors.HexColor('#C6D9F0')
+    GRID_C = colors.HexColor('#B0C4D8')
+
+    has_rate = any(g.get('rate') for g in guests)
+
+    if has_rate:
+        col_heads  = ['#', 'Last Name', 'First Name', 'Confirmation #',
+                      'Arrival', 'Departure', 'Nts', 'Adl', 'Rate']
+        col_widths = [0.28*inch, 1.35*inch, 1.15*inch, 1.45*inch,
+                      1.0*inch,  1.0*inch,   0.38*inch, 0.38*inch, 0.65*inch]
+    else:
+        col_heads  = ['#', 'Last Name', 'First Name', 'Confirmation #',
+                      'Arrival', 'Departure', 'Nts', 'Adl']
+        col_widths = [0.28*inch, 1.5*inch, 1.3*inch, 1.6*inch,
+                      1.1*inch,  1.1*inch,  0.45*inch, 0.45*inch]
+
+    ncols = len(col_heads)
+
+    sections = OrderedDict()
+    for g in guests:
+        sec = g.get('section') or ''
+        sections.setdefault(sec, []).append(g)
+
+    table_data = [col_heads]
+    row_styles = []
+    rn = 1
+
+    for sec, sec_guests in sections.items():
+        if sec:
+            table_data.append([Paragraph(f'<b>{sec}</b>', sec_sty)] + [''] * (ncols - 1))
+            row_styles += [
+                ('BACKGROUND', (0, rn), (-1, rn), SEC_BG),
+                ('SPAN',       (0, rn), (-1, rn)),
+                ('TOPPADDING', (0, rn), (-1, rn), 3),
+                ('BOTTOMPADDING', (0, rn), (-1, rn), 3),
+            ]
+            rn += 1
+
+        for i, g in enumerate(sec_guests, 1):
+            parts    = g['name'].split(',', 1)
+            last_nm  = parts[0].strip()
+            first_nm = parts[1].strip() if len(parts) > 1 else ''
+            try:
+                arr_s = datetime.strptime(g['arrival'],   '%Y-%m-%d').strftime('%m/%d/%y')
+                dep_s = datetime.strptime(g['departure'], '%Y-%m-%d').strftime('%m/%d/%y')
+            except Exception:
+                arr_s = g.get('arrival',   '')
+                dep_s = g.get('departure', '')
+
+            rate_v = g.get('rate')
+            rate_s = f'${rate_v:,.0f}' if rate_v else ''
+
+            data_row = [str(i), last_nm, first_nm, g.get('conf_no', ''),
+                        arr_s, dep_s, str(g.get('nights', '')),
+                        str(g.get('rooms', 1))]
+            if has_rate:
+                data_row.append(rate_s)
+
+            table_data.append(data_row)
+            if i % 2 == 0:
+                row_styles.append(('BACKGROUND', (0, rn), (-1, rn), STRIPE))
+            rn += 1
+
+        sub_row = [''] * ncols
+        sub_row[ncols - (3 if has_rate else 2)] = Paragraph(
+            f'<b>{sec} — {len(sec_guests)} room{"s" if len(sec_guests) != 1 else ""}</b>', sec_sty)
+        table_data.append(sub_row)
+        row_styles += [
+            ('SPAN',         (0, rn), (-1, rn)),
+            ('ALIGN',        (0, rn), (-1, rn), 'RIGHT'),
+            ('TOPPADDING',   (0, rn), (-1, rn), 2),
+            ('BOTTOMPADDING',(0, rn), (-1, rn), 2),
+        ]
+        rn += 1
+
+    gt_row = [''] * ncols
+    gt_row[ncols - (3 if has_rate else 2)] = Paragraph(
+        f'<b>Grand Total: {len(guests)} room{"s" if len(guests) != 1 else ""}</b>', sec_sty)
+    table_data.append(gt_row)
+    row_styles += [
+        ('BACKGROUND',    (0, rn), (-1, rn), TOT_BG),
+        ('SPAN',          (0, rn), (-1, rn)),
+        ('ALIGN',         (0, rn), (-1, rn), 'RIGHT'),
+        ('TOPPADDING',    (0, rn), (-1, rn), 3),
+        ('BOTTOMPADDING', (0, rn), (-1, rn), 3),
+    ]
+
+    base_style = [
+        ('FONTNAME',      (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE',      (0, 0), (-1, -1), 8),
+        ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
+        ('BACKGROUND',    (0, 0), (-1,  0), NAVY),
+        ('TEXTCOLOR',     (0, 0), (-1,  0), colors.white),
+        ('GRID',          (0, 0), (-1, -1), 0.3, GRID_C),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN',         (0, 0), (0,  -1), 'CENTER'),
+        ('ALIGN',         (6, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('ROWBACKGROUND', (0, 1), (-1, -2), [colors.white, STRIPE]),
+    ]
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle(base_style + row_styles))
+
+    # Rooms-per-night summary
+    nbd = {}
+    for g in guests:
+        try:
+            cur = datetime.strptime(g['arrival'],   '%Y-%m-%d')
+            end = datetime.strptime(g['departure'], '%Y-%m-%d')
+            while cur < end:
+                k = cur.strftime('%Y-%m-%d')
+                nbd[k] = nbd.get(k, 0) + g.get('rooms', 1)
+                cur += timedelta(days=1)
+        except Exception:
+            pass
+
+    story = []
+    story.append(Paragraph(hotel_name or '', title_sty))
+    story.append(Paragraph(title, sub_sty))
+    if report_date:
+        rd_s = (report_date.strftime('%B %d, %Y')
+                if hasattr(report_date, 'strftime') else str(report_date))
+        story.append(Paragraph(f'As of {rd_s}', sub_sty))
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(t)
+
+    if nbd:
+        cell_sty = ParagraphStyle('rl_cell', parent=styles['Normal'], fontSize=8, leading=10)
+        story.append(Spacer(1, 0.18 * inch))
+        story.append(Paragraph('<b>Rooms Per Night</b>', cell_sty))
+        story.append(Spacer(1, 0.04 * inch))
+        nbd_data = [['Date', 'Rooms']]
+        for d in sorted(nbd):
+            try:
+                lbl = datetime.strptime(d, '%Y-%m-%d').strftime('%a %m/%d/%y')
+            except Exception:
+                lbl = d
+            nbd_data.append([lbl, str(nbd[d])])
+        nbd_table = Table(nbd_data, colWidths=[1.3 * inch, 0.65 * inch])
+        nbd_table.setStyle(TableStyle([
+            ('FONTNAME',      (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE',      (0, 0), (-1, -1), 8),
+            ('FONTNAME',      (0, 0), (-1,  0), 'Helvetica-Bold'),
+            ('BACKGROUND',    (0, 0), (-1,  0), NAVY),
+            ('TEXTCOLOR',     (0, 0), (-1,  0), colors.white),
+            ('GRID',          (0, 0), (-1, -1), 0.3, GRID_C),
+            ('ALIGN',         (1, 0), (1,  -1), 'CENTER'),
+            ('TOPPADDING',    (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 4),
+        ]))
+        story.append(nbd_table)
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 def parse_rooming_list_xls(file_bytes, filename=''):
     """
     Parse a hotel rooming list XLS or XLSX file.
@@ -1258,6 +1594,22 @@ def parse_rooming_list_xls(file_bytes, filename=''):
             import openpyxl
             import io as _io
             wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True)
+
+            # ── Omni/IHG structured multi-tab format ──────────────────────────
+            omni = _parse_omni_rooming_list_xlsx(wb)
+            if omni:
+                result = _build_guest_result(omni['guests'])
+                pdf = generate_rooming_list_pdf(
+                    omni['guests'],
+                    title='Group Rooming List',
+                    hotel_name=omni.get('hotel_name', ''),
+                    report_date=omni.get('report_date'),
+                )
+                if pdf:
+                    result['pdf_bytes'] = pdf
+                return result
+            # ─────────────────────────────────────────────────────────────────
+
             ws = wb.active
             rows = []
             for row in ws.iter_rows(values_only=True):
