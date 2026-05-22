@@ -3572,6 +3572,9 @@ The JSON object must have exactly these keys:
   hotel_contact_email   — hotel contact email address, or null
   group_contact         — client/group contact person's full name, or null
   group_contact_email   — client/group contact email address, or null
+  block_review_date     — room block review date in YYYY-MM-DD format, or null. Look for a
+                          "block review" or "pickup review" clause specifying when the hotel
+                          will review pickup and may reduce the block.
   contracted_block      — object mapping each night's date (YYYY-MM-DD) to the number of rooms
                           blocked for that night (integer). Only include nights with a room
                           count > 0. Example: {"2026-10-31": 200, "2026-11-01": 350}
@@ -3582,6 +3585,8 @@ Rules:
 - If the contract shows a flat block (same rooms every night) without per-night breakdown,
   generate one entry per night of the block period, each with that room count.
 - Cutoff date may be labeled "cutoff", "release date", "cut-off date", "room block deadline", etc.
+- block_review_date: look for a "room block review" clause, "review date", "pickup review date",
+  or similar language specifying when the block will be reviewed/reduced.
 - Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
 - Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
 - Group contact is the client or meeting planner who signed or is listed as the customer.
@@ -3647,6 +3652,17 @@ Rules:
                 data['rebate_per_room'] = round(float(rebate), 2)
             except Exception:
                 data['rebate_per_room'] = None
+
+        # Normalise block_review_date — validate YYYY-MM-DD
+        brd = data.get('block_review_date')
+        if brd:
+            try:
+                datetime.strptime(str(brd).strip(), '%Y-%m-%d')
+                data['block_review_date'] = str(brd).strip()
+            except Exception:
+                data['block_review_date'] = None
+        else:
+            data['block_review_date'] = None
 
         data.setdefault('error', None)
         return data
@@ -3750,6 +3766,9 @@ The JSON object must have exactly these keys:
   hotel_contact_email   — hotel contact email address, or null
   group_contact         — client/group contact person's full name, or null
   group_contact_email   — client/group contact email address, or null
+  block_review_date     — room block review date in YYYY-MM-DD format, or null. Look for a
+                          "block review" or "pickup review" clause specifying a date when the
+                          hotel will review pickup and may reduce the block.
   contracted_block      — object mapping each night's date (YYYY-MM-DD) to the number of rooms
                           blocked for that night (integer). Only include nights with a room
                           count > 0. Example: {"2026-10-31": 200, "2026-11-01": 350}
@@ -3760,6 +3779,8 @@ Rules:
 - If the contract shows a flat block (same rooms every night) without per-night breakdown,
   generate one entry per night of the block period, each with that room count.
 - Cutoff date may be labeled "cutoff", "release date", "cut-off date", "room block deadline", etc.
+- block_review_date: look for a "room block review" clause, "review date", "pickup review date",
+  or similar language specifying when the block will be reviewed/reduced.
 - Attrition is often "80% attrition" or "you must use 80% of your block" — convert to 0.80.
 - Hotel contact is usually signed by a Sales Manager or Director of Sales at the hotel.
 - Group contact is the client or meeting planner who signed or is listed as the customer.
@@ -3824,6 +3845,17 @@ Contract text:
             except Exception:
                 data['rebate_per_room'] = None
 
+        # Normalise block_review_date — validate YYYY-MM-DD
+        brd = data.get('block_review_date')
+        if brd:
+            try:
+                datetime.strptime(str(brd).strip(), '%Y-%m-%d')
+                data['block_review_date'] = str(brd).strip()
+            except Exception:
+                data['block_review_date'] = None
+        else:
+            data['block_review_date'] = None
+
         data.setdefault('error', None)
         return data
 
@@ -3851,7 +3883,7 @@ def parse_contract_document(file_bytes, filename=''):
         'contracted_block': {}, 'contracted_rate': None, 'cutoff_date': None,
         'attrition_pct': None, 'hotel': None, 'hotel_contact': None,
         'hotel_contact_email': None, 'group_contact': None, 'group_contact_email': None,
-        'error': None,
+        'block_review_date': None, 'error': None,
     }
 
     text = _extract_text_from_contract(file_bytes, filename)

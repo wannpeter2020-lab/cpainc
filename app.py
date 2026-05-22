@@ -3424,6 +3424,12 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+    # Add block_review_date to pickup_config if not present
+    try:
+        db.execute('ALTER TABLE pickup_config ADD COLUMN block_review_date TEXT')
+        db.commit()
+    except Exception:
+        pass
 
 
 try:
@@ -8156,6 +8162,7 @@ def pickup_upload_contract(cid):
 
                 contract_data     = request.form.get('_contract_data_b64', '')
                 contract_filename = request.form.get('_contract_filename', '')
+                block_review_date = request.form.get('block_review_date', '').strip() or None
                 import base64
                 file_blob = base64.b64decode(contract_data) if contract_data else None
 
@@ -8169,6 +8176,7 @@ def pickup_upload_contract(cid):
                         block_is_estimated   = 0,
                         contract_filename    = ?,
                         contract_data        = ?,
+                        block_review_date    = COALESCE(?, block_review_date),
                         hotel_contact        = COALESCE(?, hotel_contact),
                         hotel_contact_email  = COALESCE(?, hotel_contact_email),
                         hotel_contact2       = COALESCE(?, hotel_contact2),
@@ -8178,6 +8186,7 @@ def pickup_upload_contract(cid):
                     WHERE id = ?
                 ''', (json.dumps(block), rate, rebate, cutoff, atr,
                       contract_filename or None, file_blob,
+                      block_review_date,
                       hotel_contact, hotel_contact_email,
                       hotel_contact2, hotel_contact2_email,
                       group_contact, group_contact_email, cid))
@@ -8818,6 +8827,7 @@ def pickup_edit_event(cid):
             ('group_contact_email',   config['group_contact_email'],  gc_email),
             ('notes',                 config['notes'],                f.get('notes')),
             ('rooming_list_required', config['rooming_list_required'], rooming_list_required),
+            ('block_review_date',     config['block_review_date'],    f.get('block_review_date') or None),
         ]
         db.execute('''
             UPDATE pickup_config SET
@@ -8826,7 +8836,7 @@ def pickup_edit_event(cid):
             hotel_contacts=?, group_contact=?, group_contact_email=?, cutoff_date=?, attrition_pct=?,
             contracted_block=?, contracted_rate=?, rebate_per_room=?, shoulder_pre=?,
             shoulder_post=?, hotel_booking_link=?, notes=?, ota_url=?, cc_emails=?,
-            event_start=?, event_end=?, rooming_list_required=?
+            event_start=?, event_end=?, rooming_list_required=?, block_review_date=?
             WHERE id=?
         ''', (
             f.get('booking_id'), f.get('tab_name'), f['organization'],
@@ -8839,7 +8849,7 @@ def pickup_edit_event(cid):
             int(f.get('shoulder_pre', 3)), int(f.get('shoulder_post', 3)),
             f.get('hotel_booking_link'), f.get('notes'), ota_url, json.dumps(cc_emails),
             f.get('event_start') or None, f.get('event_end') or None,
-            rooming_list_required, cid
+            rooming_list_required, f.get('block_review_date') or None, cid
         ))
         _log_change(db, cid, 'edit_event', _changes)
         db.commit()

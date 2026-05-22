@@ -208,6 +208,12 @@
                value="{{ (config['cutoff_date'] or '') if config else '' }}">
       </div>
       <div class="col-md-4">
+        <label class="form-label fw-semibold">Block Review Date</label>
+        <input type="date" name="block_review_date" class="form-control"
+               value="{{ (config['block_review_date'] or '') if config else '' }}">
+        <div class="form-text">From the room block review clause in the contract.</div>
+      </div>
+      <div class="col-md-4">
         <label class="form-label fw-semibold">Attrition %</label>
         <div class="input-group">
           <input type="number" step="1" min="0" max="100" name="attrition_pct" class="form-control"

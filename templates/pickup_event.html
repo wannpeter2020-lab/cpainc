@@ -77,6 +77,12 @@
           {% endif %}
         </div>
       </div>
+      {% if config['block_review_date'] %}
+      <div class="col-md-4">
+        <div class="section-label">Block Review Date</div>
+        <div>{{ config['block_review_date'] | us_date }}</div>
+      </div>
+      {% endif %}
       <div class="col-md-4">
         <div class="section-label">Attrition %</div>
         <div>
