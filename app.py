@@ -82,9 +82,35 @@ def send_email(to_addrs, subject, body_html, attachments=None):
         return False, str(e)
 
 def get_db():
+    """
+    Open a SQLite connection (cached on flask.g) with a small retry on
+    transient Dropbox / cloud-storage hiccups. macOS Dropbox occasionally
+    denies reads on synced files while it's reconciling; SQLite surfaces
+    those as `sqlite3.DatabaseError: authorization denied` or
+    `disk I/O error`. We retry briefly so a hiccup doesn't turn into a 500.
+    """
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        import time as _t
+        transient_markers = (
+            'authorization denied',
+            'disk i/o error',
+            'database is locked',
+            'unable to open database',
+        )
+        last_err = None
+        for attempt in range(4):  # ~0 + 0.2 + 0.4 + 0.6 s = 1.2 s worst case
+            try:
+                g.db = sqlite3.connect(DATABASE, timeout=10)
+                g.db.row_factory = sqlite3.Row
+                return g.db
+            except sqlite3.Error as e:
+                last_err = e
+                msg = str(e).lower()
+                if not any(m in msg for m in transient_markers):
+                    raise
+                if attempt < 3:
+                    _t.sleep((attempt + 1) * 0.2)
+        raise last_err
     return g.db
 
 @app.teardown_appcontext
