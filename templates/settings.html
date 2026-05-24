@@ -71,34 +71,120 @@
     </div>
   </div>
 
+  {# ── Default Hotel Points Recipient (admin only) ── #}
   <div class="col-md-8">
     <div class="card mb-4">
-      <div class="card-header">User Profile — Hotel Points Forms</div>
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-award me-2"></i>Default Hotel Points Recipient</span>
+        {% if default_recipient_user %}
+        <span class="badge bg-light text-dark">{{ default_recipient_user.name }}</span>
+        {% endif %}
+      </div>
       <div class="card-body">
+        <p class="small text-muted mb-2">
+          All hotel planner points default to this user's loyalty accounts. Their
+          name, email, phone and chain-specific member number fill the primary
+          block on every points request form. Users below can still record their
+          own loyalty info for future point splits.
+        </p>
+        {% if current_user and current_user.role == 'admin' %}
+        <form method="post" class="row g-2 align-items-end">
+          <input type="hidden" name="action" value="save_default_recipient">
+          <div class="col-md-6">
+            <label class="form-label small">Default Recipient</label>
+            <select name="default_recipient_user_id" class="form-select form-select-sm">
+              {% for u in all_users %}
+              <option value="{{ u.id }}" {% if u.id == default_recipient_user_id %}selected{% endif %}>
+                {{ u.name }} ({{ u.email }})
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-auto">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save Default</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="small text-muted">
+          Only an administrator can change the default recipient.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# ── My Loyalty Info (per-user) ── #}
+    {% if current_user %}
+    <div class="card mb-4">
+      <div class="card-header"><i class="bi bi-person-vcard me-2"></i>My Hotel Points Loyalty Info — {{ current_user.name }}</div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">
+          Record your own loyalty numbers here. They aren't used on forms today
+          (all points default to {{ default_recipient_user.name if default_recipient_user else 'the default recipient' }}),
+          but the data is held for future point-splitting.
+        </p>
         <form method="post" class="row g-2">
-          <input type="hidden" name="action" value="save_user_profile">
+          <input type="hidden" name="action" value="save_my_loyalty_profile">
           <div class="col-md-4">
             <label class="form-label small">Full Name</label>
-            <input type="text" name="user_full_name" class="form-control form-control-sm"
-                   value="{{ user_profile.user_full_name or '' }}" placeholder="Your name">
+            <input type="text" name="full_name" class="form-control form-control-sm"
+                   value="{{ my_loyalty.full_name if my_loyalty else current_user.name }}">
           </div>
           <div class="col-md-5">
-            <label class="form-label small">Email Address</label>
-            <input type="email" name="user_email" class="form-control form-control-sm"
-                   value="{{ user_profile.user_email or '' }}" placeholder="you@conferencedirect.com">
+            <label class="form-label small">Email</label>
+            <input type="email" name="email" class="form-control form-control-sm"
+                   value="{{ my_loyalty.email if my_loyalty else current_user.email }}">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Business Phone</label>
-            <input type="text" name="user_phone" class="form-control form-control-sm"
-                   value="{{ user_profile.user_phone or '' }}" placeholder="(303) 555-1212">
+            <label class="form-label small">Phone</label>
+            <input type="text" name="phone" class="form-control form-control-sm"
+                   value="{{ my_loyalty.phone if my_loyalty and my_loyalty.phone else '' }}">
           </div>
-          <div class="col-12">
-            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save Profile</button>
-            <span class="text-muted small ms-2">Used to auto-fill Marriott Bonvoy, Hyatt, Hilton, IHG and Omni points request forms.</span>
+
+          <div class="col-12"><hr class="my-2"></div>
+
+          <div class="col-md-4">
+            <label class="form-label small">Marriott Bonvoy #</label>
+            <input type="text" name="marriott_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.marriott_number if my_loyalty and my_loyalty.marriott_number else '' }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">World of Hyatt #</label>
+            <input type="text" name="hyatt_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.hyatt_number if my_loyalty and my_loyalty.hyatt_number else '' }}">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Hilton Honors #</label>
+            <input type="text" name="hilton_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.hilton_number if my_loyalty and my_loyalty.hilton_number else '' }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">IHG One Rewards #</label>
+            <input type="text" name="ihg_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.ihg_number if my_loyalty and my_loyalty.ihg_number else '' }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Omni Select Guest #</label>
+            <input type="text" name="omni_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.omni_number if my_loyalty and my_loyalty.omni_number else '' }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Choice Privileges #</label>
+            <input type="text" name="choice_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.choice_number if my_loyalty and my_loyalty.choice_number else '' }}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Sonesta Travel Pass #</label>
+            <input type="text" name="sonesta_number" class="form-control form-control-sm"
+                   value="{{ my_loyalty.sonesta_number if my_loyalty and my_loyalty.sonesta_number else '' }}">
+          </div>
+
+          <div class="col-12 mt-3">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save My Loyalty Info</button>
           </div>
         </form>
       </div>
     </div>
+    {% endif %}
   </div>
 
   <div class="col-md-4">

@@ -2728,6 +2728,46 @@ def settings():
                 db.execute('INSERT OR REPLACE INTO Settings (key, value) VALUES (?, ?)', (key, val))
             db.commit()
             flash('User profile saved — used on Hotel Points forms.', 'success')
+        elif action == 'save_my_loyalty_profile':
+            current = get_current_user()
+            if not current:
+                flash('Please log in to save your loyalty profile.', 'error')
+            else:
+                uid = current['id']
+                fields = {}
+                for k in ('full_name', 'email', 'phone',
+                          'marriott_number', 'hyatt_number', 'hilton_number',
+                          'ihg_number', 'omni_number', 'choice_number', 'sonesta_number'):
+                    fields[k] = request.form.get(k, '').strip() or None
+                # Ensure a row exists
+                db.execute('''INSERT OR IGNORE INTO user_loyalty_profile (user_id, full_name, email)
+                              VALUES (?, ?, ?)''',
+                           (uid, current['name'] or '', current['email'] or ''))
+                sets = ', '.join(f'{k}=?' for k in fields)
+                db.execute(f'''UPDATE user_loyalty_profile
+                               SET {sets}, updated_at=datetime('now')
+                               WHERE user_id=?''',
+                           list(fields.values()) + [uid])
+                db.commit()
+                flash('Your loyalty info saved.', 'success')
+        elif action == 'save_default_recipient':
+            current = get_current_user()
+            if not current or current['role'] != 'admin':
+                flash('Only an administrator can change the default Hotel Points recipient.', 'error')
+            else:
+                new_uid = request.form.get('default_recipient_user_id', '').strip()
+                try:
+                    int(new_uid)  # validate
+                except Exception:
+                    flash('Invalid user selection.', 'error')
+                else:
+                    db.execute('INSERT OR REPLACE INTO Settings (key, value) VALUES '
+                               '("hotel_points_default_recipient_user_id", ?)',
+                               (new_uid,))
+                    db.commit()
+                    target = db.execute('SELECT name FROM Users WHERE id=?', (new_uid,)).fetchone()
+                    flash(f'Default Hotel Points recipient set to {target["name"] if target else new_uid}.',
+                          'success')
         return redirect(url_for('settings'))
 
     current       = get_commission_split()
@@ -2742,13 +2782,34 @@ def settings():
     for key in ('user_full_name', 'user_email', 'user_phone'):
         row = db.execute('SELECT value FROM Settings WHERE key=?', (key,)).fetchone()
         user_profile[key] = row[0] if row else ''
+
+    # Hotel Points multi-user data
+    current_user = get_current_user()
+    my_loyalty   = None
+    if current_user:
+        my_loyalty = _get_user_loyalty_profile(db, current_user['id'])
+    default_recipient_user_id = _get_default_recipient_user_id(db)
+    default_recipient_user    = None
+    if default_recipient_user_id:
+        default_recipient_user = db.execute(
+            'SELECT id, name, email FROM Users WHERE id=?',
+            (default_recipient_user_id,)).fetchone()
+    all_users = db.execute(
+        'SELECT id, name, email FROM Users WHERE active=1 ORDER BY name'
+    ).fetchall()
+
     return render_template('settings.html', commission_split=current, tolerance=tolerance,
                            kristin_split=kristin_split, kristin_cut=kristin_cut,
                            overrides=overrides, accounts=accounts,
                            date_format_options=DATE_FORMAT_OPTIONS,
                            current_date_fmt=current_date_fmt,
                            today_preview=today_preview,
-                           user_profile=user_profile)
+                           user_profile=user_profile,
+                           current_user=current_user,
+                           my_loyalty=my_loyalty,
+                           default_recipient_user=default_recipient_user,
+                           default_recipient_user_id=default_recipient_user_id,
+                           all_users=all_users)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
@@ -3525,6 +3586,53 @@ def _ensure_hotel_points_tables(db):
         if not row:
             db.execute('INSERT INTO Settings (key, value) VALUES (?, ?)',
                        (key, default))
+    db.commit()
+
+    # ── Per-user loyalty profile (for point-splitting and default-recipient logic) ──
+    # All hotel points in CPAinc default to Kristin House. Each user can still
+    # enter their own loyalty info to support future point splitting.
+    db.executescript('''
+        CREATE TABLE IF NOT EXISTS user_loyalty_profile (
+            user_id          INTEGER PRIMARY KEY REFERENCES Users(id) ON DELETE CASCADE,
+            full_name        TEXT,
+            email            TEXT,
+            phone            TEXT,
+            marriott_number  TEXT,
+            hyatt_number     TEXT,
+            hilton_number    TEXT,
+            ihg_number       TEXT,
+            omni_number      TEXT,
+            choice_number    TEXT,
+            sonesta_number   TEXT,
+            created_at       TEXT DEFAULT (datetime('now')),
+            updated_at       TEXT DEFAULT (datetime('now'))
+        );
+    ''')
+    db.commit()
+
+    # Seed one row per existing active user, defaulting name/email from Users.
+    for u in db.execute("SELECT id, name, email FROM Users WHERE active=1").fetchall():
+        existing = db.execute("SELECT 1 FROM user_loyalty_profile WHERE user_id=?",
+                              (u['id'],)).fetchone()
+        if not existing:
+            db.execute('''INSERT INTO user_loyalty_profile
+                (user_id, full_name, email)
+                VALUES (?, ?, ?)''',
+                (u['id'], u['name'] or '', u['email'] or ''))
+    db.commit()
+
+    # Default-recipient setting — defaults to Kristin House (id=2). All forms
+    # use this user's loyalty profile as the primary recipient until a future
+    # point-split feature allows per-request overrides.
+    row = db.execute("SELECT 1 FROM Settings WHERE key='hotel_points_default_recipient_user_id'").fetchone()
+    if not row:
+        kristin = db.execute(
+            "SELECT id FROM Users WHERE LOWER(name) LIKE '%kristin%house%' "
+            "OR LOWER(username) = 'kristin' LIMIT 1"
+        ).fetchone()
+        default_uid = str(kristin['id']) if kristin else '2'
+        db.execute("INSERT INTO Settings (key, value) VALUES ('hotel_points_default_recipient_user_id', ?)",
+                   (default_uid,))
     db.commit()
 
 
@@ -11996,12 +12104,75 @@ def admin_test_email():
 # Hotel Planner Points — module
 # ════════════════════════════════════════════════════════════════════════════
 
+def _get_default_recipient_user_id(db):
+    """Return the user_id of the default Hotel Points recipient (Kristin)."""
+    row = db.execute("SELECT value FROM Settings WHERE key='hotel_points_default_recipient_user_id'").fetchone()
+    if row and row['value']:
+        try:
+            return int(row['value'])
+        except Exception:
+            pass
+    # Fallback: try to find Kristin
+    krow = db.execute(
+        "SELECT id FROM Users WHERE LOWER(name) LIKE '%kristin%house%' "
+        "OR LOWER(username)='kristin' LIMIT 1"
+    ).fetchone()
+    return krow['id'] if krow else None
+
+
+def _get_user_loyalty_profile(db, user_id):
+    """Fetch user_loyalty_profile row, falling back to Users.name/email if blank."""
+    if not user_id:
+        return None
+    row = db.execute("SELECT * FROM user_loyalty_profile WHERE user_id=?",
+                     (user_id,)).fetchone()
+    if not row:
+        # Auto-create from Users defaults so the row always exists
+        u = db.execute("SELECT id, name, email FROM Users WHERE id=?",
+                       (user_id,)).fetchone()
+        if not u:
+            return None
+        db.execute('''INSERT INTO user_loyalty_profile (user_id, full_name, email)
+                      VALUES (?, ?, ?)''',
+                   (u['id'], u['name'] or '', u['email'] or ''))
+        db.commit()
+        row = db.execute("SELECT * FROM user_loyalty_profile WHERE user_id=?",
+                         (user_id,)).fetchone()
+    return row
+
+
+_CHAIN_TO_NUMBER_COL = {
+    'Marriott': 'marriott_number',
+    'Hyatt':    'hyatt_number',
+    'Hilton':   'hilton_number',
+    'IHG':      'ihg_number',
+    'Omni':     'omni_number',
+    'Choice':   'choice_number',
+    'Sonesta':  'sonesta_number',
+}
+
+
 def _get_user_profile(db):
-    """Return dict of user profile settings for points form filling."""
-    out = {}
-    for key in ('user_full_name', 'user_email', 'user_phone'):
-        row = db.execute('SELECT value FROM Settings WHERE key=?', (key,)).fetchone()
-        out[key] = row[0] if row else ''
+    """Return dict of user profile settings for points form filling.
+
+    In CPAinc, the primary recipient is whichever user is configured as the
+    default Hotel Points recipient (Kristin House by default). All forms fill
+    that user's name/email/phone into the primary block.
+    """
+    out = {'user_full_name': '', 'user_email': '', 'user_phone': ''}
+    uid = _get_default_recipient_user_id(db)
+    if uid:
+        prof = _get_user_loyalty_profile(db, uid)
+        if prof:
+            out['user_full_name'] = prof['full_name'] or ''
+            out['user_email']     = prof['email']     or ''
+            out['user_phone']     = prof['phone']     or ''
+    # Legacy fallback to Settings keys (covers fresh installs before profile set)
+    for k in out:
+        if not out[k]:
+            r = db.execute('SELECT value FROM Settings WHERE key=?', (k,)).fetchone()
+            if r and r['value']:
+                out[k] = r['value']
     return out
 
 
@@ -12016,7 +12187,12 @@ def _get_program(db, chain_name=None, program_id=None):
 
 
 def _build_field_values_for_request(db, request_row):
-    """Helper: assemble field_values from a request row."""
+    """Helper: assemble field_values from a request row.
+
+    Primary recipient = default recipient (Kristin by default). The chain-
+    specific loyalty number comes from her user_loyalty_profile, with a
+    fallback to the program's member_number (legacy behavior).
+    """
     from points_utils import build_field_values
     program = _get_program(db, program_id=request_row['program_id'])
     pickup_cfg = None
@@ -12028,9 +12204,22 @@ def _build_field_values_for_request(db, request_row):
         booking = db.execute('SELECT * FROM ReportPipeline WHERE BookingId=?',
                              (request_row['booking_id'],)).fetchone()
     user_profile = _get_user_profile(db)
+
+    # Override the program's member_number with the default recipient's own
+    # per-chain number if set. The program's member_number remains as a
+    # fallback for chains the recipient hasn't filled in yet.
+    program_d = dict(program) if program else None
+    if program_d:
+        uid = _get_default_recipient_user_id(db)
+        prof = _get_user_loyalty_profile(db, uid) if uid else None
+        chain = program_d.get('chain_name')
+        col = _CHAIN_TO_NUMBER_COL.get(chain)
+        if prof and col and prof[col]:
+            program_d['member_number'] = prof[col]
+
     pickup_cfg_d = dict(pickup_cfg) if pickup_cfg else None
     booking_d    = dict(booking)    if booking    else None
-    return build_field_values(user_profile, dict(program) if program else None,
+    return build_field_values(user_profile, program_d,
                               dict(request_row), pickup_cfg_d, booking_d), program, pickup_cfg, booking
 
 
