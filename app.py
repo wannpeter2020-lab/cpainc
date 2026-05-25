@@ -3,6 +3,7 @@ import io
 import json
 import sqlite3
 import functools
+import tempfile
 import pandas as pd
 
 # Load .env file for local development (ignored in production where env vars are set directly)
