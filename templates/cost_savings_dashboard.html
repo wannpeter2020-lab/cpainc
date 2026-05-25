@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Cost Savings — Promagent{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0"><i class="bi bi-piggy-bank me-2"></i>Cost Savings Analysis</h3>
+  <form class="d-flex gap-2" method="get">
+    <input class="form-control form-control-sm" type="search" name="q"
+           value="{{ q }}" placeholder="Search meeting / hotel / RFP code">
+    <button class="btn btn-sm btn-primary"><i class="bi bi-search"></i></button>
+  </form>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <div class="section-label">Reports</div>
+        <div class="fs-3 fw-bold">{{ stat_count }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <div class="section-label">Total Savings</div>
+        <div class="fs-3 fw-bold text-success">${{ '{:,.2f}'.format(total_savings) }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <div class="section-label">Avg Savings / Meeting</div>
+        <div class="fs-3 fw-bold">${{ '{:,.2f}'.format(avg_savings) }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body">
+        <div class="section-label">Total Hours Worked</div>
+        <div class="fs-3 fw-bold">{{ '{:,.1f}'.format(total_hours) }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>All Reports</span>
+  </div>
+  <div class="card-body p-0">
+    {% if reports %}
+    <div style="max-height:60vh; overflow-y:auto;">
+      <table class="table table-striped table-sm mb-0">
+        <thead style="position:sticky; top:0; z-index:2;">
+          <tr>
+            <th>RFP</th>
+            <th>Meeting</th>
+            <th>Hotel</th>
+            <th>Dates</th>
+            <th>Status</th>
+            <th class="text-end">Total Savings</th>
+            <th class="text-end">Hours</th>
+            <th class="text-end">Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for x in reports %}
+          {% set r = x.r %}
+          <tr>
+            <td>
+              <a href="{{ url_for('rfp_detail', rid=r['rfp_id']) }}">{{ r['rfp_code'] or '—' }}</a>
+            </td>
+            <td>{{ r['meeting_name'] or '—' }}</td>
+            <td>{{ r['hotel_name'] or '—' }}</td>
+            <td>{{ r['meeting_dates'] or '' }}</td>
+            <td>
+              {% if r['status'] == 'final' %}
+              <span class="badge bg-success">Final</span>
+              {% else %}
+              <span class="badge bg-secondary">Draft</span>
+              {% endif %}
+            </td>
+            <td class="text-end fw-bold text-success">${{ '{:,.2f}'.format(x.grand_total) }}</td>
+            <td class="text-end">{{ '{:,.1f}'.format(r['hours_worked'] or 0) }}</td>
+            <td class="text-end small text-muted">{{ r['updated_at'] }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" href="{{ url_for('cost_savings_edit', report_id=r['id']) }}">
+                <i class="bi bi-pencil"></i>
+              </a>
+              <a class="btn btn-sm btn-outline-success" href="{{ url_for('cost_savings_export', report_id=r['id']) }}">
+                <i class="bi bi-file-earmark-excel"></i>
+              </a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted">
+      No reports yet. Open an RFP, then click the Cost Savings button on a hotel row to create one.
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

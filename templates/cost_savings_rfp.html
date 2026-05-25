@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Cost Savings — {{ rfp['rfp_code'] }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="{{ url_for('cost_savings_dashboard') }}">Cost Savings</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('rfp_detail', rid=rfp['id']) }}">{{ rfp['rfp_code'] }}</a></li>
+    <li class="breadcrumb-item active">Cost Savings</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0"><i class="bi bi-piggy-bank me-2"></i>Cost Savings — {{ rfp['rfp_name'] or rfp['rfp_code'] }}</h3>
+  {% set any_report = false %}
+  {% for r in rows %}{% if r.report %}{% set any_report = true %}{% endif %}{% endfor %}
+  {% if any_report %}
+  <a class="btn btn-success" href="{{ url_for('cost_savings_export_all', rid=rfp['id']) }}">
+    <i class="bi bi-file-earmark-excel me-1"></i>Export All (Multi-Sheet)
+  </a>
+  {% endif %}
+</div>
+
+<div class="row g-3">
+  {% for row in rows %}
+  {% set h = row.hotel %}
+  {% set rep = row.report %}
+  <div class="col-md-6 col-lg-4">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>{{ h['hotel_name'] }}</span>
+        {% if rep %}
+          {% if rep['status'] == 'final' %}
+          <span class="badge bg-success">Final</span>
+          {% else %}
+          <span class="badge bg-warning text-dark">Draft</span>
+          {% endif %}
+        {% else %}
+        <span class="badge bg-secondary">No Report</span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="small text-muted mb-1">{{ h['city'] or '' }}{% if h['state'] %}, {{ h['state'] }}{% endif %}</div>
+        <div class="small mb-2">
+          Status: <span class="text-muted">{{ h['status'] or '—' }}</span><br>
+          Proposed Rate: {% if h['proposed_rate'] %}${{ '{:,.2f}'.format(h['proposed_rate']) }}{% else %}—{% endif %}
+        </div>
+        {% if rep %}
+        <hr>
+        <div>
+          <div class="section-label">Total Cost Savings</div>
+          <div class="fs-4 fw-bold text-success">${{ '{:,.2f}'.format(row.grand_total or 0) }}</div>
+          <div class="small text-muted">Hours: {{ '{:,.1f}'.format(rep['hours_worked'] or 0) }}</div>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer bg-white d-flex gap-2">
+        {% if rep %}
+        <a class="btn btn-sm btn-primary" href="{{ url_for('cost_savings_edit', report_id=rep['id']) }}">
+          <i class="bi bi-pencil me-1"></i>Open
+        </a>
+        <a class="btn btn-sm btn-outline-success" href="{{ url_for('cost_savings_export', report_id=rep['id']) }}">
+          <i class="bi bi-file-earmark-excel me-1"></i>Export
+        </a>
+        {% else %}
+        <form method="post" action="{{ url_for('cost_savings_create', rid=rfp['id'], hid=h['id']) }}">
+          <button class="btn btn-sm btn-success"><i class="bi bi-plus-circle me-1"></i>Create Report</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12">
+    <div class="card"><div class="card-body text-muted">No hotels on this RFP yet.</div></div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

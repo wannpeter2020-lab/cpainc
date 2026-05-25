@@ -233,6 +233,10 @@
               <i class="bi bi-check-lg"></i>
             </button>
             {% endif %}
+            <a href="{{ url_for('cost_savings_rfp', rid=rfp['id']) }}"
+               class="btn btn-sm btn-outline-success" title="Cost Savings Analysis">
+              <i class="bi bi-piggy-bank"></i>
+            </a>
             <a href="{{ url_for('rfp_hotel_edit', rid=rfp['id'], hid=h['id']) }}"
                class="btn btn-sm btn-outline-secondary">
               <i class="bi bi-pencil"></i>

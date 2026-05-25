@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+{% block title %}{{ report['meeting_name'] or 'Cost Savings Report' }}{% endblock %}
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb small">
+    <li class="breadcrumb-item"><a href="{{ url_for('cost_savings_dashboard') }}">Cost Savings</a></li>
+    {% if rfp %}
+    <li class="breadcrumb-item"><a href="{{ url_for('rfp_detail', rid=rfp['id']) }}">{{ rfp['rfp_code'] }}</a></li>
+    <li class="breadcrumb-item"><a href="{{ url_for('cost_savings_rfp', rid=rfp['id']) }}">Cost Savings</a></li>
+    {% endif %}
+    <li class="breadcrumb-item active">{{ report['hotel_name'] or 'Report' }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1"><i class="bi bi-piggy-bank me-2"></i>{{ report['meeting_name'] or 'Cost Savings Report' }}</h3>
+    <div class="text-muted small">{{ report['hotel_name'] or '' }} · {{ report['meeting_dates'] or '' }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <form method="post" action="{{ url_for('cost_savings_extract_proposal', report_id=report['id']) }}"
+          onsubmit="return confirm('Re-run AI extraction from the hotel proposal? This overwrites the proposal-side fields.');">
+      <button class="btn btn-warning"><i class="bi bi-magic me-1"></i>Auto-fill from Proposal</button>
+    </form>
+    <form method="post" action="{{ url_for('cost_savings_extract_contract', report_id=report['id']) }}"
+          onsubmit="return confirm('Re-run AI extraction from the signed contract? This overwrites the contract-side fields.');">
+      <button class="btn btn-warning"><i class="bi bi-magic me-1"></i>Auto-fill from Contract</button>
+    </form>
+    <a class="btn btn-success" href="{{ url_for('cost_savings_export', report_id=report['id']) }}">
+      <i class="bi bi-file-earmark-excel me-1"></i>Export
+    </a>
+    <form method="post" action="{{ url_for('cost_savings_delete', report_id=report['id']) }}"
+          onsubmit="return confirm('Delete this Cost Savings Report? This cannot be undone.');">
+      <button class="btn btn-outline-danger"><i class="bi bi-trash"></i></button>
+    </form>
+  </div>
+</div>
+
+<form method="post" action="{{ url_for('cost_savings_save', report_id=report['id']) }}">
+  <div class="row g-3">
+    <!-- Meeting metadata -->
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header">Meeting Details</div>
+        <div class="card-body">
+          <div class="row g-2">
+            <div class="col-md-4"><label class="form-label small">Meeting Name</label>
+              <input class="form-control form-control-sm" name="meeting_name" value="{{ report['meeting_name'] or '' }}"></div>
+            <div class="col-md-4"><label class="form-label small">Hotel Name</label>
+              <input class="form-control form-control-sm" name="hotel_name" value="{{ report['hotel_name'] or '' }}"></div>
+            <div class="col-md-4"><label class="form-label small">Meeting Dates</label>
+              <input class="form-control form-control-sm" name="meeting_dates" value="{{ report['meeting_dates'] or '' }}"></div>
+            <div class="col-md-3"><label class="form-label small">Lead Date Requested</label>
+              <input class="form-control form-control-sm" name="lead_date_requested" value="{{ report['lead_date_requested'] or '' }}"></div>
+            <div class="col-md-3"><label class="form-label small">Booked Date</label>
+              <input class="form-control form-control-sm" name="booked_date" value="{{ report['booked_date'] or '' }}"></div>
+            <div class="col-md-2"><label class="form-label small">Hours Worked</label>
+              <input class="form-control form-control-sm" type="number" step="0.5" name="hours_worked" value="{{ report['hours_worked'] or 0 }}"></div>
+            <div class="col-md-2"><label class="form-label small">Hotel Brand</label>
+              <select class="form-select form-select-sm" name="hotel_brand">
+                {% for b in brands %}
+                <option value="{{ b }}" {% if report['hotel_brand'] == b %}selected{% endif %}>{{ b }}</option>
+                {% endfor %}
+              </select></div>
+            <div class="col-md-2"><label class="form-label small">Status</label>
+              <select class="form-select form-select-sm" name="status">
+                <option value="draft" {% if report['status'] == 'draft' %}selected{% endif %}>Draft</option>
+                <option value="final" {% if report['status'] == 'final' %}selected{% endif %}>Final</option>
+              </select></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Grand Total preview -->
+    <div class="col-12">
+      <div class="alert alert-success d-flex justify-content-between align-items-center mb-0">
+        <strong><i class="bi bi-cash-coin me-2"></i>TOTAL COST SAVINGS</strong>
+        <strong class="fs-4" id="cs_grand_total">${{ '{:,.2f}'.format(totals.grand_total) }}</strong>
+      </div>
+    </div>
+
+    <!-- Guest Rooms -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header">Guest Rooms</div>
+        <div class="card-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-6"><label class="form-label small">Rack Rate (Proposal)</label>
+              <input class="form-control form-control-sm" type="number" step="0.01" name="gr_rack_rate" value="{{ report['gr_rack_rate'] or '' }}"></div>
+            <div class="col-6"><label class="form-label small">Contracted Rate</label>
+              <input class="form-control form-control-sm" type="number" step="0.01" name="gr_contracted_rate" value="{{ report['gr_contracted_rate'] or '' }}"></div>
+            <div class="col-6"><label class="form-label small">Total Guestrooms Contracted</label>
+              <input class="form-control form-control-sm" type="number" name="gr_total_nights" value="{{ report['gr_total_nights'] or '' }}"></div>
+            <div class="col-6"><label class="form-label small">Notes</label>
+              <input class="form-control form-control-sm" name="gr_notes" value="{{ report['gr_notes'] or '' }}"></div>
+          </div>
+          <hr>
+          <div class="d-flex justify-content-between small">
+            <span>Savings per Room:</span>
+            <strong id="cs_gr_savings_per">${{ '{:,.2f}'.format(totals.gr_savings_per) }}</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span>Savings on Guestrooms:</span>
+            <strong class="text-success" id="cs_gr_total">${{ '{:,.2f}'.format(totals.gr_total) }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Staff Rooms -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header">Staff Rooms</div>
+        <div class="card-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-6"><label class="form-label small">Group Room Rate (Proposal)</label>
+              <input class="form-control form-control-sm" type="number" step="0.01" name="sr_group_rate" value="{{ report['sr_group_rate'] or '' }}"></div>
+            <div class="col-6"><label class="form-label small">Contracted Rate</label>
+              <input class="form-control form-control-sm" type="number" step="0.01" name="sr_contracted_rate" value="{{ report['sr_contracted_rate'] or '' }}"></div>
+            <div class="col-6"><label class="form-label small">Total Staff Rooms Contracted</label>
+              <input class="form-control form-control-sm" type="number" name="sr_total_nights" value="{{ report['sr_total_nights'] or '' }}"></div>
+          </div>
+          <hr>
+          <div class="d-flex justify-content-between small">
+            <span>Savings per Room:</span>
+            <strong id="cs_sr_savings_per">${{ '{:,.2f}'.format(totals.sr_savings_per) }}</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span>Savings on Staff Rooms:</span>
+            <strong class="text-success" id="cs_sr_total">${{ '{:,.2f}'.format(totals.sr_total) }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Comp Rooms -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header">Complimentary Rooms</div>
+        <div class="card-body">
+          <div class="row g-2 align-items-end">
+            <div class="col-6"><label class="form-label small">Industry Standard (1 per …)</label>
+              <input class="form-control form-control-sm" type="number" name="comp_industry_standard" value="{{ report['comp_industry_standard'] or 50 }}"></div>
+            <div class="col-6"><label class="form-label small">Negotiated Policy (1 per …)</label>
+              <input class="form-control form-control-sm" type="number" name="comp_negotiated_policy" value="{{ report['comp_negotiated_policy'] or '' }}"></div>
+          </div>
+          <hr>
+          <div class="d-flex justify-content-between">
+            <span>Savings on Comp Room Nights:</span>
+            <strong class="text-success" id="cs_comp_total">${{ '{:,.2f}'.format(totals.comp_total) }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Meeting Room + F&B -->
+    <div class="col-md-6">
+      <div class="card h-100">
+        <div class="card-header">Meeting Room &amp; F&amp;B</div>
+        <div class="card-body">
+          <table class="table table-sm mb-0">
+            <thead>
+              <tr><th></th><th class="small">Initial Quote</th><th class="small">Negotiated Quote</th><th class="small text-end">Savings</th><th class="small">Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="align-middle small">Meeting Room Rental</td>
+                <td><input class="form-control form-control-sm" type="number" step="0.01" name="mr_initial" value="{{ report['mr_initial'] or '' }}"></td>
+                <td><input class="form-control form-control-sm" type="number" step="0.01" name="mr_negotiated" value="{{ report['mr_negotiated'] or '' }}"></td>
+                <td class="text-end fw-bold text-success" id="cs_mr_savings">${{ '{:,.2f}'.format(totals.mr_savings) }}</td>
+                <td><input class="form-control form-control-sm" name="mr_notes" value="{{ report['mr_notes'] or '' }}"></td>
+              </tr>
+              <tr>
+                <td class="align-middle small">F&amp;B Minimum</td>
+                <td><input class="form-control form-control-sm" type="number" step="0.01" name="fb_initial" value="{{ report['fb_initial'] or '' }}"></td>
+                <td><input class="form-control form-control-sm" type="number" step="0.01" name="fb_negotiated" value="{{ report['fb_negotiated'] or '' }}"></td>
+                <td class="text-end fw-bold text-success" id="cs_fb_savings">${{ '{:,.2f}'.format(totals.fb_savings) }}</td>
+                <td><input class="form-control form-control-sm" name="fb_notes" value="{{ report['fb_notes'] or '' }}"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Other Cost Savings Items -->
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span>Other Cost Savings Elements</span>
+          <span class="badge bg-success">Subtotal: <span id="cs_item_subtotal">${{ '{:,.2f}'.format(totals.item_total) }}</span></span>
+        </div>
+        <div class="card-body p-0">
+          <div style="max-height:55vh; overflow-y:auto;">
+            <table class="table table-sm mb-0">
+              <thead style="position:sticky; top:0; z-index:2;">
+                <tr>
+                  <th style="width:32%">Item</th>
+                  <th style="width:11%">Calc Type</th>
+                  <th style="width:10%" class="text-end">Standard $</th>
+                  <th style="width:10%" class="text-end">Negotiated $</th>
+                  <th style="width:8%" class="text-end">Qty / %</th>
+                  <th style="width:10%" class="text-end">Savings</th>
+                  <th style="width:15%">Notes</th>
+                  <th style="width:4%"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in items %}
+                {% set saving = (totals.item_calcs | selectattr('id', 'equalto', it['id']) | list | first).savings %}
+                <tr data-item-id="{{ it['id'] }}">
+                  <td><input class="form-control form-control-sm" name="item_{{ it['id'] }}_item_name" value="{{ it['item_name'] or '' }}"></td>
+                  <td>
+                    <select class="form-select form-select-sm cs-item-calc" name="item_{{ it['id'] }}_calc_type">
+                      <option value="simple"    {% if it['calc_type'] == 'simple' %}selected{% endif %}>Simple</option>
+                      <option value="attrition" {% if it['calc_type'] == 'attrition' %}selected{% endif %}>Attrition</option>
+                      <option value="points"    {% if it['calc_type'] == 'points' %}selected{% endif %}>Points</option>
+                      <option value="note_only" {% if it['calc_type'] == 'note_only' %}selected{% endif %}>Note Only</option>
+                    </select>
+                  </td>
+                  <td><input class="form-control form-control-sm text-end cs-item-std" type="number" step="0.01"
+                             name="item_{{ it['id'] }}_standard_price" value="{{ it['standard_price'] if it['standard_price'] is not none else '' }}"></td>
+                  <td><input class="form-control form-control-sm text-end cs-item-neg" type="number" step="0.01"
+                             name="item_{{ it['id'] }}_negotiated_price" value="{{ it['negotiated_price'] if it['negotiated_price'] is not none else '' }}"></td>
+                  <td><input class="form-control form-control-sm text-end cs-item-qty" type="number" step="0.01"
+                             name="item_{{ it['id'] }}_quantity" value="{{ it['quantity'] if it['quantity'] is not none else '' }}"></td>
+                  <td class="text-end fw-bold cs-item-savings {% if saving > 0 %}text-success{% elif saving < 0 %}text-danger{% endif %}">
+                    ${{ '{:,.2f}'.format(saving) }}
+                  </td>
+                  <td><input class="form-control form-control-sm" name="item_{{ it['id'] }}_notes" value="{{ it['notes'] or '' }}"></td>
+                  <td class="text-end">
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            onclick="if (confirm('Remove this item?')) { document.getElementById('del_item_{{ it['id'] }}').submit(); }">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="text-muted text-center p-3">No items — click Add Item below.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-footer bg-white">
+          <button type="button" class="btn btn-sm btn-outline-primary"
+                  onclick="document.getElementById('add_item_form').submit();">
+            <i class="bi bi-plus-circle me-1"></i>Add Item
+          </button>
+          <span class="text-muted small ms-2">
+            Calc types: <b>Simple</b> = (Std − Neg) × Qty &nbsp; · &nbsp;
+            <b>Attrition</b> = Contracted Rate × GR Nights × MAX(90% − Contracted Attrition[Qty], 0) &nbsp; · &nbsp;
+            <b>Points</b> = (Brand $/pt − Neg) × ((GR Nights × Contracted) + MR Negotiated) &nbsp; · &nbsp;
+            <b>Note Only</b> = no calc, notes column only.
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 d-flex justify-content-end gap-2 mb-5">
+      <a class="btn btn-secondary" href="{{ url_for('cost_savings_dashboard') }}">Cancel</a>
+      <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Save</button>
+    </div>
+  </div>
+</form>
+
+<!-- Hidden item-management forms (kept outside the main form so they aren't nested) -->
+<form id="add_item_form" method="post" action="{{ url_for('cost_savings_item_add', report_id=report['id']) }}"></form>
+{% for it in items %}
+<form id="del_item_{{ it['id'] }}" method="post"
+      action="{{ url_for('cost_savings_item_delete', report_id=report['id'], iid=it['id']) }}"></form>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const BRAND_DOLLAR = {
+    'Hyatt': 0.018, 'Hilton': 0.005, 'Marriott': 0.008,
+    'IHG': 0.007, 'Preferred': 0.005
+  };
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const num = (el) => {
+    if (!el) return 0;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? 0 : v;
+  };
+  const fmt = (v) => '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const setText = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = fmt(val); };
+
+  function recompute() {
+    const grRack   = num(document.querySelector('[name="gr_rack_rate"]'));
+    const grContr  = num(document.querySelector('[name="gr_contracted_rate"]'));
+    const grNights = num(document.querySelector('[name="gr_total_nights"]'));
+    const srGroup  = num(document.querySelector('[name="sr_group_rate"]'));
+    const srContr  = num(document.querySelector('[name="sr_contracted_rate"]'));
+    const srNights = num(document.querySelector('[name="sr_total_nights"]'));
+    const compNeg  = num(document.querySelector('[name="comp_negotiated_policy"]'));
+    const mrInit   = num(document.querySelector('[name="mr_initial"]'));
+    const mrNeg    = num(document.querySelector('[name="mr_negotiated"]'));
+    const fbInit   = num(document.querySelector('[name="fb_initial"]'));
+    const fbNeg    = num(document.querySelector('[name="fb_negotiated"]'));
+    const brandSel = document.querySelector('[name="hotel_brand"]');
+    const brand    = brandSel ? brandSel.value : 'Preferred';
+    const pointsDollar = BRAND_DOLLAR[brand] || 0.005;
+    const pointsBase   = (grNights * grContr) + mrNeg;
+
+    const grPer    = grRack - grContr;
+    const grTotal  = grPer * grNights;
+    const srPer    = srGroup - srContr;
+    const srTotal  = srPer * srNights;
+    const compTotal = compNeg ? (grNights / compNeg) * grContr : 0;
+    const mrSav    = mrInit - mrNeg;
+    const fbSav    = fbInit - fbNeg;
+
+    setText('cs_gr_savings_per', grPer);
+    setText('cs_gr_total', grTotal);
+    setText('cs_sr_savings_per', srPer);
+    setText('cs_sr_total', srTotal);
+    setText('cs_comp_total', compTotal);
+    setText('cs_mr_savings', mrSav);
+    setText('cs_fb_savings', fbSav);
+
+    let itemTotal = 0;
+    $$('tr[data-item-id]').forEach(row => {
+      const ct  = row.querySelector('.cs-item-calc').value;
+      const std = num(row.querySelector('.cs-item-std'));
+      const neg = num(row.querySelector('.cs-item-neg'));
+      const qty = num(row.querySelector('.cs-item-qty'));
+      let saving = 0;
+      if (ct === 'simple')         saving = (std - neg) * qty;
+      else if (ct === 'attrition') saving = grContr * grNights * Math.max(0.9 - qty, 0);
+      else if (ct === 'points')    saving = (pointsDollar - neg) * pointsBase;
+      // note_only -> 0
+      const cell = row.querySelector('.cs-item-savings');
+      if (cell) {
+        cell.textContent = fmt(saving);
+        cell.classList.toggle('text-success', saving > 0);
+        cell.classList.toggle('text-danger', saving < 0);
+      }
+      itemTotal += saving;
+    });
+    setText('cs_item_subtotal', itemTotal);
+    setText('cs_grand_total', grTotal + srTotal + compTotal + mrSav + fbSav + itemTotal);
+  }
+
+  document.addEventListener('input',  e => { if (e.target.matches('input, select')) recompute(); });
+  document.addEventListener('change', e => { if (e.target.matches('select'))        recompute(); });
+  document.addEventListener('DOMContentLoaded', recompute);
+})();
+</script>
+{% endblock %}

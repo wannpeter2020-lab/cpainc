@@ -3530,6 +3530,188 @@ def ensure_pickup_tables():
         pass
 
     _ensure_hotel_points_tables(db)
+    _ensure_cost_savings_tables(db)
+
+
+def _ensure_cost_savings_tables(db):
+    """Create cost_savings_report + cost_savings_item tables."""
+    db.executescript('''
+        CREATE TABLE IF NOT EXISTS cost_savings_report (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            rfp_hotel_id            INTEGER NOT NULL,
+            meeting_name            TEXT,
+            hotel_name              TEXT,
+            meeting_dates           TEXT,
+            lead_date_requested     TEXT,
+            booked_date             TEXT,
+            hours_worked            REAL DEFAULT 0,
+            gr_rack_rate            REAL,
+            gr_contracted_rate      REAL,
+            gr_total_nights         INTEGER,
+            gr_notes                TEXT,
+            sr_group_rate           REAL,
+            sr_contracted_rate      REAL,
+            sr_total_nights         INTEGER,
+            comp_industry_standard  INTEGER DEFAULT 50,
+            comp_negotiated_policy  INTEGER,
+            mr_initial              REAL,
+            mr_negotiated           REAL,
+            mr_notes                TEXT,
+            fb_initial              REAL,
+            fb_negotiated           REAL,
+            fb_notes                TEXT,
+            hotel_brand             TEXT,
+            status                  TEXT DEFAULT 'draft',
+            proposal_extracted_at   TEXT,
+            contract_extracted_at   TEXT,
+            created_at              TEXT DEFAULT (datetime('now')),
+            updated_at              TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (rfp_hotel_id) REFERENCES rfp_hotel(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS cost_savings_item (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id         INTEGER NOT NULL,
+            sort_order        INTEGER DEFAULT 0,
+            item_name         TEXT NOT NULL,
+            calc_type         TEXT NOT NULL DEFAULT 'simple',
+            standard_price    REAL,
+            negotiated_price  REAL,
+            quantity          REAL,
+            cost_savings      REAL,
+            notes             TEXT,
+            FOREIGN KEY (report_id) REFERENCES cost_savings_report(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_csr_rfp_hotel ON cost_savings_report(rfp_hotel_id);
+        CREATE INDEX IF NOT EXISTS idx_csi_report    ON cost_savings_item(report_id);
+    ''')
+    db.commit()
+
+    # pickup_config.contract_extracted_data — cache for the richer extractor.
+    try:
+        db.execute('ALTER TABLE pickup_config ADD COLUMN contract_extracted_data TEXT')
+        db.commit()
+    except Exception:
+        pass
+
+    # Backfill: add Travel Expense rows to any existing report that lacks them.
+    travel_items = [
+        ('Travel Expenses – Site Visits',
+         'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
+        ('Travel Expenses – Attending Meeting Dates',
+         'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
+    ]
+    reports = db.execute('SELECT id FROM cost_savings_report').fetchall()
+    for r in reports:
+        existing_names = {row[0] for row in db.execute(
+            'SELECT item_name FROM cost_savings_item WHERE report_id=?', (r[0],)
+        ).fetchall()}
+        max_order = db.execute(
+            'SELECT COALESCE(MAX(sort_order), -1) FROM cost_savings_item WHERE report_id=?',
+            (r[0],)
+        ).fetchone()[0]
+        for name, note in travel_items:
+            if name in existing_names:
+                continue
+            max_order += 1
+            db.execute('''INSERT INTO cost_savings_item
+                (report_id, sort_order, item_name, calc_type,
+                 standard_price, negotiated_price, quantity, notes)
+                VALUES (?, ?, ?, 'simple', 0, 0, 1, ?)''',
+                (r[0], max_order, name, note))
+    db.commit()
+
+
+# Default seed items inserted when a Cost Savings Report is first created.
+COST_SAVINGS_SEED_ITEMS = [
+    {'item_name': 'Attrition Savings vs 90% Baseline',               'calc_type': 'attrition',  'quantity': 0.70},
+    {'item_name': 'Complimentary Internet in Guest Rooms',           'calc_type': 'simple',     'standard_price': 12.95, 'negotiated_price': 0},
+    {'item_name': 'Complimentary Internet in Meeting Space',         'calc_type': 'simple',     'standard_price': 15.00, 'negotiated_price': 0},
+    {'item_name': 'Suite upgrades per night at group rate',          'calc_type': 'simple',     'standard_price': 150.00, 'negotiated_price': 0},
+    {'item_name': 'VIP Amenities',                                   'calc_type': 'simple',     'standard_price': 50.00, 'negotiated_price': 0},
+    {'item_name': 'Complimentary Overnight Valet Vouchers',          'calc_type': 'simple',     'standard_price': 59.00, 'negotiated_price': 0},
+    {'item_name': '15% Discount on A/V',                             'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'Group may bring in own laptops and projectors',   'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'Reduced valet parking fee',                       'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'Complimentary easels and podiums',                'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'Complimentary meeting planner room',              'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0},
+    {'item_name': 'No Resort Fees or Destination Fees',              'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0},
+    {'item_name': 'Waived storage and handling fees',                'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'No deposit required',                             'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': 'Travel Expenses – Site Visits',                   'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'},
+    {'item_name': 'Travel Expenses – Attending Meeting Dates',       'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'},
+    {'item_name': 'Meeting Planner Points',                          'calc_type': 'points'},
+]
+
+PLANNER_POINTS_BY_BRAND = {
+    'Hyatt':     0.018,
+    'Hilton':    0.005,
+    'Marriott':  0.008,
+    'IHG':       0.007,
+    'Preferred': 0.005,
+}
+
+
+def _compute_report_totals(report, items):
+    rack = (report['gr_rack_rate'] or 0)
+    gr_contr = (report['gr_contracted_rate'] or 0)
+    gr_nights = (report['gr_total_nights'] or 0)
+    gr_savings_per = rack - gr_contr
+    gr_total = gr_savings_per * gr_nights
+
+    sr_savings_per = (report['sr_group_rate'] or 0) - (report['sr_contracted_rate'] or 0)
+    sr_total = sr_savings_per * (report['sr_total_nights'] or 0)
+
+    comp_negotiated = (report['comp_negotiated_policy'] or 0)
+    comp_total = (gr_nights / comp_negotiated) * gr_contr if comp_negotiated else 0
+
+    mr_savings = (report['mr_initial'] or 0) - (report['mr_negotiated'] or 0)
+    fb_savings = (report['fb_initial'] or 0) - (report['fb_negotiated'] or 0)
+
+    points_dollar = PLANNER_POINTS_BY_BRAND.get(report['hotel_brand'] or 'Preferred', 0.005)
+    points_base = (gr_nights * gr_contr) + (report['mr_negotiated'] or 0)
+
+    item_total = 0
+    item_calcs = []
+    for it in items:
+        ct = it['calc_type']
+        b = (it['standard_price'] or 0)
+        c = (it['negotiated_price'] or 0)
+        d = (it['quantity'] or 0)
+        if ct == 'attrition':
+            saving = gr_contr * gr_nights * max(0.90 - d, 0)
+        elif ct == 'points':
+            saving = (points_dollar - c) * points_base
+        elif ct == 'note_only':
+            saving = 0
+        else:
+            saving = (b - c) * d
+        item_calcs.append({'id': it['id'], 'savings': saving})
+        item_total += saving
+
+    grand = gr_total + sr_total + comp_total + mr_savings + fb_savings + item_total
+    return {
+        'gr_savings_per': gr_savings_per, 'gr_total': gr_total,
+        'sr_savings_per': sr_savings_per, 'sr_total': sr_total,
+        'comp_total': comp_total,
+        'mr_savings': mr_savings, 'fb_savings': fb_savings,
+        'item_total': item_total, 'item_calcs': item_calcs,
+        'grand_total': grand,
+        'points_dollar': points_dollar, 'points_base': points_base,
+    }
+
+
+def _detect_brand_from_hotel(hotel_name):
+    h = (hotel_name or '').lower()
+    if 'hyatt' in h: return 'Hyatt'
+    if 'hilton' in h or 'embassy suites' in h or 'doubletree' in h or 'hampton' in h or 'waldorf' in h or 'conrad' in h or 'curio' in h:
+        return 'Hilton'
+    if 'marriott' in h or 'ritz' in h or 'sheraton' in h or 'westin' in h or 'renaissance' in h or 'jw ' in h or 'courtyard' in h or 'gaylord' in h:
+        return 'Marriott'
+    if 'intercontinental' in h or 'crowne plaza' in h or 'holiday inn' in h or 'kimpton' in h or 'staybridge' in h:
+        return 'IHG'
+    return 'Preferred'
 
 
 def _ensure_hotel_points_tables(db):
@@ -8617,8 +8799,22 @@ def pickup_upload_contract(cid):
                       hotel_contact, hotel_contact_email,
                       hotel_contact2, hotel_contact2_email,
                       group_contact, group_contact_email, cid))
+
+                # Cascade rich extraction → cost_savings_report rows
+                cs_flash = None
+                if file_blob:
+                    cs_res = cascade_contract_cost_savings(
+                        db, file_blob, contract_filename,
+                        booking_id=config['booking_id'],
+                        pickup_config_id=cid,
+                    )
+                    if cs_res and not cs_res.get('error'):
+                        cs_flash = 'Cost Savings reports updated with contract values.'
+
                 db.commit()
                 flash('Contract data saved — room block updated.', 'success')
+                if cs_flash:
+                    flash(cs_flash, 'success')
                 return redirect(url_for('pickup_event', cid=cid))
             except Exception as e:
                 flash(f'Error saving contract data: {e}', 'error')
@@ -11292,7 +11488,11 @@ def rfp_hotel_select(rid, hid):
             (pf.filename, pf.read(), hid, rid)
         )
     db.commit()
+    # Auto-create / refresh Cost Savings Report for the selected hotel.
+    cs_id = _cs_seed_from_selected_hotel(db, rid, hid)
     flash('Hotel selected.', 'success')
+    if cs_id:
+        flash('Cost Savings Report initialized from CRF — open it under Reports → Cost Savings.', 'success')
     return redirect(url_for('rfp_detail', rid=rid))
 
 
@@ -11541,11 +11741,24 @@ def rfp_upload_contract_confirm(rid):
                   group_contact, group_contact_email))
             pickup_updated = True
 
+    # Cascade rich extraction → cost_savings_report (via booking link)
+    cs_flash = None
+    if file_blob and rfp['booking_id']:
+        cs_res = cascade_contract_cost_savings(
+            db, file_blob, contract_filename,
+            booking_id=rfp['booking_id'],
+            pickup_config_id=None,
+        )
+        if cs_res and not cs_res.get('error'):
+            cs_flash = 'Cost Savings reports updated with contract values.'
+
     db.commit()
     msg = 'Contract saved — RFP and hotel updated.'
     if pickup_updated:
         msg += ' Pickup tracking updated with real block data.'
     flash(msg, 'success')
+    if cs_flash:
+        flash(cs_flash, 'success')
     return redirect(url_for('rfp_detail', rid=rid))
 
 
@@ -12700,6 +12913,737 @@ def points_import():
 
     return render_template('points_import.html', programs=programs,
                            preview=None, chain_name=None)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COST SAVINGS ANALYSIS
+# ═════════════════════════════════════════════════════════════════════════════
+
+COST_SAVINGS_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), 'assets', 'cost_savings_template.xlsx')
+
+
+def _cs_get_report(db, report_id):
+    return db.execute('SELECT * FROM cost_savings_report WHERE id=?', (report_id,)).fetchone()
+
+
+def _cs_get_items(db, report_id):
+    return db.execute(
+        'SELECT * FROM cost_savings_item WHERE report_id=? ORDER BY sort_order, id',
+        (report_id,)
+    ).fetchall()
+
+
+def _cs_seed_items(db, report_id):
+    for i, item in enumerate(COST_SAVINGS_SEED_ITEMS):
+        db.execute('''INSERT INTO cost_savings_item
+            (report_id, sort_order, item_name, calc_type,
+             standard_price, negotiated_price, quantity, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (report_id, i, item['item_name'], item['calc_type'],
+             item.get('standard_price'), item.get('negotiated_price'),
+             item.get('quantity'), item.get('notes')))
+
+
+def _cs_recompute_and_save(db, report_id):
+    report = _cs_get_report(db, report_id)
+    items = _cs_get_items(db, report_id)
+    if not report:
+        return
+    totals = _compute_report_totals(report, items)
+    for calc in totals['item_calcs']:
+        db.execute('UPDATE cost_savings_item SET cost_savings=? WHERE id=?',
+                   (calc['savings'], calc['id']))
+    db.execute("UPDATE cost_savings_report SET updated_at=datetime('now') WHERE id=?",
+               (report_id,))
+    db.commit()
+
+
+def _cs_apply_extraction(db, report_id, side, data):
+    if side == 'proposal':
+        sets, params = [], []
+        for col, key in [
+            ('gr_rack_rate',           'rack_rate'),
+            ('sr_group_rate',          'group_rate'),
+            ('mr_initial',             'meeting_room_rental'),
+            ('fb_initial',             'f_and_b_minimum'),
+            ('comp_industry_standard', 'comp_industry_standard'),
+        ]:
+            v = data.get(key)
+            if v is not None:
+                sets.append(f'{col}=?'); params.append(v)
+        if data.get('hotel_brand'):
+            sets.append('hotel_brand=?'); params.append(data['hotel_brand'])
+        sets.append("proposal_extracted_at=datetime('now')")
+        sets.append("updated_at=datetime('now')")
+        params.append(report_id)
+        db.execute(f'UPDATE cost_savings_report SET {", ".join(sets)} WHERE id=?', params)
+    else:
+        sets, params = [], []
+        for col, key in [
+            ('gr_contracted_rate',     'contracted_rate'),
+            ('sr_contracted_rate',     'staff_contracted_rate'),
+            ('gr_total_nights',        'total_room_nights'),
+            ('sr_total_nights',        'staff_total_nights'),
+            ('mr_negotiated',          'meeting_room_rental'),
+            ('fb_negotiated',          'f_and_b_minimum'),
+            ('comp_negotiated_policy', 'comp_negotiated_policy'),
+        ]:
+            v = data.get(key)
+            if v is not None:
+                sets.append(f'{col}=?'); params.append(v)
+        sets.append("contract_extracted_at=datetime('now')")
+        sets.append("updated_at=datetime('now')")
+        params.append(report_id)
+        db.execute(f'UPDATE cost_savings_report SET {", ".join(sets)} WHERE id=?', params)
+    db.commit()
+
+
+def _cs_extract_from_crf_columns(rh):
+    data = {}
+    if rh['proposed_rate'] is not None:
+        data['rack_rate'] = rh['proposed_rate']
+        data['group_rate'] = rh['proposed_rate']
+    if rh['f_and_b_minimum'] is not None:
+        data['f_and_b_minimum'] = rh['f_and_b_minimum']
+    if rh['meeting_room_rental'] is not None:
+        data['meeting_room_rental'] = rh['meeting_room_rental']
+    if rh['attrition_pct'] is not None:
+        data['proposal_attrition_pct'] = rh['attrition_pct']
+    brand_val = rh['brand'] or _detect_brand_from_hotel(rh['hotel_name'])
+    if brand_val:
+        bl = brand_val.lower()
+        for canonical in ('Hyatt', 'Hilton', 'Marriott', 'IHG'):
+            if canonical.lower() in bl:
+                brand_val = canonical
+                break
+        data['hotel_brand'] = brand_val
+    try:
+        crf_qa = json.loads(rh['crf_row_data'] or '{}')
+        for q, a in crf_qa.items():
+            ql = q.lower()
+            if 'gross room rate' in ql and a:
+                import re as _re
+                m = _re.search(r'\$?\s*([\d,]+(?:\.\d+)?)', str(a))
+                if m:
+                    try:
+                        data['rack_rate'] = float(m.group(1).replace(',', ''))
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return data
+
+
+def _cs_apply_attrition_to_seed(db, report_id, attrition_pct):
+    if attrition_pct is None:
+        return
+    db.execute('''UPDATE cost_savings_item SET quantity=?
+                  WHERE id = (SELECT id FROM cost_savings_item
+                              WHERE report_id=? AND calc_type='attrition'
+                              ORDER BY sort_order LIMIT 1)''',
+               (attrition_pct, report_id))
+
+
+def cascade_contract_cost_savings(db, file_bytes, filename, booking_id=None,
+                                  pickup_config_id=None):
+    """Run rich cost-savings extraction on the contract file, cache JSON in
+    pickup_config, and cascade contract-side values onto any linked reports."""
+    from pickup_utils import parse_contract_for_cost_savings
+    if not file_bytes:
+        return None
+    try:
+        result = parse_contract_for_cost_savings(file_bytes, filename or 'contract.pdf')
+    except Exception as e:
+        return {'error': f'cost-savings extraction failed: {e}'}
+    if result.get('error'):
+        return result
+    payload = json.dumps({k: v for k, v in result.items() if k != 'raw_text'})
+    if pickup_config_id:
+        db.execute('UPDATE pickup_config SET contract_extracted_data=? WHERE id=?',
+                   (payload, pickup_config_id))
+    elif booking_id is not None:
+        db.execute('''UPDATE pickup_config SET contract_extracted_data=?
+                      WHERE CAST(booking_id AS INTEGER)=CAST(? AS INTEGER)''',
+                   (payload, booking_id))
+    if booking_id is not None:
+        rows = db.execute('''
+            SELECT csr.id FROM cost_savings_report csr
+            JOIN rfp_hotel rh ON rh.id = csr.rfp_hotel_id
+            JOIN rfp r        ON r.id  = rh.rfp_id
+            WHERE CAST(r.booking_id AS INTEGER) = CAST(? AS INTEGER)
+        ''', (booking_id,)).fetchall()
+        for row in rows:
+            _cs_apply_extraction(db, row['id'], 'contract', result)
+            _cs_apply_attrition_to_seed(db, row['id'], result.get('attrition_pct'))
+            _cs_recompute_and_save(db, row['id'])
+    db.commit()
+    return result
+
+
+def _cs_seed_from_selected_hotel(db, rid, hid):
+    """When a hotel is selected, create/refresh a Cost Savings Report pre-filled
+    from CRF / structured rfp_hotel columns."""
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    hotel = db.execute('SELECT * FROM rfp_hotel WHERE id=? AND rfp_id=?',
+                       (hid, rid)).fetchone()
+    if not (rfp and hotel):
+        return None
+    existing = db.execute(
+        'SELECT id FROM cost_savings_report WHERE rfp_hotel_id=? ORDER BY id DESC LIMIT 1',
+        (hid,)
+    ).fetchone()
+    if existing:
+        report_id = existing['id']
+    else:
+        brand = _detect_brand_from_hotel(hotel['hotel_name']) or 'Preferred'
+        meeting_dates = ''
+        if rfp['start_date'] and rfp['end_date']:
+            meeting_dates = f"{rfp['start_date']} to {rfp['end_date']}"
+        cur = db.execute('''
+            INSERT INTO cost_savings_report
+                (rfp_hotel_id, meeting_name, hotel_name, meeting_dates,
+                 lead_date_requested, booked_date,
+                 comp_industry_standard, hotel_brand, status)
+            VALUES (?, ?, ?, ?, ?, ?, 50, ?, 'draft')
+        ''', (
+            hid,
+            rfp['event_name'] or rfp['rfp_name'] or '',
+            hotel['hotel_name'] or '',
+            meeting_dates,
+            rfp['created_at'][:10] if rfp['created_at'] else '',
+            '',
+            brand,
+        ))
+        report_id = cur.lastrowid
+        _cs_seed_items(db, report_id)
+        db.commit()
+    data = _cs_extract_from_crf_columns(hotel)
+    if data:
+        _cs_apply_extraction(db, report_id, 'proposal', data)
+        _cs_apply_attrition_to_seed(db, report_id, data.get('proposal_attrition_pct'))
+        _cs_recompute_and_save(db, report_id)
+    return report_id
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.route('/cost-savings')
+def cost_savings_dashboard():
+    db = get_db()
+    q = (request.args.get('q') or '').strip()
+    sql = '''
+        SELECT csr.*, rh.rfp_id AS rfp_id, r.rfp_code AS rfp_code, r.event_name AS rfp_event_name
+        FROM cost_savings_report csr
+        JOIN rfp_hotel rh ON rh.id = csr.rfp_hotel_id
+        JOIN rfp r        ON r.id  = rh.rfp_id
+    '''
+    params = []
+    if q:
+        sql += ' WHERE csr.meeting_name LIKE ? OR csr.hotel_name LIKE ? OR r.rfp_code LIKE ?'
+        params = [f'%{q}%', f'%{q}%', f'%{q}%']
+    sql += ' ORDER BY csr.updated_at DESC'
+    reports = db.execute(sql, params).fetchall()
+    enriched = []
+    total_savings = 0
+    total_hours = 0
+    for r in reports:
+        items = _cs_get_items(db, r['id'])
+        totals = _compute_report_totals(r, items)
+        enriched.append({'r': r, 'grand_total': totals['grand_total']})
+        total_savings += totals['grand_total']
+        total_hours += (r['hours_worked'] or 0)
+    stat_count = len(enriched)
+    avg = (total_savings / stat_count) if stat_count else 0
+    return render_template('cost_savings_dashboard.html',
+                           reports=enriched, q=q,
+                           stat_count=stat_count,
+                           total_savings=total_savings,
+                           total_hours=total_hours,
+                           avg_savings=avg)
+
+
+@app.route('/rfp/<int:rid>/cost-savings')
+def cost_savings_rfp(rid):
+    db = get_db()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    hotels = db.execute('SELECT * FROM rfp_hotel WHERE rfp_id=? ORDER BY id', (rid,)).fetchall()
+    rows = []
+    for h in hotels:
+        rep = db.execute(
+            'SELECT * FROM cost_savings_report WHERE rfp_hotel_id=? ORDER BY id DESC LIMIT 1',
+            (h['id'],)
+        ).fetchone()
+        grand = None
+        if rep:
+            items = _cs_get_items(db, rep['id'])
+            grand = _compute_report_totals(rep, items)['grand_total']
+        rows.append({'hotel': h, 'report': rep, 'grand_total': grand})
+    return render_template('cost_savings_rfp.html', rfp=rfp, rows=rows)
+
+
+@app.route('/rfp/<int:rid>/hotel/<int:hid>/cost-savings/create', methods=['POST'])
+def cost_savings_create(rid, hid):
+    db = get_db()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    hotel = db.execute('SELECT * FROM rfp_hotel WHERE id=? AND rfp_id=?',
+                       (hid, rid)).fetchone()
+    if not (rfp and hotel):
+        flash('RFP or hotel not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    existing = db.execute(
+        'SELECT id FROM cost_savings_report WHERE rfp_hotel_id=? ORDER BY id DESC LIMIT 1',
+        (hid,)
+    ).fetchone()
+    if existing:
+        return redirect(url_for('cost_savings_edit', report_id=existing['id']))
+    brand = _detect_brand_from_hotel(hotel['hotel_name']) or 'Preferred'
+    meeting_dates = ''
+    if rfp['start_date'] and rfp['end_date']:
+        meeting_dates = f"{rfp['start_date']} to {rfp['end_date']}"
+    cur = db.execute('''
+        INSERT INTO cost_savings_report
+            (rfp_hotel_id, meeting_name, hotel_name, meeting_dates,
+             lead_date_requested, booked_date,
+             gr_contracted_rate, sr_contracted_rate,
+             comp_industry_standard, hotel_brand,
+             mr_negotiated, fb_negotiated, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 50, ?, ?, ?, 'draft')
+    ''', (hid,
+          rfp['event_name'] or rfp['rfp_name'] or '',
+          hotel['hotel_name'] or '',
+          meeting_dates,
+          rfp['created_at'][:10] if rfp['created_at'] else '',
+          '',
+          hotel['proposed_rate'], hotel['proposed_rate'],
+          brand,
+          hotel['meeting_room_rental'], hotel['f_and_b_minimum']))
+    report_id = cur.lastrowid
+    _cs_seed_items(db, report_id)
+    db.commit()
+    _cs_recompute_and_save(db, report_id)
+    flash('Cost Savings Report created.', 'success')
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>')
+def cost_savings_edit(report_id):
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        flash('Report not found.', 'error')
+        return redirect(url_for('cost_savings_dashboard'))
+    items = _cs_get_items(db, report_id)
+    rh = db.execute('SELECT * FROM rfp_hotel WHERE id=?',
+                    (report['rfp_hotel_id'],)).fetchone()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rh['rfp_id'],)).fetchone() if rh else None
+    totals = _compute_report_totals(report, items)
+    return render_template('cost_savings_edit.html',
+                           report=report, items=items,
+                           rfp=rfp, rfp_hotel=rh,
+                           totals=totals,
+                           brands=list(PLANNER_POINTS_BY_BRAND.keys()))
+
+
+@app.route('/cost-savings/<int:report_id>/save', methods=['POST'])
+def cost_savings_save(report_id):
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        flash('Report not found.', 'error')
+        return redirect(url_for('cost_savings_dashboard'))
+
+    def _f(name):
+        v = request.form.get(name, '').strip().replace(',', '').replace('$', '')
+        try:
+            return float(v) if v else None
+        except Exception:
+            return None
+
+    def _i(name):
+        v = request.form.get(name, '').strip()
+        try:
+            return int(float(v)) if v else None
+        except Exception:
+            return None
+
+    db.execute('''UPDATE cost_savings_report SET
+        meeting_name=?, hotel_name=?, meeting_dates=?,
+        lead_date_requested=?, booked_date=?, hours_worked=?,
+        gr_rack_rate=?, gr_contracted_rate=?, gr_total_nights=?, gr_notes=?,
+        sr_group_rate=?, sr_contracted_rate=?, sr_total_nights=?,
+        comp_industry_standard=?, comp_negotiated_policy=?,
+        mr_initial=?, mr_negotiated=?, mr_notes=?,
+        fb_initial=?, fb_negotiated=?, fb_notes=?,
+        hotel_brand=?, status=?, updated_at=datetime('now')
+        WHERE id=?''', (
+        request.form.get('meeting_name', '').strip(),
+        request.form.get('hotel_name', '').strip(),
+        request.form.get('meeting_dates', '').strip(),
+        request.form.get('lead_date_requested', '').strip(),
+        request.form.get('booked_date', '').strip(),
+        _f('hours_worked') or 0,
+        _f('gr_rack_rate'), _f('gr_contracted_rate'), _i('gr_total_nights'),
+        request.form.get('gr_notes', '').strip() or None,
+        _f('sr_group_rate'), _f('sr_contracted_rate'), _i('sr_total_nights'),
+        _i('comp_industry_standard') or 50, _i('comp_negotiated_policy'),
+        _f('mr_initial'), _f('mr_negotiated'),
+        request.form.get('mr_notes', '').strip() or None,
+        _f('fb_initial'), _f('fb_negotiated'),
+        request.form.get('fb_notes', '').strip() or None,
+        request.form.get('hotel_brand', 'Preferred').strip(),
+        request.form.get('status', 'draft').strip(),
+        report_id,
+    ))
+    items = _cs_get_items(db, report_id)
+    for idx, it in enumerate(items):
+        prefix = f'item_{it["id"]}_'
+        db.execute('''UPDATE cost_savings_item SET
+            sort_order=?, item_name=?, calc_type=?,
+            standard_price=?, negotiated_price=?, quantity=?, notes=?
+            WHERE id=?''', (
+            _i(prefix + 'sort_order') if request.form.get(prefix + 'sort_order') else idx,
+            request.form.get(prefix + 'item_name', it['item_name']).strip(),
+            request.form.get(prefix + 'calc_type', it['calc_type']).strip(),
+            _f(prefix + 'standard_price'),
+            _f(prefix + 'negotiated_price'),
+            _f(prefix + 'quantity'),
+            request.form.get(prefix + 'notes', '').strip() or None,
+            it['id'],
+        ))
+    db.commit()
+    _cs_recompute_and_save(db, report_id)
+    flash('Saved.', 'success')
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>/extract-proposal', methods=['POST'])
+def cost_savings_extract_proposal(report_id):
+    from pickup_utils import parse_proposal_for_cost_savings
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        flash('Report not found.', 'error')
+        return redirect(url_for('cost_savings_dashboard'))
+    rh = db.execute('SELECT * FROM rfp_hotel WHERE id=?',
+                    (report['rfp_hotel_id'],)).fetchone()
+    if rh and rh['proposal_data']:
+        result = parse_proposal_for_cost_savings(bytes(rh['proposal_data']),
+                                                 rh['proposal_filename'] or 'proposal.pdf')
+        if result.get('error'):
+            flash(f"AI extraction problem: {result['error']}", 'error')
+            return redirect(url_for('cost_savings_edit', report_id=report_id))
+        _cs_apply_extraction(db, report_id, 'proposal', result)
+        _cs_apply_attrition_to_seed(db, report_id, result.get('attrition_pct'))
+        _cs_recompute_and_save(db, report_id)
+        flash('Proposal values extracted from uploaded PDF — review and Save.', 'success')
+        return redirect(url_for('cost_savings_edit', report_id=report_id))
+    if rh and (rh['proposed_rate'] is not None or rh['crf_row_data']):
+        data = _cs_extract_from_crf_columns(rh)
+        _cs_apply_extraction(db, report_id, 'proposal', data)
+        _cs_apply_attrition_to_seed(db, report_id, data.get('proposal_attrition_pct'))
+        _cs_recompute_and_save(db, report_id)
+        flash('Proposal values pulled from the CRF — review and Save.', 'success')
+        return redirect(url_for('cost_savings_edit', report_id=report_id))
+    flash('No proposal data found on this hotel — upload a proposal PDF or import a CRF first.', 'error')
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>/extract-contract', methods=['POST'])
+def cost_savings_extract_contract(report_id):
+    from pickup_utils import parse_contract_for_cost_savings
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        flash('Report not found.', 'error')
+        return redirect(url_for('cost_savings_dashboard'))
+    rh = db.execute('SELECT * FROM rfp_hotel WHERE id=?',
+                    (report['rfp_hotel_id'],)).fetchone()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rh['rfp_id'],)).fetchone() if rh else None
+    if rfp and rfp['booking_id']:
+        cached = db.execute(
+            '''SELECT contract_extracted_data FROM pickup_config
+               WHERE CAST(booking_id AS INTEGER)=CAST(? AS INTEGER)
+                 AND contract_extracted_data IS NOT NULL LIMIT 1''',
+            (rfp['booking_id'],)
+        ).fetchone()
+        if cached and cached['contract_extracted_data']:
+            try:
+                data = json.loads(cached['contract_extracted_data'])
+                _cs_apply_extraction(db, report_id, 'contract', data)
+                _cs_apply_attrition_to_seed(db, report_id, data.get('attrition_pct'))
+                _cs_recompute_and_save(db, report_id)
+                flash('Contract values pulled from cached extraction — review and Save.', 'success')
+                return redirect(url_for('cost_savings_edit', report_id=report_id))
+            except Exception:
+                pass
+    file_bytes, filename = None, None
+    if rfp and rfp['contract_data']:
+        file_bytes = bytes(rfp['contract_data'])
+        filename = rfp['contract_filename'] or 'contract.pdf'
+    elif rfp and rfp['booking_id']:
+        bc = db.execute('''SELECT filename, file_data FROM booking_contract
+                           WHERE booking_id=? ORDER BY id DESC LIMIT 1''',
+                        (rfp['booking_id'],)).fetchone()
+        if bc and bc['file_data']:
+            file_bytes = bytes(bc['file_data'])
+            filename = bc['filename']
+    if not file_bytes:
+        flash('No contract PDF found on this RFP — upload one first.', 'error')
+        return redirect(url_for('cost_savings_edit', report_id=report_id))
+    result = parse_contract_for_cost_savings(file_bytes, filename)
+    if result.get('error'):
+        flash(f"Extraction problem: {result['error']}", 'error')
+    else:
+        _cs_apply_extraction(db, report_id, 'contract', result)
+        _cs_apply_attrition_to_seed(db, report_id, result.get('attrition_pct'))
+        _cs_recompute_and_save(db, report_id)
+        if rfp and rfp['booking_id']:
+            payload = json.dumps({k: v for k, v in result.items() if k != 'raw_text'})
+            db.execute('''UPDATE pickup_config SET contract_extracted_data=?
+                          WHERE CAST(booking_id AS INTEGER)=CAST(? AS INTEGER)''',
+                       (payload, rfp['booking_id']))
+            db.commit()
+        flash('Contract values extracted — review and Save.', 'success')
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>/item/add', methods=['POST'])
+def cost_savings_item_add(report_id):
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        return redirect(url_for('cost_savings_dashboard'))
+    max_order = db.execute(
+        'SELECT COALESCE(MAX(sort_order), -1) FROM cost_savings_item WHERE report_id=?',
+        (report_id,)
+    ).fetchone()[0]
+    db.execute('''INSERT INTO cost_savings_item
+        (report_id, sort_order, item_name, calc_type) VALUES (?, ?, ?, ?)''',
+        (report_id, max_order + 1, 'New Item', 'simple'))
+    db.commit()
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>/item/<int:iid>/delete', methods=['POST'])
+def cost_savings_item_delete(report_id, iid):
+    db = get_db()
+    db.execute('DELETE FROM cost_savings_item WHERE id=? AND report_id=?',
+               (iid, report_id))
+    db.commit()
+    _cs_recompute_and_save(db, report_id)
+    return redirect(url_for('cost_savings_edit', report_id=report_id))
+
+
+@app.route('/cost-savings/<int:report_id>/delete', methods=['POST'])
+def cost_savings_delete(report_id):
+    db = get_db()
+    db.execute('DELETE FROM cost_savings_item WHERE report_id=?', (report_id,))
+    db.execute('DELETE FROM cost_savings_report WHERE id=?', (report_id,))
+    db.commit()
+    flash('Report deleted.', 'success')
+    return redirect(url_for('cost_savings_dashboard'))
+
+
+def _sanitize_sheet_name(name):
+    bad = '\\/?*[]:'
+    out = ''.join((c if c not in bad else ' ') for c in (name or 'Sheet'))
+    return out[:31] or 'Sheet'
+
+
+def _cs_populate_template_sheet(ws, report, items):
+    from openpyxl.styles import Font
+    ws['A1'] = report['meeting_name'] or ''
+    ws['A2'] = report['hotel_name'] or ''
+    ws['A3'] = report['meeting_dates'] or ''
+    ws['A4'] = f"Original Lead Date Request: {report['lead_date_requested'] or ''}"
+    ws['A5'] = f"Booked: {report['booked_date'] or ''}"
+    ws['B8']  = report['gr_rack_rate']
+    ws['B9']  = report['gr_contracted_rate']
+    ws['B10'] = '=B8-B9'
+    ws['B11'] = report['gr_total_nights']
+    ws['B12'] = '=B11*B10'
+    if report['gr_notes']:
+        ws['C7'] = 'Notes'
+        ws['C8'] = report['gr_notes']
+    ws['B15'] = report['sr_group_rate']
+    ws['B16'] = report['sr_contracted_rate']
+    ws['B17'] = '=B15-B16'
+    ws['B18'] = report['sr_total_nights']
+    ws['B19'] = '=B17*B18'
+    ws['B22'] = report['comp_industry_standard'] or 50
+    ws['B23'] = report['comp_negotiated_policy']
+    if report['comp_negotiated_policy']:
+        ws['B24'] = '=(B11/B23)*B9'
+    else:
+        ws['B24'] = 0
+    ws['B27'] = report['mr_initial']
+    ws['C27'] = report['mr_negotiated']
+    ws['D27'] = '=B27-C27'
+    if report['mr_notes']: ws['E27'] = report['mr_notes']
+    ws['B28'] = report['fb_initial']
+    ws['C28'] = report['fb_negotiated']
+    ws['D28'] = '=B28-C28'
+    if report['fb_notes']: ws['E28'] = report['fb_notes']
+    brand = report['hotel_brand'] or 'Preferred'
+    brand_cell = {'Hyatt': 'K7', 'Hilton': 'K8', 'Marriott': 'K9',
+                  'IHG': 'K10', 'Preferred': 'K11'}.get(brand, 'K11')
+    row = 31
+    item_rows = []
+    for it in items:
+        ws.cell(row=row, column=1, value=it['item_name'])
+        ct = it['calc_type']
+        if ct == 'simple':
+            if it['standard_price'] is not None:
+                ws.cell(row=row, column=2, value=it['standard_price'])
+            if it['negotiated_price'] is not None:
+                ws.cell(row=row, column=3, value=it['negotiated_price'])
+            if it['quantity'] is not None:
+                ws.cell(row=row, column=4, value=it['quantity'])
+            ws.cell(row=row, column=5, value=f'=(B{row}-C{row})*D{row}')
+        elif ct == 'attrition':
+            if it['quantity'] is not None:
+                ws.cell(row=row, column=3, value=it['quantity'])
+            ws.cell(row=row, column=5, value=f'=B9*B11*MAX(0.9-C{row},0)')
+        elif ct == 'points':
+            ws.cell(row=row, column=2, value=f'={brand_cell}')
+            ws.cell(row=row, column=3, value=it['negotiated_price'] or 0)
+            ws.cell(row=row, column=4, value=f'=(B11*B9)+C27')
+            ws.cell(row=row, column=5, value=f'=(B{row}-C{row})*D{row}')
+        if it['notes']:
+            ws.cell(row=row, column=6, value=it['notes'])
+        item_rows.append(row)
+        row += 1
+    total_items_row = row + 1
+    ws.cell(row=total_items_row, column=1, value='TOTAL').font = Font(bold=True)
+    if item_rows:
+        ws.cell(row=total_items_row, column=5,
+                value=f'=SUM(E{item_rows[0]}:E{item_rows[-1]})')
+    else:
+        ws.cell(row=total_items_row, column=5, value=0)
+    hours_row = total_items_row + 2
+    ws.cell(row=hours_row, column=1, value='Hours Worked:')
+    ws.cell(row=hours_row, column=2, value=report['hours_worked'] or 0)
+    grand_total_row = hours_row + 2
+    ws.cell(row=grand_total_row, column=1, value='TOTAL COST SAVINGS:  ').font = Font(bold=True)
+    ws.cell(row=grand_total_row, column=2,
+            value=f'=B12+B19+B24+D27+D28+E{total_items_row}').font = Font(bold=True)
+    money_cells = ['B8','B9','B10','B12','B15','B16','B17','B19','B24',
+                   'B27','C27','D27','B28','C28','D28', f'B{grand_total_row}']
+    for addr in money_cells:
+        ws[addr].number_format = '$#,##0.00'
+    for r in item_rows:
+        for col in ('B', 'C', 'E'):
+            ws[f'{col}{r}'].number_format = '$#,##0.00'
+    ws[f'E{total_items_row}'].number_format = '$#,##0.00'
+    return {'grand_total_row': grand_total_row, 'hours_row': hours_row}
+
+
+def _cs_build_workbook_for_report(report, items):
+    from openpyxl import load_workbook
+    wb = load_workbook(COST_SAVINGS_TEMPLATE_PATH)
+    ws = wb.active
+    ws.title = _sanitize_sheet_name(report['meeting_name'] or 'Cost Savings')
+    _cs_populate_template_sheet(ws, report, items)
+    return wb
+
+
+@app.route('/cost-savings/<int:report_id>/export')
+def cost_savings_export(report_id):
+    db = get_db()
+    report = _cs_get_report(db, report_id)
+    if not report:
+        flash('Report not found.', 'error')
+        return redirect(url_for('cost_savings_dashboard'))
+    items = _cs_get_items(db, report_id)
+    wb = _cs_build_workbook_for_report(report, items)
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    safe = ''.join(c if c.isalnum() or c in '-_' else '_'
+                   for c in (report['meeting_name'] or f'report_{report_id}'))
+    filename = f"{safe}_Cost_Savings.xlsx"
+    return send_file(output, download_name=filename, as_attachment=True,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/rfp/<int:rid>/cost-savings/export-all')
+def cost_savings_export_all(rid):
+    from openpyxl import load_workbook, Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from copy import copy
+    db = get_db()
+    rfp = db.execute('SELECT * FROM rfp WHERE id=?', (rid,)).fetchone()
+    if not rfp:
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    rows = db.execute('''
+        SELECT csr.* FROM cost_savings_report csr
+        JOIN rfp_hotel rh ON rh.id = csr.rfp_hotel_id
+        WHERE rh.rfp_id = ? ORDER BY csr.id
+    ''', (rid,)).fetchall()
+    if not rows:
+        flash('No cost savings reports under this RFP yet.', 'error')
+        return redirect(url_for('cost_savings_rfp', rid=rid))
+    wb = Workbook()
+    summary_ws = wb.active
+    summary_ws.title = 'Summary'
+    summary_ws['A1'] = f"{rfp['rfp_name'] or rfp['rfp_code'] or 'RFP'} Cost Savings Summary"
+    summary_ws['A1'].font = Font(bold=True, size=14)
+    headers = ['Meeting Name', 'Hotel', 'Meeting Dates', 'Total Cost Savings', 'Hours Worked']
+    for i, h in enumerate(headers, 1):
+        c = summary_ws.cell(row=4, column=i, value=h)
+        c.font = Font(bold=True, color='FFFFFF')
+        c.fill = PatternFill('solid', start_color='1A3A5C')
+        c.alignment = Alignment(horizontal='center')
+    summary_data_rows = []
+    for report in rows:
+        tpl = load_workbook(COST_SAVINGS_TEMPLATE_PATH).active
+        sheet_name = _sanitize_sheet_name(report['meeting_name'] or f'Report {report["id"]}')
+        base = sheet_name; n = 2
+        while sheet_name in wb.sheetnames:
+            sheet_name = (base[:28] + f' {n}')[:31]; n += 1
+        new_ws = wb.create_sheet(sheet_name)
+        for row in tpl.iter_rows():
+            for cell in row:
+                tgt = new_ws.cell(row=cell.row, column=cell.column, value=cell.value)
+                if cell.has_style:
+                    tgt.font = copy(cell.font); tgt.fill = copy(cell.fill)
+                    tgt.border = copy(cell.border); tgt.alignment = copy(cell.alignment)
+                    tgt.number_format = cell.number_format; tgt.protection = copy(cell.protection)
+        for col_letter, dim in tpl.column_dimensions.items():
+            new_ws.column_dimensions[col_letter].width = dim.width
+        items = _cs_get_items(db, report['id'])
+        meta = _cs_populate_template_sheet(new_ws, report, items)
+        summary_data_rows.append((report, sheet_name, meta))
+    for i, (report, sheet_name, meta) in enumerate(summary_data_rows):
+        srow = 5 + i
+        sn = sheet_name.replace("'", "''")
+        summary_ws.cell(row=srow, column=1, value=f"='{sn}'!A1")
+        summary_ws.cell(row=srow, column=2, value=f"='{sn}'!A2")
+        summary_ws.cell(row=srow, column=3, value=f"='{sn}'!A3")
+        summary_ws.cell(row=srow, column=4, value=f"='{sn}'!B{meta['grand_total_row']}")
+        summary_ws.cell(row=srow, column=4).number_format = '$#,##0.00'
+        summary_ws.cell(row=srow, column=5, value=f"='{sn}'!B{meta['hours_row']}")
+    tot_row = 5 + len(summary_data_rows) + 1
+    summary_ws.cell(row=tot_row, column=3, value='Totals').font = Font(bold=True)
+    summary_ws.cell(row=tot_row, column=4,
+                    value=f'=SUM(D5:D{4 + len(summary_data_rows)})').font = Font(bold=True)
+    summary_ws.cell(row=tot_row, column=4).number_format = '$#,##0.00'
+    summary_ws.cell(row=tot_row, column=5,
+                    value=f'=SUM(E5:E{4 + len(summary_data_rows)})').font = Font(bold=True)
+    widths = [36, 36, 22, 18, 12]
+    for i, w in enumerate(widths, 1):
+        summary_ws.column_dimensions[summary_ws.cell(1, i).column_letter].width = w
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    code = (rfp['rfp_code'] or rfp['rfp_name'] or f'RFP_{rid}').strip().replace(' ', '_')
+    filename = f"{code}_Cost_Savings_Report.xlsx"
+    return send_file(output, download_name=filename, as_attachment=True,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 if __name__ == '__main__':

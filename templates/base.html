@@ -99,6 +99,7 @@
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item" href="/reports/customer-summary"><i class="bi bi-person-lines-fill me-2"></i>Customer Summary</a></li>
             {% endif %}
+            <li><a class="dropdown-item {% if request.path.startswith('/cost-savings') %}active{% endif %}" href="/cost-savings"><i class="bi bi-piggy-bank me-2"></i>Cost Savings Analysis</a></li>
           </ul>
         </li>
         {% endif %}

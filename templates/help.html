@@ -483,6 +483,10 @@
     {% if can_admin %}<a href="#settings"><i class="bi bi-sliders"></i> Settings</a>{% endif %}
     {% if can_admin %}<a href="#admin"><i class="bi bi-shield-lock"></i> User Management</a>{% endif %}
     {% if can_admin %}<a href="#activity-log"><i class="bi bi-clock-history"></i> Activity Log</a>{% endif %}
+
+    <div class="section-label">Financial Tools</div>
+    <a href="#cost-savings"><i class="bi bi-piggy-bank"></i> Cost Savings Analysis</a>
+    <a href="#hotel-points"><i class="bi bi-award"></i> Hotel Points Tracking</a>
   </nav>
   <div class="back-link">
     <a href="/"><i class="bi bi-arrow-left me-1"></i> Back to App</a>
@@ -1630,6 +1634,125 @@ flowchart TD
     </ul>
   </div>
   {% endif %}{# end can_admin #}
+
+  <!-- ── Cost Savings Analysis ──────────────────────────────── -->
+  <div class="section" id="cost-savings">
+    <div class="section-title"><i class="bi bi-piggy-bank"></i> Cost Savings Analysis</div>
+    <p>The <strong>Cost Savings Analysis</strong> tool lets you document and report the financial value you negotiated for a client at each hotel — rate discounts, complimentary rooms, reduced meeting room rental, F&amp;B concessions, and any other custom savings line items. Reports are tied to RFP hotel responses and can be exported to Excel for client presentations.</p>
+
+    <h3>Accessing Cost Savings</h3>
+    <p>There are two ways to get to cost savings reports:</p>
+    <ul>
+      <li><strong>From the navigation bar:</strong> Click <strong>Reports → Cost Savings Analysis</strong> to see the full dashboard of all reports across all meetings.</li>
+      <li><strong>From an RFP:</strong> Open an RFP, scroll to a hotel response, and click the <strong>Cost Savings</strong> button next to that hotel. This takes you directly to that hotel's cost savings page.</li>
+    </ul>
+
+    <h3>Creating a Report</h3>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the RFP and go to the hotel response</strong><p>Navigate to <strong>RFP Process</strong>, find the RFP, and click into the hotel whose savings you want to document.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "Cost Savings"</strong><p>On the RFP hotel page, click the <strong>Cost Savings</strong> button. If no report exists yet, one is created automatically using the hotel's proposed rate as the starting rate.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Fill in the report fields</strong><p>The report opens with several sections pre-populated from the RFP data. Complete each section described below.</p></div></div>
+    </div>
+
+    <h3>Report Sections</h3>
+    <table class="info-table">
+      <tr><th>Section</th><th>What to Enter</th></tr>
+      <tr><td><strong>Meeting Info</strong></td><td>Meeting name, hotel name, meeting dates, lead date requested, and the date the contract was booked. These are pre-filled from the RFP.</td></tr>
+      <tr><td><strong>Guest Room Rate</strong></td><td>The rack rate (hotel's standard rate) and the contracted group rate. The system calculates the savings per night and multiplies by total room nights.</td></tr>
+      <tr><td><strong>Staff Rate</strong></td><td>If a separate staff room rate was negotiated, enter the published group rate and the contracted staff rate with total nights.</td></tr>
+      <tr><td><strong>Comp Policy</strong></td><td>The industry standard comp ratio and what you negotiated (e.g. 1 comp per 40 rooms paid vs. 1 per 50). The savings value is calculated automatically.</td></tr>
+      <tr><td><strong>Meeting Room Rental</strong></td><td>Initial quote vs. what was negotiated. Enter both values; the difference is calculated as savings.</td></tr>
+      <tr><td><strong>F&amp;B Minimum</strong></td><td>Initial F&amp;B minimum vs. negotiated minimum. Savings are calculated from the difference.</td></tr>
+      <tr><td><strong>Hotel Brand / Points</strong></td><td>Select the hotel chain. The system calculates approximate planner points value based on the contracted rate and room nights.</td></tr>
+      <tr><td><strong>Hours Worked</strong></td><td>Total hours you spent negotiating this contract — used for your value summary.</td></tr>
+      <tr><td><strong>Custom Line Items</strong></td><td>Add any additional savings — complimentary suites, waived resort fees, welcome amenities, rebates, etc. Each item has a name and dollar value.</td></tr>
+    </table>
+
+    <h3>Auto-Extracting from a Proposal or Contract</h3>
+    <p>Instead of manually entering rates, you can upload a document and have the AI extract the numbers:</p>
+    <ul>
+      <li><strong>Extract from Proposal:</strong> Upload the hotel's original proposal PDF. The AI reads the rack rate, proposed group rate, meeting room quote, and F&amp;B minimum.</li>
+      <li><strong>Extract from Contract:</strong> Upload the signed contract PDF. The AI reads the contracted rates and any negotiated concessions. If the pickup card already has a contract uploaded, the system can pull from that.</li>
+    </ul>
+    <p>After extraction, review the pre-filled values — always verify that the numbers match your documents before saving.</p>
+
+    <h3>Saving and Finalizing</h3>
+    <p>Click <strong>Save Report</strong> at any time to save your progress. Reports can have a status of <em>Draft</em> or <em>Final</em> — set it to Final when the report is ready to share with the client. The grand total savings is displayed prominently on the report and on the dashboard.</p>
+
+    <h3>Exporting to Excel</h3>
+    <p>Click <strong>Export to Excel</strong> on any report to download a formatted spreadsheet ready for client presentation. The spreadsheet includes all sections, savings calculations, and a grand total. If an RFP has multiple hotels, you can also export all of them in a single workbook from the RFP cost savings page.</p>
+
+    <h3>Cost Savings Dashboard</h3>
+    <p>The <strong>Reports → Cost Savings Analysis</strong> page shows all reports across all meetings with their grand total savings, sorted by most recently updated. Use the search box to filter by meeting name, hotel name, or RFP code. The dashboard also shows total savings and total hours worked across all reports.</p>
+
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>Cost savings reports are linked to RFP hotel responses, not directly to bookings. If the RFP was marked as booked and a pickup card exists, the rate from the contract is used automatically when the contract is uploaded to the pickup card.</p></div>
+  </div>
+
+  <!-- ── Hotel Points Tracking ───────────────────────────────── -->
+  <div class="section" id="hotel-points">
+    <div class="section-title"><i class="bi bi-award"></i> Hotel Points Tracking</div>
+    <p>The <strong>Hotel Points Tracking</strong> system helps you manage planner rewards points requests for every completed meeting. When a meeting ends, you submit a points request form to the hotel chain's loyalty program. This tool tracks each request from generation through submission and receipt of the points.</p>
+
+    <h3>How It Works</h3>
+    <p>Each hotel chain (Marriott, Hilton, Hyatt, IHG, etc.) has a loyalty program for meeting planners. After a group checks out, you submit a form with meeting details to claim points. CPAinc tracks these requests so nothing falls through the cracks.</p>
+
+    <table class="info-table">
+      <tr><th>Status</th><th>Meaning</th></tr>
+      <tr><td><strong>Pending</strong></td><td>Request has been created but the form has not been sent yet</td></tr>
+      <tr><td><strong>Submitted</strong></td><td>Form sent to the hotel chain — waiting for points to be posted</td></tr>
+      <tr><td><strong>Received</strong></td><td>Points confirmed and posted to the loyalty account</td></tr>
+      <tr><td><strong>Disallowed</strong></td><td>The hotel or chain declined the points request</td></tr>
+      <tr><td><strong>Cancelled</strong></td><td>Request was cancelled (meeting cancelled, etc.)</td></tr>
+    </table>
+
+    <h3>Hotel Points Dashboard</h3>
+    <p>Click <strong>Hotel Points</strong> in the navigation bar to see all requests. The dashboard shows:</p>
+    <ul>
+      <li>KPI tiles: total requests, pending, submitted, received, overdue (past 60 days from event end with no points), and points earned year-to-date</li>
+      <li>A breakdown by hotel chain showing request count and total points</li>
+      <li>Filter the list by chain or status using the dropdowns at the top</li>
+    </ul>
+
+    <h3>Generating a Points Request from a Pickup Event</h3>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the pickup card for the completed event</strong><p>Go to <strong>Pickup Tracking &amp; Reporting</strong>, find the event, and click into its pickup card.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "Generate Points Request"</strong><p>On the pickup event page, scroll to the Hotel Points section and click <strong>Generate Points Request</strong>. The system automatically detects the hotel chain from the hotel name.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review and complete the request</strong><p>The request detail page is pre-filled with meeting dates, room nights, contracted rate, hotel contact, and other data from the pickup card. Review the pre-filled values and add any missing information.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Submit the form to the hotel chain</strong><p>Use the chain's submission method — online form (link provided), email template, or downloadable Word form. Mark the status as <strong>Submitted</strong> once sent.</p></div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-body"><strong>Record receipt of points</strong><p>When points are posted, enter the points awarded and the date received. The status automatically advances to <strong>Received</strong>.</p></div></div>
+    </div>
+
+    <h3>Points Request Detail Fields</h3>
+    <table class="info-table">
+      <tr><th>Field</th><th>Description</th></tr>
+      <tr><td><strong>Sent To / Email</strong></td><td>The hotel contact who received the points form — pre-filled from the pickup card hotel contact</td></tr>
+      <tr><td><strong>Form Sent Date</strong></td><td>Date the form was submitted to the chain</td></tr>
+      <tr><td><strong>Points Received Date</strong></td><td>Date the points were confirmed — setting this automatically moves status to Received</td></tr>
+      <tr><td><strong>Points Awarded</strong></td><td>The number of points posted to the loyalty account</td></tr>
+      <tr><td><strong>Incentive Type / Award Timing</strong></td><td>Some chains have different reward structures (e.g. points vs. gift cards, immediate vs. deferred)</td></tr>
+      <tr><td><strong>Second Recipient</strong></td><td>If the chain sends rewards to the hotel-side contact as well, record their details here</td></tr>
+      <tr><td><strong>Notes</strong></td><td>Any notes about the request — correspondence, follow-up actions, etc.</td></tr>
+    </table>
+
+    <h3>Managing Hotel Programs</h3>
+    <p>Each hotel chain's loyalty program is configured under <strong>Hotel Points → Programs</strong> (accessible from the Hotel Points dashboard). For each program you can set:</p>
+    <ul>
+      <li><strong>Member Number:</strong> Your planner loyalty account number for that chain</li>
+      <li><strong>Submission Type:</strong> How forms are submitted — online form, email, or downloadable template</li>
+      <li><strong>Form URL:</strong> Link to the chain's online submission form</li>
+      <li><strong>Submission Window:</strong> How many days after the meeting you have to submit (default 90 days)</li>
+      <li><strong>Receipt Window:</strong> How many days after submission to expect points to post (default 60 days)</li>
+      <li><strong>Form Template:</strong> Upload a .docx template that can be downloaded pre-filled with meeting data</li>
+      <li><strong>Active/Inactive:</strong> Inactive programs won't appear when generating requests</li>
+    </ul>
+
+    <h3>Importing Points Data</h3>
+    <p>If you have historical points data to load in bulk, use the <strong>Import</strong> function on the Hotel Points dashboard. Upload a spreadsheet with the required columns and the system will create the records.</p>
+
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>A request is considered <strong>overdue</strong> if the event ended more than 60 days ago and points have not yet been received. Overdue requests are highlighted in the dashboard KPIs.</p></div>
+
+    <div class="callout warning"><i class="bi bi-exclamation-triangle"></i><p>The chain is detected automatically from the hotel name on the pickup card. If the hotel name is abbreviated or non-standard (e.g. "DT Chicago" instead of "DoubleTree by Hilton Chicago"), the chain detection may fail. If this happens, the full hotel name needs to be on the pickup card, or contact your administrator to add the chain detection pattern.</p></div>
+  </div>
 
   <!-- Footer -->
   <div style="border-top:1px solid #e5e9f0;padding-top:24px;margin-top:40px;color:#888;font-size:.8rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">

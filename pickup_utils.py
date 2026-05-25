@@ -4186,3 +4186,217 @@ def parse_amendment_document(file_bytes, filename=''):
         if k not in result:
             result[k] = empty[k]
     return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# COST SAVINGS — proposal & contract document parsers
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _cs_safe_float(val):
+    try:
+        if val is None or val == '':
+            return None
+        return float(str(val).replace(',', '').replace('$', '').strip())
+    except Exception:
+        return None
+
+
+def _cs_safe_int(val):
+    try:
+        if val is None or val == '':
+            return None
+        return int(float(str(val).replace(',', '').replace('$', '').strip()))
+    except Exception:
+        return None
+
+
+def _cs_extract_text(file_bytes, filename):
+    import re as _re
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    raw_text = ''
+    try:
+        if ext == 'pdf':
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                raw_text = '\n'.join((page.extract_text() or '') for page in pdf.pages)
+        elif ext in ('docx', 'doc'):
+            try:
+                import docx, io
+                doc = docx.Document(io.BytesIO(file_bytes))
+                raw_text = '\n'.join(p.text for p in doc.paragraphs)
+                for table in doc.tables:
+                    for row in table.rows:
+                        raw_text += '\n' + '\t'.join(c.text for c in row.cells)
+            except ImportError:
+                return None, False, 'python-docx not installed'
+        else:
+            return None, False, f'Unsupported file type .{ext}'
+    except Exception as e:
+        return None, False, f'Could not read file: {e}'
+    _plain_words = set(_re.findall(r'\b[a-z]{3,}\b', (raw_text or '').lower()))
+    KEYWORDS = {'rate', 'room', 'block', 'cutoff', 'attrition', 'hotel', 'group',
+                'meeting', 'suite', 'agreement', 'proposal', 'rfp'}
+    is_scanned = (ext == 'pdf'
+                  and (not raw_text or len((raw_text or '').split()) < 50
+                       or not (KEYWORDS & _plain_words)))
+    return raw_text, is_scanned, None
+
+
+def _cs_get_anthropic_key():
+    import sys, importlib, os
+    api_key = ''
+    try:
+        if 'config' in sys.modules:
+            importlib.reload(sys.modules['config'])
+        else:
+            import config as _cfg
+            sys.modules['config'] = _cfg
+        api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    return api_key
+
+
+_CS_PROPOSAL_PROMPT = """You are extracting cost-savings data from a hotel SALES PROPOSAL document
+(this is the hotel's initial offer, BEFORE contract negotiation).
+Return ONLY a valid JSON object — no markdown, no explanation.
+
+Required keys (use null if not found):
+  "rack_rate"               — published / non-discounted nightly rack rate (number)
+  "group_rate"              — proposed group / staff nightly rate (number)
+  "meeting_room_rental"     — total proposed meeting room rental fee (number)
+  "f_and_b_minimum"         — proposed F&B minimum (number)
+  "attrition_pct"           — proposed attrition as decimal (80% -> 0.80)
+  "comp_industry_standard"  — industry-standard comp room ratio denominator (usually 50)
+  "comp_negotiated_policy"  — proposed comp room ratio denominator (e.g. 40)
+  "internet_gr_price"       — published price per night for in-room internet
+  "internet_ms_price"       — published price per day for meeting-space internet
+  "valet_price"             — published nightly valet parking price
+  "av_discount_pct"         — A/V discount offered as decimal (15% -> 0.15)
+  "concessions"             — array of short strings describing each concession offered
+  "hotel_brand"             — one of "Hyatt","Hilton","Marriott","IHG","Preferred"
+  "total_room_nights"       — total contracted room nights across the pattern (integer)
+
+Rules:
+- Numbers only — strip "$" and "," from amounts.
+- For percentages, return decimals (10% -> 0.10).
+- If genuinely not found, use null (not 0).
+"""
+
+_CS_CONTRACT_PROMPT = """You are extracting cost-savings data from a SIGNED HOTEL CONTRACT
+(this is the FINAL negotiated agreement).
+Return ONLY a valid JSON object — no markdown, no explanation.
+
+Required keys (use null if not found):
+  "contracted_rate"          — final negotiated guest-room nightly rate (number)
+  "staff_contracted_rate"    — final negotiated staff-room nightly rate (number)
+  "total_room_nights"        — total contracted guest room nights (integer)
+  "staff_total_nights"       — total contracted staff room nights (integer)
+  "meeting_room_rental"      — final meeting room rental fee (number)
+  "f_and_b_minimum"          — final F&B minimum (number)
+  "attrition_pct"            — final attrition as decimal (70% -> 0.70)
+  "comp_negotiated_policy"   — final comp ratio denominator (e.g. "1 per 40" -> 40)
+  "internet_gr_price"        — final per-night in-room internet charge (number)
+  "internet_ms_price"        — final per-day meeting-space internet charge (number)
+  "valet_price"              — final nightly valet parking (number)
+  "av_discount_pct"          — A/V discount as decimal
+  "concessions"              — array of short strings — each negotiated concession
+
+Rules:
+- Numbers only — strip "$" and ",".
+- Percentages as decimals.
+- If not found, use null.
+"""
+
+
+def _cs_call_claude(prompt, raw_text, file_bytes, is_scanned):
+    api_key = _cs_get_anthropic_key()
+    if not api_key:
+        return None, 'No Anthropic API key configured'
+    try:
+        import anthropic, json, re
+        client = anthropic.Anthropic(api_key=api_key)
+        if is_scanned:
+            import fitz, base64
+            doc = fitz.open(stream=file_bytes, filetype='pdf')
+            content = [{'type': 'text', 'text': prompt}]
+            for page_num in range(min(len(doc), 8)):
+                page = doc[page_num]
+                mat = fitz.Matrix(100 / 72, 100 / 72)
+                pix = page.get_pixmap(matrix=mat)
+                img_b64 = base64.standard_b64encode(pix.tobytes('png')).decode()
+                content.append({
+                    'type': 'image',
+                    'source': {'type': 'base64', 'media_type': 'image/png', 'data': img_b64}
+                })
+            doc.close()
+            content.append({'type': 'text', 'text': 'Extract the data and return ONLY the JSON.'})
+            response = client.messages.create(
+                model='claude-opus-4-5',
+                max_tokens=2048,
+                messages=[{'role': 'user', 'content': content}]
+            )
+        else:
+            if not raw_text or not raw_text.strip():
+                return None, 'No text could be extracted from the file'
+            response = client.messages.create(
+                model='claude-opus-4-5',
+                max_tokens=2048,
+                messages=[{'role': 'user',
+                           'content': prompt + '\nDocument text:\n' + raw_text[:12000]}]
+            )
+        raw_json = response.content[0].text.strip()
+        raw_json = re.sub(r'^```[a-z]*\n?', '', raw_json)
+        raw_json = re.sub(r'\n?```$', '', raw_json)
+        return json.loads(raw_json), None
+    except Exception as e:
+        return None, f'AI extraction failed: {e}'
+
+
+def _cs_normalize(data):
+    if not data:
+        return {}
+    out = {}
+    for k, v in data.items():
+        if v is None:
+            out[k] = None
+            continue
+        if k in ('total_room_nights', 'staff_total_nights',
+                 'comp_industry_standard', 'comp_negotiated_policy'):
+            out[k] = _cs_safe_int(v)
+        elif k == 'concessions':
+            if isinstance(v, list):
+                out[k] = [str(x) for x in v]
+            else:
+                out[k] = []
+        elif k == 'hotel_brand':
+            out[k] = str(v) if v else None
+        else:
+            out[k] = _cs_safe_float(v)
+    return out
+
+
+def parse_proposal_for_cost_savings(file_bytes, filename=''):
+    raw_text, is_scanned, err = _cs_extract_text(file_bytes, filename)
+    if err:
+        return {'error': err, 'raw_text': ''}
+    data, err = _cs_call_claude(_CS_PROPOSAL_PROMPT, raw_text, file_bytes, is_scanned)
+    if err:
+        return {'error': err, 'raw_text': raw_text or ''}
+    normalized = _cs_normalize(data)
+    normalized['raw_text'] = raw_text or ''
+    return normalized
+
+
+def parse_contract_for_cost_savings(file_bytes, filename=''):
+    raw_text, is_scanned, err = _cs_extract_text(file_bytes, filename)
+    if err:
+        return {'error': err, 'raw_text': ''}
+    data, err = _cs_call_claude(_CS_CONTRACT_PROMPT, raw_text, file_bytes, is_scanned)
+    if err:
+        return {'error': err, 'raw_text': raw_text or ''}
+    normalized = _cs_normalize(data)
+    normalized['raw_text'] = raw_text or ''
+    return normalized
