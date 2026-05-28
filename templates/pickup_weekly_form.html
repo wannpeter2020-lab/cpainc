@@ -73,8 +73,16 @@
 </div>
 
 <div class="card mb-3">
-  <div class="card-header">Pickup by Night</div>
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span>Pickup by Night</span>
+    <button type="button" id="pasteToggleBtn" class="btn btn-sm btn-outline-primary"
+            onclick="togglePastePanel()">
+      <i class="bi bi-clipboard-plus me-1"></i>Paste from Email
+    </button>
+  </div>
   <div class="card-body">
+  <div class="d-flex align-items-start gap-4 flex-wrap">
+  <div class="flex-shrink-0">
     <table class="table table-sm w-auto" id="pickupTable">
       <thead>
         <tr>
@@ -228,7 +236,50 @@
       </div>
       {% endif %}
     </div>
+  </div>{# end flex-shrink-0 #}
+
+  {# ── Paste panel ── #}
+  <div id="pastePanel" class="flex-grow-1" style="min-width:280px;max-width:420px;display:none;">
+    <div class="card border-primary h-100">
+      <div class="card-header bg-primary text-white py-2 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clipboard-plus me-1"></i>Paste Pickup from Email</span>
+        <button type="button" class="btn-close btn-close-white btn-sm" onclick="togglePastePanel()"></button>
+      </div>
+      <div class="card-body p-3">
+        <div class="form-text mb-2">
+          Paste hotel email text <strong>or drop a PDF/XLSX pickup report</strong> directly onto the box.
+          The parser fills matching dates automatically.
+        </div>
+        <div id="dropZone" style="position:relative;border:2px dashed #ccc;border-radius:6px;transition:border-color .15s,background .15s;">
+          <textarea id="pasteBox" class="form-control font-monospace border-0 bg-transparent"
+                    rows="12" placeholder="Paste pickup email text here, or drop a PDF/XLSX pickup report…"
+                    style="font-size:.78rem;resize:vertical;"
+                    ondragover="onDropZoneDragOver(event)"
+                    ondragleave="onDropZoneDragLeave(event)"
+                    ondrop="onDropZoneDrop(event)"></textarea>
+          <div id="dropOverlay" style="display:none;position:absolute;inset:0;background:rgba(13,110,253,.12);
+               border-radius:6px;pointer-events:none;align-items:center;justify-content:center;">
+            <span class="fs-5 text-primary fw-semibold"><i class="bi bi-file-earmark-arrow-down me-2"></i>Drop file here</span>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-2 align-items-center">
+          <button type="button" class="btn btn-primary btn-sm" onclick="parseAndFill()">
+            <i class="bi bi-magic me-1"></i>Parse &amp; Fill Grid
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" onclick="clearPaste()">
+            <i class="bi bi-x me-1"></i>Clear
+          </button>
+          <span id="pdfSpinner" class="text-muted small ms-1" style="display:none;">
+            <span class="spinner-border spinner-border-sm me-1"></span>Extracting file…
+          </span>
+        </div>
+        <div id="parseFeedback" class="mt-2"></div>
+      </div>
+    </div>
   </div>
+
+  </div>{# end d-flex wrapper #}
+  </div>{# end card-body #}
 </div>
 
 <div class="d-flex gap-2">
@@ -399,5 +450,258 @@ function updateStatus() {
 
 // Init on load
 updateStatus();
+
+// ── Paste panel ─────────────────────────────────────────────────────────────
+
+function togglePastePanel() {
+  const panel = document.getElementById('pastePanel');
+  const open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  const btn = document.getElementById('pasteToggleBtn');
+  btn.innerHTML = open
+    ? '<i class="bi bi-clipboard-plus me-1"></i>Paste from Email'
+    : '<i class="bi bi-x me-1"></i>Close';
+}
+
+function clearPaste() {
+  document.getElementById('pasteBox').value = '';
+  document.getElementById('parseFeedback').innerHTML = '';
+  document.querySelectorAll('.night-input').forEach(function(inp) {
+    inp.classList.remove('border-success', 'bg-success-subtle', 'border-warning', 'bg-warning-subtle');
+  });
+}
+
+// ── PDF/XLSX drag-and-drop ───────────────────────────────────────────────────
+
+function onDropZoneDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('dropZone');
+  dz.style.borderColor = '#0d6efd';
+  dz.style.background  = 'rgba(13,110,253,.06)';
+  const ov = document.getElementById('dropOverlay');
+  ov.style.display = 'flex';
+}
+
+function onDropZoneDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const dz = document.getElementById('dropZone');
+  dz.style.borderColor = '#ccc';
+  dz.style.background  = '';
+  document.getElementById('dropOverlay').style.display = 'none';
+}
+
+function onDropZoneDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  onDropZoneDragLeave(e);
+
+  const files = e.dataTransfer.files;
+  if (!files || files.length === 0) return;
+  const file = files[0];
+
+  const nameLower = file.name.toLowerCase();
+  if (file.type === 'application/pdf' || nameLower.endsWith('.pdf') ||
+      nameLower.endsWith('.xlsx') || nameLower.endsWith('.xls')) {
+    uploadPdfForExtraction(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      document.getElementById('pasteBox').value = ev.target.result;
+      parseAndFill();
+    };
+    reader.readAsText(file);
+  }
+}
+
+function uploadPdfForExtraction(file) {
+  const spinner = document.getElementById('pdfSpinner');
+  const fb      = document.getElementById('parseFeedback');
+  spinner.style.display = '';
+  fb.innerHTML = '';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  fetch('{{ url_for("pickup_extract_pickup_pdf", cid=config["id"]) }}', {
+    method: 'POST',
+    body: fd
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    spinner.style.display = 'none';
+
+    if (data.error && !data.pairs.length) {
+      document.getElementById('pasteBox').value = data.text || '';
+      fb.innerHTML = '<div class="alert alert-warning py-2 small mb-0 mt-2">' +
+        '<i class="bi bi-exclamation-triangle me-1"></i>' +
+        'Could not auto-parse columns: ' + (data.error || 'unknown format') +
+        '. Raw text loaded — try <strong>Parse &amp; Fill Grid</strong>.</div>';
+      return;
+    }
+
+    if (data.pairs && data.pairs.length) {
+      let matched = 0;
+      const log = [];
+      data.pairs.forEach(function(p) {
+        const inp = document.getElementById('night_' + p.date);
+        if (inp) {
+          inp.value = p.count;
+          inp.classList.add('border-success', 'bg-success-subtle');
+          matched++;
+          log.push(p);
+        }
+      });
+      updateStatus();
+
+      let rows = log.map(function(p) {
+        return '<tr><td class="text-muted pe-3" style="font-size:.75rem">' + p.date + '</td>' +
+               '<td class="fw-semibold">' + p.count + '</td></tr>';
+      }).join('');
+      fb.innerHTML =
+        '<div class="alert alert-success py-2 small mb-0 mt-2">' +
+        '<i class="bi bi-file-earmark-check me-1"></i>' +
+        '<strong>File parsed — ' + matched + ' date(s) filled</strong>' +
+        (data.source ? ' from <em>' + data.source + '</em>' : '') + '.' +
+        ' Review the grid and save.' +
+        '</div>' +
+        '<div class="mt-2" style="max-height:160px;overflow-y:auto">' +
+        '<table class="table table-sm table-borderless mb-0" style="font-size:.78rem">' +
+        '<thead><tr><th>Date</th><th>Rooms</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></div>';
+
+      document.getElementById('pasteBox').value = data.text || '';
+    }
+  })
+  .catch(function(err) {
+    spinner.style.display = 'none';
+    fb.innerHTML = '<div class="alert alert-danger py-2 small mb-0 mt-2">' +
+      '<i class="bi bi-exclamation-triangle me-1"></i>Upload failed: ' + err + '</div>';
+  });
+}
+
+function parseAndFill() {
+  const text = document.getElementById('pasteBox').value;
+  if (!text.trim()) {
+    document.getElementById('parseFeedback').innerHTML =
+      '<div class="text-muted small mt-1">Paste some text first.</div>';
+    return;
+  }
+
+  const MON3    = ['','jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const MONFULL = ['','january','february','march','april','may','june',
+                   'july','august','september','october','november','december'];
+
+  const blockInputs = [];
+  document.querySelectorAll('.night-input').forEach(function(inp) {
+    const date = inp.name.replace('night_', '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      blockInputs.push({ date: date, contracted: parseInt(inp.dataset.contracted) || 0, el: inp });
+    }
+  });
+
+  blockInputs.forEach(function(b) {
+    b.el.classList.remove('border-success','bg-success-subtle','border-warning','bg-warning-subtle');
+  });
+
+  const lines = text.split('\n');
+  let matched = 0;
+  const log = [];
+
+  blockInputs.forEach(function(b) {
+    const parts  = b.date.split('-');
+    const yr     = parts[0];
+    const mo     = parseInt(parts[1]);
+    const dy     = parseInt(parts[2]);
+    const mo2    = String(mo).padStart(2,'0');
+    const dy2    = String(dy).padStart(2,'0');
+
+    const datePatterns = [
+      new RegExp('\\b' + mo + '/' + dy + '(?:/' + yr.slice(2) + '|/' + yr + ')?\\b'),
+      new RegExp('\\b' + mo2 + '/' + dy2 + '(?:/' + yr.slice(2) + '|/' + yr + ')?\\b'),
+      new RegExp('\\b' + b.date + '\\b'),
+      new RegExp('\\b' + MON3[mo] + '[\\s\\-\\.]+' + dy + '\\b', 'i'),
+      new RegExp('\\b' + MONFULL[mo] + '[\\s]+' + dy + '\\b', 'i'),
+      new RegExp('\\b' + dy + '[\\s\\-]+' + MON3[mo] + '\\b', 'i'),
+    ];
+
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+
+      let dateEnd = -1;
+      for (let pi = 0; pi < datePatterns.length; pi++) {
+        const m = datePatterns[pi].exec(line);
+        if (m) { dateEnd = m.index + m[0].length; break; }
+      }
+      if (dateEnd < 0) continue;
+
+      const afterDate = line.slice(dateEnd);
+      const nums = [];
+      const numRe = /\b(\d{1,3})\b/g;
+      let nm;
+      while ((nm = numRe.exec(afterDate)) !== null) {
+        const n = parseInt(nm[1]);
+        if (n >= 0 && n <= 999) nums.push(n);
+      }
+      if (nums.length === 0) {
+        const numRe2 = /\b(\d{1,3})\b/g;
+        while ((nm = numRe2.exec(line)) !== null) {
+          const n = parseInt(nm[1]);
+          if (n >= 0 && n <= 999) nums.push(n);
+        }
+      }
+      if (nums.length === 0) continue;
+
+      let pickupVal = null;
+      const c = b.contracted;
+
+      if (nums.length === 1) {
+        pickupVal = nums[0];
+      } else if (c > 0) {
+        const ci = nums.indexOf(c);
+        if (ci >= 0 && ci + 1 < nums.length) {
+          pickupVal = nums[ci + 1];
+        } else {
+          pickupVal = nums[0];
+        }
+      } else {
+        pickupVal = nums[0];
+      }
+
+      b.el.value = pickupVal;
+      b.el.classList.add('border-success', 'bg-success-subtle');
+      matched++;
+      log.push({ date: b.date, val: pickupVal, line: line.trim() });
+      break;
+    }
+  });
+
+  updateStatus();
+
+  const fb = document.getElementById('parseFeedback');
+  if (matched === 0) {
+    fb.innerHTML = '<div class="alert alert-warning py-2 small mb-0 mt-2">' +
+      '<i class="bi bi-exclamation-triangle me-1"></i>' +
+      'No dates matched. Try pasting more of the email, or check that the dates in the email ' +
+      'overlap with your contracted block dates.</div>';
+  } else {
+    let rows = log.map(function(r) {
+      return '<tr><td class="text-muted pe-3" style="font-size:.75rem">' + r.date + '</td>' +
+             '<td class="fw-semibold pe-3">' + r.val + '</td>' +
+             '<td class="text-muted" style="font-size:.72rem;max-width:180px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis" title="' +
+             r.line.replace(/"/g,'&quot;') + '">' + r.line.replace(/</g,'&lt;') + '</td></tr>';
+    }).join('');
+    fb.innerHTML =
+      '<div class="alert alert-success py-2 small mb-0 mt-2">' +
+      '<i class="bi bi-check-circle me-1"></i><strong>' + matched + ' date(s) filled.</strong> ' +
+      'Review the grid, adjust if needed, then save.' +
+      '</div>' +
+      '<div class="mt-2" style="max-height:160px;overflow-y:auto">' +
+      '<table class="table table-sm table-borderless mb-0" style="font-size:.78rem">' +
+      '<thead><tr><th>Date</th><th>Rooms</th><th>Matched line</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>';
+  }
+}
 </script>
 {% endblock %}

@@ -9521,6 +9521,22 @@ def pickup_edit_event(cid):
                            pipeline_end=pipeline_end)
 
 
+@app.route('/pickup/<int:cid>/extract-pickup-pdf', methods=['POST'])
+def pickup_extract_pickup_pdf(cid):
+    f = request.files.get('file')
+    if not f:
+        return jsonify({'error': 'No file uploaded', 'pairs': [], 'text': ''})
+    filename = (f.filename or '').lower()
+    data = f.read()
+    if filename.endswith('.xlsx') or filename.endswith('.xls'):
+        from pickup_utils import parse_columnar_pickup_xlsx
+        result = parse_columnar_pickup_xlsx(data, filename=filename)
+    else:
+        from pickup_utils import parse_columnar_pickup_pdf
+        result = parse_columnar_pickup_pdf(data, filename=filename)
+    return jsonify(result)
+
+
 @app.route('/pickup/<int:cid>/weekly/new', methods=['GET', 'POST'])
 def pickup_weekly_new(cid):
     db = get_db()

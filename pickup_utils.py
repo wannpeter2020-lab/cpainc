@@ -4400,3 +4400,319 @@ def parse_contract_for_cost_savings(file_bytes, filename=''):
     normalized = _cs_normalize(data)
     normalized['raw_text'] = raw_text or ''
     return normalized
+
+
+def parse_columnar_pickup_pdf(file_bytes, filename=''):
+    """
+    Parse a hotel "Group Pickup" PDF where dates are column headers and
+    pickup counts are in rows beneath (Henry Hotel / IHG grppickup format).
+
+    Returns:
+      {
+        'pairs':  [{'date': 'YYYY-MM-DD', 'count': N}, ...],   # all dates incl. zeros
+        'text':   str,     # raw extracted text
+        'source': str,     # 'Grand Total' or block name used
+        'error':  str|None
+      }
+    """
+    import re
+    from datetime import date as _date
+
+    # ── Extract text ───────────────────────────────────────────────────────────
+    text = ''
+    try:
+        import pdfplumber, io as _io
+        with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+            text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
+    except Exception as e:
+        return {'pairs': [], 'text': '', 'source': '', 'error': str(e)}
+
+    if not text.strip():
+        return {'pairs': [], 'text': text, 'source': '', 'error': 'No text extracted from PDF'}
+
+    # ── "Group Pickup Detail" format (Opera/Hilton row-per-date report) ─────────
+    if 'group pickup detail' in text.lower():
+        _gpd_re = re.compile(
+            r'^([A-Z]{1,5})\s+(\d{1,2}/\d{1,2}/\d{2,4})\s+'
+            r'\d+\s+\d+\s+\d+\s+\d+\s+(\d+)',
+            re.MULTILINE
+        )
+        date_totals = {}
+        for m in _gpd_re.finditer(text):
+            raw_date = m.group(2)
+            count    = int(m.group(3))
+            parts = raw_date.split('/')
+            if len(parts) == 3:
+                mo, dy, yr = int(parts[0]), int(parts[1]), int(parts[2])
+                if yr < 100:
+                    yr += 2000
+                iso = f'{yr}-{mo:02d}-{dy:02d}'
+                date_totals[iso] = date_totals.get(iso, 0) + count
+        if date_totals:
+            pairs = [{'date': d, 'count': c} for d, c in sorted(date_totals.items())]
+            return {'pairs': pairs, 'text': text, 'source': 'Group Pickup Detail', 'error': None}
+
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
+
+    MONTHS = {'jan':1,'feb':2,'mar':3,'apr':4,'may':5,'jun':6,
+              'jul':7,'aug':8,'sep':9,'oct':10,'nov':11,'dec':12}
+
+    # ── Find the day-number header row ─────────────────────────────────────────
+    day_row_idx = None
+    day_numbers = []
+    for i, line in enumerate(lines):
+        tokens = line.split()
+        nums = []
+        for t in tokens:
+            if re.match(r'^\d{1,2}$', t):
+                n = int(t)
+                if 1 <= n <= 31:
+                    nums.append(n)
+        if len(nums) >= 4 and len(nums) >= 0.7 * len(tokens):
+            day_row_idx = i
+            day_numbers = nums
+            break
+
+    if day_row_idx is None:
+        return {'pairs': [], 'text': text, 'source': '',
+                'error': 'Date header row not found — unrecognized pickup report format'}
+
+    # ── Determine year and start month from surrounding context ────────────────
+    year = None
+    start_month = None
+
+    for line in lines[:day_row_idx + 6]:
+        m = re.search(r'(?:From Date|Start Date|Filter From Date)\s+(\d{1,2})[/\-]\d{1,2}[/\-](\d{2,4})',
+                      line, re.IGNORECASE)
+        if m:
+            if start_month is None:
+                start_month = int(m.group(1))
+            yr_raw = int(m.group(2))
+            if year is None:
+                year = 2000 + yr_raw if yr_raw < 100 else yr_raw
+            break
+
+    if year is None:
+        for line in lines[:10]:
+            m = re.search(r'\b(20\d{2})\b', line)
+            if m:
+                year = int(m.group(1))
+                break
+    if year is None:
+        for line in lines:
+            m = re.search(r'\b\d{1,2}[/\-]\d{1,2}[/\-](\d{2})\b', line)
+            if m:
+                year = 2000 + int(m.group(1))
+                break
+    if year is None:
+        year = _date.today().year
+
+    if start_month is None:
+        for line in lines[max(0, day_row_idx - 3):day_row_idx + 1]:
+            for token in line.split():
+                tok_l = token[:3].lower()
+                if tok_l in MONTHS:
+                    start_month = MONTHS[tok_l]
+                    break
+            if start_month:
+                break
+    if start_month is None:
+        start_month = _date.today().month
+
+    # ── Build date list, handling month roll-over ──────────────────────────────
+    dates = []
+    cur_month = start_month
+    prev_day = 0
+    cur_year = year
+    for day in day_numbers:
+        if day < prev_day and day <= 7:
+            cur_month += 1
+            if cur_month > 12:
+                cur_month = 1
+                cur_year += 1
+        dates.append(f'{cur_year}-{cur_month:02d}-{day:02d}')
+        prev_day = day
+
+    # ── Find pickup values: prefer Grand Total Pickup ──────────────────────────
+    pickup_values = None
+    source = ''
+
+    grand_total_idx = None
+    for i, line in enumerate(lines):
+        if 'grand total' in line.lower():
+            grand_total_idx = i
+            break
+
+    def _extract_pickup_nums(line, expected_len):
+        nums = [int(x) for x in re.findall(r'\b(\d+)\b', line)]
+        if len(nums) == expected_len + 1:
+            nums = nums[:-1]
+        return nums if len(nums) == expected_len else None
+
+    if grand_total_idx is not None:
+        for line in lines[grand_total_idx: grand_total_idx + 6]:
+            if re.match(r'.*\bpickup\b', line, re.IGNORECASE):
+                nums = _extract_pickup_nums(line, len(dates))
+                if nums is not None:
+                    pickup_values = nums
+                    source = 'Grand Total'
+                    break
+
+    if pickup_values is None:
+        for line in lines:
+            if re.match(r'.*\bpickup\b', line, re.IGNORECASE):
+                nums = _extract_pickup_nums(line, len(dates))
+                if nums is not None:
+                    pickup_values = nums
+                    source = 'Pickup'
+                    break
+
+    if pickup_values is None:
+        return {'pairs': [], 'text': text, 'source': '',
+                'error': 'Could not find a Pickup row matching the date columns'}
+
+    pairs = [{'date': d, 'count': c} for d, c in zip(dates, pickup_values)]
+    return {'pairs': pairs, 'text': text, 'source': source, 'error': None}
+
+
+def parse_columnar_pickup_xlsx(file_bytes, filename=''):
+    """
+    Parse a hotel "Group Pickup" XLSX.  Handles two layouts:
+
+    Format A — Omni/IHG (Pick-up sheet):
+      Row 3: date headers as "MM/DD\\nDay"
+      Row labeled "Pickup Total": pickup counts
+
+    Format B — Hyatt "Block and PickUp Report":
+      Row 7: date headers as ISO strings "YYYY-MM-DD"
+      Rows labeled "Sold" under "GRAND TOTAL" section: pickup counts
+
+    Returns: {'pairs': [{'date','count'}], 'text':'', 'source': str, 'error': str|None}
+    """
+    import re, io as _io
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True)
+    except Exception as e:
+        return {'pairs': [], 'text': '', 'source': '', 'error': str(e)}
+
+    ws = None
+    for sn in wb.sheetnames:
+        sn_l = sn.lower()
+        if 'pick' in sn_l and 'room' not in sn_l:
+            ws = wb[sn]
+            break
+    if ws is None:
+        ws = wb.active
+
+    all_rows = list(ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True))
+
+    header_row_idx = None
+    date_col_map = {}
+    fmt = None
+
+    year_a = None
+    for r in range(min(4, len(all_rows))):
+        v = ws.cell(r + 1, 1).value
+        if v is None:
+            continue
+        if hasattr(v, 'year'):
+            year_a = v.year; break
+        m = re.search(r'\b(20\d{2})\b', str(v))
+        if m:
+            year_a = int(m.group(1)); break
+    if year_a is None:
+        from datetime import date as _d
+        year_a = _d.today().year
+
+    for row_idx, row in enumerate(all_rows[:15]):
+        hits = sum(1 for c in row if c and re.match(r'^\d{1,2}/\d{1,2}', str(c).strip()))
+        if hits >= 3:
+            for col_idx, cell in enumerate(row):
+                if not cell:
+                    continue
+                m = re.match(r'^(\d{1,2})/(\d{1,2})', str(cell).strip())
+                if m:
+                    mo, dy = int(m.group(1)), int(m.group(2))
+                    date_col_map[col_idx] = f'{year_a}-{mo:02d}-{dy:02d}'
+            if date_col_map:
+                header_row_idx = row_idx
+                fmt = 'A'
+                break
+
+    if not date_col_map:
+        for row_idx, row in enumerate(all_rows[:15]):
+            hits = 0
+            for cell in row:
+                if cell and re.match(r'^20\d{2}-\d{2}-\d{2}$', str(cell).strip()):
+                    hits += 1
+            if hits >= 3:
+                for col_idx, cell in enumerate(row):
+                    if cell and re.match(r'^20\d{2}-\d{2}-\d{2}$', str(cell).strip()):
+                        date_col_map[col_idx] = str(cell).strip()
+                if date_col_map:
+                    header_row_idx = row_idx
+                    fmt = 'B'
+                    break
+
+    if not date_col_map:
+        return {'pairs': [], 'text': '', 'source': '',
+                'error': 'No date header row found (tried MM/DD and YYYY-MM-DD formats)'}
+
+    def _extract_row_vals(row):
+        vals = {}
+        for col_idx, cell in enumerate(row):
+            if col_idx in date_col_map:
+                try:
+                    vals[date_col_map[col_idx]] = int(float(str(cell or 0)))
+                except Exception:
+                    vals[date_col_map[col_idx]] = 0
+        return vals
+
+    pickup_vals = None
+    source = ''
+
+    if fmt == 'A':
+        for row in all_rows[header_row_idx + 1:]:
+            label = (str(row[0] or '') + str(row[1] or '')).strip().lower()
+            if 'pickup' in label:
+                vals = _extract_row_vals(row)
+                if vals:
+                    pickup_vals = vals
+                    source = str(row[0] or row[1] or 'Pickup').strip()
+                    break
+
+    elif fmt == 'B':
+        grand_total_row = None
+        for row_idx, row in enumerate(all_rows[header_row_idx:], start=header_row_idx):
+            label = str(row[0] or '').strip().upper()
+            if 'GRAND TOTAL' in label:
+                grand_total_row = row_idx
+                break
+
+        search_start = grand_total_row if grand_total_row is not None else header_row_idx + 1
+        for row in all_rows[search_start:search_start + 10]:
+            label = str(row[1] or row[0] or '').strip().lower()
+            if label == 'sold':
+                vals = _extract_row_vals(row)
+                if vals:
+                    pickup_vals = vals
+                    source = 'Grand Total — Sold'
+                    break
+
+        if pickup_vals is None:
+            for row in all_rows[header_row_idx + 1:]:
+                label = str(row[1] or row[0] or '').strip().lower()
+                if label == 'sold':
+                    vals = _extract_row_vals(row)
+                    if vals:
+                        pickup_vals = vals
+                        source = str(row[0] or 'Sold').strip() + ' — Sold'
+                        break
+
+    if pickup_vals is None:
+        return {'pairs': [], 'text': '', 'source': '',
+                'error': f'No pickup row found (format {fmt})'}
+
+    pairs = [{'date': d, 'count': c} for d, c in sorted(pickup_vals.items())]
+    return {'pairs': pairs, 'text': '', 'source': source, 'error': None}
