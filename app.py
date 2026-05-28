@@ -1343,13 +1343,25 @@ def import_voucher():
         # the last two decimal numbers are the amount / amount-paid, and any
         # MM/DD/YYYY is the end date.  This handles rows whose hotel/account
         # text wraps across multiple lines.
-        # Matches sourcing commission invoices (e.g. 237264-F1-TD) and
-        # housing/registration invoices (e.g. 169500-APR 2026)
-        inv_re   = re.compile(r'\d{4,9}-(?:F\d+(?:-[A-Z0-9]+)?|[A-Z]{2,4}\s+\d{4})')
+        # Matches sourcing commission invoices (e.g. 237264-F1-TD, 237264-F1, 237264-F2-2)
+        # and housing/registration invoices (e.g. 169500-APR 2026)
+        # Fallback: any 5-9 digit booking ID followed by a hyphen and anything alphanumeric
+        inv_re        = re.compile(r'\d{4,9}-(?:F\d+(?:-[A-Z0-9]+)?|[A-Z]{2,4}\s+\d{4})', re.IGNORECASE)
+        inv_re_fallbk = re.compile(r'\b(\d{5,9})-([A-Z0-9][-A-Z0-9]*)\b', re.IGNORECASE)
         date_re  = re.compile(r'\b(\d{1,2}/\d{1,2}/\d{4})\b')
         amt_re   = re.compile(r'[\d,]+\.\d{2}')
 
         positions = [(m.start(), m.group()) for m in inv_re.finditer(all_text)]
+
+        # If primary regex found nothing, try the broader fallback
+        if not positions:
+            seen_inv = set()
+            for m in inv_re_fallbk.finditer(all_text):
+                # Exclude hotel-chain ID numbers (preceded by a digit or inside a hotel string)
+                full = m.group(0)
+                if full not in seen_inv:
+                    seen_inv.add(full)
+                    positions.append((m.start(), full))
 
         booking_rows = []
         seen = set()
