@@ -1542,8 +1542,7 @@ def import_voucher():
             file_count=len(files))
 
     except Exception as e:
-        import traceback
-        flash(f'Import error: {e} — {traceback.format_exc()[-500:]}', 'error')
+        flash(f'Import error: {e}', 'error')
         return redirect(url_for('import_voucher'))
 
 
