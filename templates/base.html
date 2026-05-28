@@ -11,6 +11,8 @@
     .navbar { background: #1a3a5c !important; }
     .navbar-brand, .nav-link { color: #fff !important; }
     .nav-link:hover { color: #aed6f1 !important; }
+    .navbar-nav .nav-link { font-size: .8rem; padding-left: .45rem !important; padding-right: .45rem !important; }
+    .navbar-brand { font-size: .95rem; }
     .card { border: none; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
     .card-header { background: #1a3a5c; color: #fff; font-weight: 600; }
     .badge-definite { background: #198754; }
@@ -68,7 +70,7 @@
 
         {# ── Pickup RPT/TRK ── #}
         {% if has_perm('pickups_payments') %}
-        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/pickup') %}active{% endif %}" href="/pickup"><i class="bi bi-calendar-check me-1"></i>Pickup Tracking & Reporting</a></li>
+        <li class="nav-item"><a class="nav-link {% if request.path.startswith('/pickup') %}active{% endif %}" href="/pickup"><i class="bi bi-calendar-check me-1"></i>Pickup</a></li>
         {% endif %}
 
         {# ── Hotel Points ── #}
