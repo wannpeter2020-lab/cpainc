@@ -3189,6 +3189,212 @@ def report_proforma():
         ws_sum.column_dimensions[get_column_letter(ci)].width = w
     ws_sum.freeze_panes = 'A5'
 
+    # ── Avg Days sheet ───────────────────────────────────────────────────────
+    ws_avg = wb.create_sheet('Avg Days — Payment Timing')
+
+    # Title
+    ws_avg.merge_cells('A1:E1')
+    t = ws_avg['A1']
+    t.value     = '6-Month Rolling Average — Days from Meeting End to Commission Received'
+    t.font      = Font(name='Calibri', bold=True, size=13, color='FFFFFF')
+    t.fill      = hfill(C['title'])
+    t.alignment = Alignment(horizontal='center', vertical='center')
+    ws_avg.row_dimensions[1].height = 26
+
+    ws_avg.merge_cells('A2:E2')
+    s = ws_avg['A2']
+    s.value = (f'Based on payments received {six_months_ago} – {today}  │  '
+               f'Brand avg used first → Chain avg → 90-day default')
+    s.font      = Font(name='Calibri', italic=True, color='555555', size=9)
+    s.alignment = Alignment(horizontal='center')
+    ws_avg.row_dimensions[2].height = 14
+    ws_avg.row_dimensions[3].height = 5
+
+    # Section: Brand averages
+    def _avg_section_header(ws, row, label, col_a, col_b, col_c):
+        for ci, (col, val, algn) in enumerate([(col_a, label, 'left'),
+                                                (col_b, 'Avg Days', 'center'),
+                                                (col_c, 'Used By (unpaid meetings)', 'left')], 1):
+            cell = ws.cell(row=row, column=[col_a, col_b, col_c][ci-1])
+            cell.value     = val
+            cell.font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+            cell.fill      = hfill(C['header'])
+            cell.alignment = Alignment(horizontal=algn, wrap_text=True)
+            cell.border    = bdr
+        ws.row_dimensions[row].height = 24
+
+    # Build a lookup: which unpaid bookings use each brand/chain?
+    brand_users = {}   # brand → list of meeting names
+    chain_users = {}   # chain → list of meeting names
+    default_users = []
+    for yr_data in data.values():
+        for who_rows in yr_data.values():
+            for rd in who_rows:
+                if rd['projected']:
+                    pass  # we don't store brand/chain in rd — skip user lists for now
+
+    # Brand section header row
+    br_hdr_row = 4
+    ws_avg.cell(row=br_hdr_row, column=1, value='Brand').font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+    ws_avg.cell(row=br_hdr_row, column=1).fill      = hfill(C['header'])
+    ws_avg.cell(row=br_hdr_row, column=1).alignment = Alignment(horizontal='left')
+    ws_avg.cell(row=br_hdr_row, column=1).border    = bdr
+    ws_avg.cell(row=br_hdr_row, column=2, value='Avg Days (6 mo)').font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+    ws_avg.cell(row=br_hdr_row, column=2).fill      = hfill(C['header'])
+    ws_avg.cell(row=br_hdr_row, column=2).alignment = Alignment(horizontal='center', wrap_text=True)
+    ws_avg.cell(row=br_hdr_row, column=2).border    = bdr
+    ws_avg.cell(row=br_hdr_row, column=3, value='# Payments').font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+    ws_avg.cell(row=br_hdr_row, column=3).fill      = hfill(C['header'])
+    ws_avg.cell(row=br_hdr_row, column=3).alignment = Alignment(horizontal='center')
+    ws_avg.cell(row=br_hdr_row, column=3).border    = bdr
+    ws_avg.row_dimensions[br_hdr_row].height = 28
+
+    # Brand data rows — fetch with count
+    brand_detail = db.execute('''
+        SELECT COALESCE(NULLIF(r.Brand,''), 'Unknown') AS b,
+               ROUND(AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)), 1) AS avg_days,
+               COUNT(*) AS n
+        FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0 AND c.DateOnCheck >= ?
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND r.EndDate IS NOT NULL AND r.EndDate != ''
+          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+        GROUP BY r.Brand
+        ORDER BY avg_days DESC
+    ''', (six_months_ago,)).fetchall()
+
+    br_row = br_hdr_row + 1
+    for i, row in enumerate(brand_detail):
+        bg = 'F0F4FA' if i % 2 == 0 else 'FFFFFF'
+        days = float(row[1] or 90)
+        # Color-code by speed
+        if days >= 120:   day_color = 'FFC7CE'   # red tint
+        elif days >= 90:  day_color = 'FFEB9C'   # yellow tint
+        elif days >= 60:  day_color = 'C6EFCE'   # green tint
+        else:             day_color = 'DDFFDD'   # bright green
+
+        c1 = ws_avg.cell(row=br_row, column=1, value=row[0])
+        c1.fill = hfill(bg); c1.border = bdr
+        c1.font = Font(name='Calibri', size=9)
+        c1.alignment = Alignment(horizontal='left')
+
+        c2 = ws_avg.cell(row=br_row, column=2, value=days)
+        c2.fill = hfill(day_color); c2.border = bdr
+        c2.font = Font(name='Calibri', size=9, bold=True)
+        c2.number_format = '0.0'
+        c2.alignment = Alignment(horizontal='center')
+
+        c3 = ws_avg.cell(row=br_row, column=3, value=int(row[2]))
+        c3.fill = hfill(bg); c3.border = bdr
+        c3.font = Font(name='Calibri', size=9)
+        c3.alignment = Alignment(horizontal='center')
+
+        ws_avg.row_dimensions[br_row].height = 14
+        br_row += 1
+
+    # Spacer
+    ws_avg.row_dimensions[br_row].height = 8
+    br_row += 1
+
+    # Chain section header
+    ch_hdr_row = br_row
+    for ci, (val, algn) in enumerate([('Chain', 'left'),
+                                       ('Avg Days (6 mo)', 'center'),
+                                       ('# Payments', 'center')], 1):
+        cell = ws_avg.cell(row=ch_hdr_row, column=ci, value=val)
+        cell.font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+        cell.fill      = hfill('4472C4')   # slightly different blue for chain
+        cell.alignment = Alignment(horizontal=algn, wrap_text=True)
+        cell.border    = bdr
+    ws_avg.row_dimensions[ch_hdr_row].height = 28
+
+    chain_detail = db.execute('''
+        SELECT COALESCE(NULLIF(r.Chain,''), 'Unknown') AS ch,
+               ROUND(AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)), 1) AS avg_days,
+               COUNT(*) AS n
+        FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0 AND c.DateOnCheck >= ?
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND r.EndDate IS NOT NULL AND r.EndDate != ''
+          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+        GROUP BY r.Chain
+        ORDER BY avg_days DESC
+    ''', (six_months_ago,)).fetchall()
+
+    ch_row = ch_hdr_row + 1
+    for i, row in enumerate(chain_detail):
+        bg = 'F5F0FA' if i % 2 == 0 else 'FFFFFF'
+        days = float(row[1] or 90)
+        if days >= 120:   day_color = 'FFC7CE'
+        elif days >= 90:  day_color = 'FFEB9C'
+        elif days >= 60:  day_color = 'C6EFCE'
+        else:             day_color = 'DDFFDD'
+
+        c1 = ws_avg.cell(row=ch_row, column=1, value=row[0])
+        c1.fill = hfill(bg); c1.border = bdr
+        c1.font = Font(name='Calibri', size=9)
+        c1.alignment = Alignment(horizontal='left')
+
+        c2 = ws_avg.cell(row=ch_row, column=2, value=days)
+        c2.fill = hfill(day_color); c2.border = bdr
+        c2.font = Font(name='Calibri', size=9, bold=True)
+        c2.number_format = '0.0'
+        c2.alignment = Alignment(horizontal='center')
+
+        c3 = ws_avg.cell(row=ch_row, column=3, value=int(row[2]))
+        c3.fill = hfill(bg); c3.border = bdr
+        c3.font = Font(name='Calibri', size=9)
+        c3.alignment = Alignment(horizontal='center')
+
+        ws_avg.row_dimensions[ch_row].height = 14
+        ch_row += 1
+
+    # Spacer + default row
+    ws_avg.row_dimensions[ch_row].height = 8
+    ch_row += 1
+    def_cell = ws_avg.cell(row=ch_row, column=1, value='DEFAULT (no brand or chain match)')
+    def_cell.font      = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    def_cell.fill      = hfill('808080')
+    def_cell.border    = bdr
+    def_cell.alignment = Alignment(horizontal='left')
+    def2 = ws_avg.cell(row=ch_row, column=2, value=90)
+    def2.font          = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    def2.fill          = hfill('808080')
+    def2.border        = bdr
+    def2.number_format = '0'
+    def2.alignment     = Alignment(horizontal='center')
+    def3 = ws_avg.cell(row=ch_row, column=3, value='—')
+    def3.font          = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    def3.fill          = hfill('808080')
+    def3.border        = bdr
+    def3.alignment     = Alignment(horizontal='center')
+    ws_avg.row_dimensions[ch_row].height = 16
+
+    # Legend row
+    ch_row += 2
+    legend = [('< 60 days', 'DDFFDD'), ('60–89 days', 'C6EFCE'),
+              ('90–119 days', 'FFEB9C'), ('120+ days', 'FFC7CE')]
+    ws_avg.cell(row=ch_row, column=1, value='Legend:').font = Font(name='Calibri', bold=True, size=8)
+    ws_avg.cell(row=ch_row, column=1).alignment = Alignment(horizontal='right')
+    for li, (lbl, lclr) in enumerate(legend, 2):
+        lc = ws_avg.cell(row=ch_row, column=li, value=lbl)
+        lc.fill      = hfill(lclr)
+        lc.font      = Font(name='Calibri', size=8)
+        lc.alignment = Alignment(horizontal='center')
+        lc.border    = Border(left=Side(style='thin', color='AAAAAA'),
+                              right=Side(style='thin', color='AAAAAA'),
+                              top=Side(style='thin', color='AAAAAA'),
+                              bottom=Side(style='thin', color='AAAAAA'))
+    ws_avg.row_dimensions[ch_row].height = 14
+
+    # Column widths
+    ws_avg.column_dimensions['A'].width = 42
+    ws_avg.column_dimensions['B'].width = 16
+    ws_avg.column_dimensions['C'].width = 12
+    ws_avg.column_dimensions['D'].width = 14
+    ws_avg.column_dimensions['E'].width = 14
+    ws_avg.freeze_panes = 'A5'
+
     # ── Year detail sheets ────────────────────────────────────────────────────
     for year in years:
         for who_key, who_label, who_full in [
