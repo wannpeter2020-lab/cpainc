@@ -2567,36 +2567,35 @@ def report_days_outstanding():
         flash('This report is restricted to administrators.', 'error')
         return redirect(url_for('pipeline'))
 
+    from datetime import date as _date
+    default_from = str(_date.today().replace(year=_date.today().year - 3))
+    default_to   = str(_date.today())
+    date_from = request.args.get('date_from', default_from).strip() or default_from
+    date_to   = request.args.get('date_to',   default_to).strip()   or default_to
+
     db = get_db()
-    cutoff = '2023-05-28'   # 3 years back from 2026-05-28
 
-    base_sql = '''
-        SELECT
-            COALESCE(NULLIF(r.Brand,''), 'Unknown / Blank') AS brand,
-            COUNT(*)                                         AS num_payments,
-            ROUND(AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)), 1) AS avg_days,
-            ROUND(MIN(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS min_days,
-            ROUND(MAX(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS max_days,
-            ROUND(SUM(c.FinalPayment), 2)                   AS total_commission
-        FROM ChkRegNote c
-        JOIN ReportPipeline r ON c.BookingID = r.BookingId
-        WHERE c.Cancelled = 0
-          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
-          AND r.EndDate IS NOT NULL AND r.EndDate != ''
-          AND r.EndDate >= ?
-          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
-          AND {who_filter}
-        GROUP BY r.Brand
-        ORDER BY avg_days DESC
-    '''
-
-    kristin_rows = db.execute(
-        base_sql.format(who_filter="r.BookingAssociate LIKE '%Kristin%'"), (cutoff,)
-    ).fetchall()
-
-    team_rows = db.execute(
-        base_sql.format(who_filter="r.BookingAssociate NOT LIKE '%Kristin%'"), (cutoff,)
-    ).fetchall()
+    def _run(group_col, group_label, who_filter):
+        sql = f'''
+            SELECT
+                COALESCE(NULLIF(r.{group_col},''), 'Unknown / Blank') AS grp,
+                COUNT(*)                                               AS num_payments,
+                ROUND(AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)), 1) AS avg_days,
+                ROUND(MIN(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS min_days,
+                ROUND(MAX(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS max_days,
+                ROUND(SUM(c.FinalPayment), 2)                          AS total_commission
+            FROM ChkRegNote c
+            JOIN ReportPipeline r ON c.BookingID = r.BookingId
+            WHERE c.Cancelled = 0
+              AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+              AND r.EndDate IS NOT NULL AND r.EndDate != ''
+              AND r.EndDate >= ? AND r.EndDate <= ?
+              AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+              AND {who_filter}
+            GROUP BY r.{group_col}
+            ORDER BY avg_days DESC
+        '''
+        return db.execute(sql, (date_from, date_to)).fetchall()
 
     def totals(rows):
         n = sum(r['num_payments'] for r in rows)
@@ -2607,98 +2606,93 @@ def report_days_outstanding():
         return {'num_payments': n, 'avg_days': round(weighted, 1),
                 'min_days': mn, 'max_days': mx, 'total_commission': round(total_comm, 2)}
 
+    kristin_brand = _run('Brand', 'Brand', "r.BookingAssociate LIKE '%Kristin%'")
+    kristin_chain = _run('Chain', 'Chain', "r.BookingAssociate LIKE '%Kristin%'")
+    team_brand    = _run('Brand', 'Brand', "r.BookingAssociate NOT LIKE '%Kristin%'")
+    team_chain    = _run('Chain', 'Chain', "r.BookingAssociate NOT LIKE '%Kristin%'")
+
     if request.args.get('export') == 'xlsx':
         import io, openpyxl
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
 
-        wb  = openpyxl.Workbook()
+        wb   = openpyxl.Workbook()
         thin = Side(style='thin', color='CCCCCC')
         bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+        subtitle_text = f'Period: {date_from} to {date_to}  |  Payments received after event end date only'
 
-        col_headers = ['Brand', '# Payments', 'Avg Days Outstanding', 'Min Days', 'Max Days', 'Total Commission ($)']
-        col_widths  = [38, 13, 22, 12, 12, 22]
+        def _build_sheet(ws, title, col_label, rows, totals_row):
+            col_headers = [col_label, '# Payments', 'Avg Days Outstanding', 'Min Days', 'Max Days', 'Total Commission ($)']
+            col_widths  = [38, 13, 22, 12, 12, 22]
 
-        def _build_sheet(ws, title, rows, totals_row):
-            # Title row
             ws.merge_cells('A1:F1')
             tc = ws['A1']
             tc.value     = title
-            tc.font      = Font(name='Calibri', bold=True, size=14, color='FFFFFF')
+            tc.font      = Font(name='Calibri', bold=True, size=13, color='FFFFFF')
             tc.fill      = PatternFill('solid', fgColor='1F3864')
             tc.alignment = Alignment(horizontal='center', vertical='center')
-            ws.row_dimensions[1].height = 24
+            ws.row_dimensions[1].height = 22
 
-            # Subtitle
             ws.merge_cells('A2:F2')
             sc = ws['A2']
-            sc.value     = 'Period: May 28, 2023 – May 28, 2026  |  Payments received after event end date only'
+            sc.value     = subtitle_text
             sc.font      = Font(name='Calibri', italic=True, color='666666', size=10)
             sc.alignment = Alignment(horizontal='center')
-            ws.row_dimensions[2].height = 16
+            ws.row_dimensions[2].height = 14
+            ws.row_dimensions[3].height = 5
 
-            ws.row_dimensions[3].height = 6  # spacer
-
-            # Header row
             for ci, h in enumerate(col_headers, 1):
                 cell = ws.cell(row=4, column=ci, value=h)
                 cell.font      = Font(name='Calibri', bold=True, color='FFFFFF')
                 cell.fill      = PatternFill('solid', fgColor='2E75B6')
                 cell.alignment = Alignment(horizontal='center')
                 cell.border    = bdr
-            ws.row_dimensions[4].height = 16
 
-            # Data rows
             for ri, r in enumerate(rows):
-                row_num = ri + 5
-                vals = [r['brand'], r['num_payments'], r['avg_days'],
+                rn = ri + 5
+                vals = [r['grp'], r['num_payments'], r['avg_days'],
                         int(r['min_days']), int(r['max_days']), r['total_commission']]
                 bg = 'DEEAF1' if ri % 2 == 0 else 'FFFFFF'
                 for ci, v in enumerate(vals, 1):
-                    cell = ws.cell(row=row_num, column=ci, value=v)
+                    cell = ws.cell(row=rn, column=ci, value=v)
                     cell.fill      = PatternFill('solid', fgColor=bg)
                     cell.border    = bdr
                     cell.font      = Font(name='Calibri')
-                    if ci == 1:
-                        cell.alignment = Alignment(horizontal='left')
-                    else:
-                        cell.alignment = Alignment(horizontal='center' if ci < 6 else 'right')
-                ws.cell(row=row_num, column=3).number_format = '0.0'
-                ws.cell(row=row_num, column=6).number_format = '$#,##0.00'
+                    cell.alignment = Alignment(horizontal='left' if ci == 1 else ('right' if ci == 6 else 'center'))
+                ws.cell(row=rn, column=3).number_format = '0.0'
+                ws.cell(row=rn, column=6).number_format = '$#,##0.00'
 
-            # Totals row
-            tr_num = len(rows) + 5
-            tvals  = ['TOTAL / AVERAGE', totals_row['num_payments'],
-                      round(totals_row['avg_days'], 1),
-                      int(totals_row['min_days']), int(totals_row['max_days']),
-                      round(totals_row['total_commission'], 2)]
+            tr = len(rows) + 5
+            tvals = ['TOTAL / AVERAGE', totals_row['num_payments'],
+                     round(totals_row['avg_days'], 1),
+                     int(totals_row['min_days']), int(totals_row['max_days']),
+                     round(totals_row['total_commission'], 2)]
             for ci, v in enumerate(tvals, 1):
-                cell = ws.cell(row=tr_num, column=ci, value=v)
+                cell = ws.cell(row=tr, column=ci, value=v)
                 cell.fill   = PatternFill('solid', fgColor='D9D9D9')
                 cell.font   = Font(name='Calibri', bold=True)
                 cell.border = bdr
                 cell.alignment = Alignment(horizontal='left' if ci == 1 else ('right' if ci == 6 else 'center'))
-            ws.cell(row=tr_num, column=3).number_format = '0.0'
-            ws.cell(row=tr_num, column=6).number_format = '$#,##0.00'
+            ws.cell(row=tr, column=3).number_format = '0.0'
+            ws.cell(row=tr, column=6).number_format = '$#,##0.00'
 
-            # Column widths & freeze
             for ci, w in enumerate(col_widths, 1):
                 ws.column_dimensions[get_column_letter(ci)].width = w
             ws.freeze_panes = 'A5'
 
-        k_totals = totals(kristin_rows)
-        t_totals = totals(team_rows)
-
-        ws1 = wb.active
-        ws1.title = 'Kristin'
-        _build_sheet(ws1,
-                     'Kristin House — Avg Days to Commission Payment by Brand (Last 3 Years)',
-                     [dict(r) for r in kristin_rows], k_totals)
-
-        ws2 = wb.create_sheet('Team')
-        _build_sheet(ws2,
-                     'Team — Avg Days to Commission Payment by Brand (Last 3 Years)',
-                     [dict(r) for r in team_rows], t_totals)
+        sheets = [
+            (wb.active, 'Kristin — Brand', 'Kristin House — Avg Days by Brand', 'Brand', kristin_brand, totals(kristin_brand)),
+        ]
+        wb.active.title = 'Kristin — Brand'
+        for ws_title, sheet_title, col_label, rows, tot in [
+            ('Kristin — Brand', 'Kristin House — Avg Days to Payment by Brand', 'Brand', kristin_brand, totals(kristin_brand)),
+            ('Kristin — Chain', 'Kristin House — Avg Days to Payment by Chain', 'Chain', kristin_chain, totals(kristin_chain)),
+            ('Team — Brand',    'Team — Avg Days to Payment by Brand',           'Brand', team_brand,    totals(team_brand)),
+            ('Team — Chain',    'Team — Avg Days to Payment by Chain',           'Chain', team_chain,    totals(team_chain)),
+        ]:
+            ws = wb.active if ws_title == 'Kristin — Brand' else wb.create_sheet(ws_title)
+            ws.title = ws_title
+            _build_sheet(ws, sheet_title, col_label, [dict(r) for r in rows], tot)
 
         buf = io.BytesIO()
         wb.save(buf)
@@ -2708,11 +2702,13 @@ def report_days_outstanding():
                          mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     return render_template('report_days_outstanding.html',
-                           kristin_rows=kristin_rows,
-                           team_rows=team_rows,
-                           kristin_totals=totals(kristin_rows),
-                           team_totals=totals(team_rows),
-                           cutoff=cutoff)
+                           kristin_brand=kristin_brand, kristin_chain=kristin_chain,
+                           team_brand=team_brand,       team_chain=team_chain,
+                           kristin_brand_totals=totals(kristin_brand),
+                           kristin_chain_totals=totals(kristin_chain),
+                           team_brand_totals=totals(team_brand),
+                           team_chain_totals=totals(team_chain),
+                           date_from=date_from, date_to=date_to)
 
 
 # ── Customer Summary Report ────────────────────────────────────────────────────

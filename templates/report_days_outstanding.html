@@ -6,86 +6,155 @@
   <div>
     <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Commission Days Outstanding</h4>
     <div class="text-muted small mt-1">
-      Avg days from <strong>meeting end</strong> to <strong>commission received</strong> &mdash;
-      last 3 years ({{ cutoff }} to today) &nbsp;&middot;&nbsp;
-      <span class="badge bg-secondary">Admin Only</span>
+      Avg days from <strong>meeting end</strong> to <strong>commission received</strong>
+      &nbsp;&middot;&nbsp;<span class="badge bg-secondary">Admin Only</span>
     </div>
   </div>
-  <a href="/reports/days-outstanding?export=xlsx" class="btn btn-sm btn-outline-success">
+  <a href="/reports/days-outstanding?export=xlsx&date_from={{ date_from }}&date_to={{ date_to }}"
+     class="btn btn-sm btn-outline-success">
     <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
   </a>
 </div>
 
-{% macro brand_table(rows, totals_row, title, color_class, icon) %}
-<div class="card mb-4">
-  <div class="card-header {{ color_class }} text-white d-flex justify-content-between align-items-center">
-    <span><i class="bi {{ icon }} me-2"></i>{{ title }}</span>
-    <span class="badge bg-white text-dark">{{ totals_row.num_payments }} payments &nbsp;|&nbsp; {{ "%.1f"|format(totals_row.avg_days) }} avg days &nbsp;|&nbsp; ${{ "{:,.0f}".format(totals_row.total_commission) }} total</span>
-  </div>
-  <div class="card-body p-0">
-    <div class="table-responsive">
-      <table class="table table-sm table-hover mb-0 align-middle">
-        <thead class="table-light">
-          <tr>
-            <th>Brand</th>
-            <th class="text-center"># Payments</th>
-            <th class="text-center">Avg Days</th>
-            <th class="text-center">Min</th>
-            <th class="text-center">Max</th>
-            <th class="text-end">Total Commission</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr>
-            <td>{{ r.brand }}</td>
-            <td class="text-center">{{ r.num_payments }}</td>
-            <td class="text-center fw-semibold">
-              {% set d = r.avg_days %}
-              <span class="badge rounded-pill
-                {% if d >= 120 %}bg-danger
-                {% elif d >= 90 %}bg-warning text-dark
-                {% elif d >= 60 %}bg-info text-dark
-                {% else %}bg-success
-                {% endif %}">
-                {{ "%.1f"|format(d) }}
-              </span>
-            </td>
-            <td class="text-center text-muted">{{ r.min_days|int }}</td>
-            <td class="text-center text-muted">{{ r.max_days|int }}</td>
-            <td class="text-end">${{ "{:,.2f}".format(r.total_commission) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-        <tfoot class="table-secondary fw-semibold">
-          <tr>
-            <td>TOTAL / AVERAGE</td>
-            <td class="text-center">{{ totals_row.num_payments }}</td>
-            <td class="text-center">{{ "%.1f"|format(totals_row.avg_days) }}</td>
-            <td class="text-center">{{ totals_row.min_days|int }}</td>
-            <td class="text-center">{{ totals_row.max_days|int }}</td>
-            <td class="text-end">${{ "{:,.2f}".format(totals_row.total_commission) }}</td>
-          </tr>
-        </tfoot>
-      </table>
+{# ── Date filter ── #}
+<form method="get" action="/reports/days-outstanding" class="card card-body mb-4 py-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-auto">
+      <label class="form-label fw-semibold mb-1 small">Meeting End From</label>
+      <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
+    </div>
+    <div class="col-auto">
+      <label class="form-label fw-semibold mb-1 small">Meeting End To</label>
+      <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}">
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-clockwise me-1"></i>Run
+      </button>
+    </div>
+    <div class="col-auto">
+      <a href="/reports/days-outstanding" class="btn btn-outline-secondary btn-sm">Reset (3 yr)</a>
+    </div>
+    <div class="col text-end text-muted small">
+      Showing meetings ending {{ date_from }} – {{ date_to }}
     </div>
   </div>
-</div>
-{% endmacro %}
+</form>
 
 {# Legend #}
 <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-  <span class="text-muted small">Avg days color guide:</span>
+  <span class="text-muted small">Avg days:</span>
   <span class="badge bg-success">Under 60</span>
   <span class="badge bg-info text-dark">60–89</span>
   <span class="badge bg-warning text-dark">90–119</span>
   <span class="badge bg-danger">120+</span>
 </div>
 
-{{ brand_table(kristin_rows, kristin_totals,
-   'Kristin House — by Brand', 'bg-primary', 'bi-person-circle') }}
+{% macro summary_badge(t) %}
+<span class="badge bg-white text-dark fw-normal" style="font-size:.78rem">
+  {{ t.num_payments }} payments &nbsp;|&nbsp;
+  {{ "%.1f"|format(t.avg_days) }} avg days &nbsp;|&nbsp;
+  ${{ "{:,.0f}".format(t.total_commission) }}
+</span>
+{% endmacro %}
 
-{{ brand_table(team_rows, team_totals,
-   'Team (All Others) — by Brand', 'bg-secondary', 'bi-people') }}
+{% macro days_badge(d) %}
+<span class="badge rounded-pill
+  {% if d >= 120 %}bg-danger
+  {% elif d >= 90 %}bg-warning text-dark
+  {% elif d >= 60 %}bg-info text-dark
+  {% else %}bg-success{% endif %}">{{ "%.1f"|format(d) }}</span>
+{% endmacro %}
+
+{% macro data_table(rows, totals_row, col_label) %}
+<div class="table-responsive">
+  <table class="table table-sm table-hover mb-0 align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>{{ col_label }}</th>
+        <th class="text-center"># Payments</th>
+        <th class="text-center">Avg Days</th>
+        <th class="text-center">Min</th>
+        <th class="text-center">Max</th>
+        <th class="text-end">Total Commission</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.grp }}</td>
+        <td class="text-center">{{ r.num_payments }}</td>
+        <td class="text-center">{{ days_badge(r.avg_days) }}</td>
+        <td class="text-center text-muted">{{ r.min_days|int }}</td>
+        <td class="text-center text-muted">{{ r.max_days|int }}</td>
+        <td class="text-end">${{ "{:,.2f}".format(r.total_commission) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot class="table-secondary fw-semibold">
+      <tr>
+        <td>TOTAL / AVERAGE</td>
+        <td class="text-center">{{ totals_row.num_payments }}</td>
+        <td class="text-center">{{ "%.1f"|format(totals_row.avg_days) }}</td>
+        <td class="text-center">{{ totals_row.min_days|int }}</td>
+        <td class="text-center">{{ totals_row.max_days|int }}</td>
+        <td class="text-end">${{ "{:,.2f}".format(totals_row.total_commission) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+</div>
+{% endmacro %}
+
+{# ── Kristin ── #}
+<div class="card mb-4">
+  <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-person-circle me-2"></i>Kristin House</span>
+    {{ summary_badge(kristin_brand_totals) }}
+  </div>
+  <div class="card-body p-0">
+    <ul class="nav nav-tabs px-3 pt-2" id="kristinTabs">
+      <li class="nav-item">
+        <a class="nav-link active" data-bs-toggle="tab" href="#kristin-brand">By Brand</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#kristin-chain">By Chain</a>
+      </li>
+    </ul>
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="kristin-brand">
+        {{ data_table(kristin_brand, kristin_brand_totals, 'Brand') }}
+      </div>
+      <div class="tab-pane fade" id="kristin-chain">
+        {{ data_table(kristin_chain, kristin_chain_totals, 'Chain') }}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Team ── #}
+<div class="card mb-4">
+  <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-people me-2"></i>Team (All Others)</span>
+    {{ summary_badge(team_brand_totals) }}
+  </div>
+  <div class="card-body p-0">
+    <ul class="nav nav-tabs px-3 pt-2" id="teamTabs">
+      <li class="nav-item">
+        <a class="nav-link active" data-bs-toggle="tab" href="#team-brand">By Brand</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#team-chain">By Chain</a>
+      </li>
+    </ul>
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="team-brand">
+        {{ data_table(team_brand, team_brand_totals, 'Brand') }}
+      </div>
+      <div class="tab-pane fade" id="team-chain">
+        {{ data_table(team_chain, team_chain_totals, 'Chain') }}
+      </div>
+    </div>
+  </div>
+</div>
 
 {% endblock %}
