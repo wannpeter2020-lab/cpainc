@@ -2558,6 +2558,163 @@ def report_commission_export():
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+# ── Days Outstanding Report (admin only) ─────────────────────────────────────
+
+@app.route('/reports/days-outstanding')
+def report_days_outstanding():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('This report is restricted to administrators.', 'error')
+        return redirect(url_for('pipeline'))
+
+    db = get_db()
+    cutoff = '2023-05-28'   # 3 years back from 2026-05-28
+
+    base_sql = '''
+        SELECT
+            COALESCE(NULLIF(r.Brand,''), 'Unknown / Blank') AS brand,
+            COUNT(*)                                         AS num_payments,
+            ROUND(AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)), 1) AS avg_days,
+            ROUND(MIN(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS min_days,
+            ROUND(MAX(julianday(c.DateOnCheck) - julianday(r.EndDate)), 0) AS max_days,
+            ROUND(SUM(c.FinalPayment), 2)                   AS total_commission
+        FROM ChkRegNote c
+        JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled = 0
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND r.EndDate IS NOT NULL AND r.EndDate != ''
+          AND r.EndDate >= ?
+          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+          AND {who_filter}
+        GROUP BY r.Brand
+        ORDER BY avg_days DESC
+    '''
+
+    kristin_rows = db.execute(
+        base_sql.format(who_filter="r.BookingAssociate LIKE '%Kristin%'"), (cutoff,)
+    ).fetchall()
+
+    team_rows = db.execute(
+        base_sql.format(who_filter="r.BookingAssociate NOT LIKE '%Kristin%'"), (cutoff,)
+    ).fetchall()
+
+    def totals(rows):
+        n = sum(r['num_payments'] for r in rows)
+        total_comm = sum(r['total_commission'] for r in rows)
+        weighted = (sum(r['avg_days'] * r['num_payments'] for r in rows) / n) if n else 0
+        mn = min((r['min_days'] for r in rows), default=0)
+        mx = max((r['max_days'] for r in rows), default=0)
+        return {'num_payments': n, 'avg_days': round(weighted, 1),
+                'min_days': mn, 'max_days': mx, 'total_commission': round(total_comm, 2)}
+
+    if request.args.get('export') == 'xlsx':
+        import io, openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb  = openpyxl.Workbook()
+        thin = Side(style='thin', color='CCCCCC')
+        bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+        col_headers = ['Brand', '# Payments', 'Avg Days Outstanding', 'Min Days', 'Max Days', 'Total Commission ($)']
+        col_widths  = [38, 13, 22, 12, 12, 22]
+
+        def _build_sheet(ws, title, rows, totals_row):
+            # Title row
+            ws.merge_cells('A1:F1')
+            tc = ws['A1']
+            tc.value     = title
+            tc.font      = Font(name='Calibri', bold=True, size=14, color='FFFFFF')
+            tc.fill      = PatternFill('solid', fgColor='1F3864')
+            tc.alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 24
+
+            # Subtitle
+            ws.merge_cells('A2:F2')
+            sc = ws['A2']
+            sc.value     = 'Period: May 28, 2023 – May 28, 2026  |  Payments received after event end date only'
+            sc.font      = Font(name='Calibri', italic=True, color='666666', size=10)
+            sc.alignment = Alignment(horizontal='center')
+            ws.row_dimensions[2].height = 16
+
+            ws.row_dimensions[3].height = 6  # spacer
+
+            # Header row
+            for ci, h in enumerate(col_headers, 1):
+                cell = ws.cell(row=4, column=ci, value=h)
+                cell.font      = Font(name='Calibri', bold=True, color='FFFFFF')
+                cell.fill      = PatternFill('solid', fgColor='2E75B6')
+                cell.alignment = Alignment(horizontal='center')
+                cell.border    = bdr
+            ws.row_dimensions[4].height = 16
+
+            # Data rows
+            for ri, r in enumerate(rows):
+                row_num = ri + 5
+                vals = [r['brand'], r['num_payments'], r['avg_days'],
+                        int(r['min_days']), int(r['max_days']), r['total_commission']]
+                bg = 'DEEAF1' if ri % 2 == 0 else 'FFFFFF'
+                for ci, v in enumerate(vals, 1):
+                    cell = ws.cell(row=row_num, column=ci, value=v)
+                    cell.fill      = PatternFill('solid', fgColor=bg)
+                    cell.border    = bdr
+                    cell.font      = Font(name='Calibri')
+                    if ci == 1:
+                        cell.alignment = Alignment(horizontal='left')
+                    else:
+                        cell.alignment = Alignment(horizontal='center' if ci < 6 else 'right')
+                ws.cell(row=row_num, column=3).number_format = '0.0'
+                ws.cell(row=row_num, column=6).number_format = '$#,##0.00'
+
+            # Totals row
+            tr_num = len(rows) + 5
+            tvals  = ['TOTAL / AVERAGE', totals_row['num_payments'],
+                      round(totals_row['avg_days'], 1),
+                      int(totals_row['min_days']), int(totals_row['max_days']),
+                      round(totals_row['total_commission'], 2)]
+            for ci, v in enumerate(tvals, 1):
+                cell = ws.cell(row=tr_num, column=ci, value=v)
+                cell.fill   = PatternFill('solid', fgColor='D9D9D9')
+                cell.font   = Font(name='Calibri', bold=True)
+                cell.border = bdr
+                cell.alignment = Alignment(horizontal='left' if ci == 1 else ('right' if ci == 6 else 'center'))
+            ws.cell(row=tr_num, column=3).number_format = '0.0'
+            ws.cell(row=tr_num, column=6).number_format = '$#,##0.00'
+
+            # Column widths & freeze
+            for ci, w in enumerate(col_widths, 1):
+                ws.column_dimensions[get_column_letter(ci)].width = w
+            ws.freeze_panes = 'A5'
+
+        k_totals = totals(kristin_rows)
+        t_totals = totals(team_rows)
+
+        ws1 = wb.active
+        ws1.title = 'Kristin'
+        _build_sheet(ws1,
+                     'Kristin House — Avg Days to Commission Payment by Brand (Last 3 Years)',
+                     [dict(r) for r in kristin_rows], k_totals)
+
+        ws2 = wb.create_sheet('Team')
+        _build_sheet(ws2,
+                     'Team — Avg Days to Commission Payment by Brand (Last 3 Years)',
+                     [dict(r) for r in team_rows], t_totals)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(buf, download_name='Commission_Days_Outstanding.xlsx',
+                         as_attachment=True,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    return render_template('report_days_outstanding.html',
+                           kristin_rows=kristin_rows,
+                           team_rows=team_rows,
+                           kristin_totals=totals(kristin_rows),
+                           team_totals=totals(team_rows),
+                           cutoff=cutoff)
+
+
 # ── Customer Summary Report ────────────────────────────────────────────────────
 
 from cs_report_utils import (

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Days Outstanding Report{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-clock-history me-2"></i>Commission Days Outstanding</h4>
+    <div class="text-muted small mt-1">
+      Avg days from <strong>meeting end</strong> to <strong>commission received</strong> &mdash;
+      last 3 years ({{ cutoff }} to today) &nbsp;&middot;&nbsp;
+      <span class="badge bg-secondary">Admin Only</span>
+    </div>
+  </div>
+  <a href="/reports/days-outstanding?export=xlsx" class="btn btn-sm btn-outline-success">
+    <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
+  </a>
+</div>
+
+{% macro brand_table(rows, totals_row, title, color_class, icon) %}
+<div class="card mb-4">
+  <div class="card-header {{ color_class }} text-white d-flex justify-content-between align-items-center">
+    <span><i class="bi {{ icon }} me-2"></i>{{ title }}</span>
+    <span class="badge bg-white text-dark">{{ totals_row.num_payments }} payments &nbsp;|&nbsp; {{ "%.1f"|format(totals_row.avg_days) }} avg days &nbsp;|&nbsp; ${{ "{:,.0f}".format(totals_row.total_commission) }} total</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Brand</th>
+            <th class="text-center"># Payments</th>
+            <th class="text-center">Avg Days</th>
+            <th class="text-center">Min</th>
+            <th class="text-center">Max</th>
+            <th class="text-end">Total Commission</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.brand }}</td>
+            <td class="text-center">{{ r.num_payments }}</td>
+            <td class="text-center fw-semibold">
+              {% set d = r.avg_days %}
+              <span class="badge rounded-pill
+                {% if d >= 120 %}bg-danger
+                {% elif d >= 90 %}bg-warning text-dark
+                {% elif d >= 60 %}bg-info text-dark
+                {% else %}bg-success
+                {% endif %}">
+                {{ "%.1f"|format(d) }}
+              </span>
+            </td>
+            <td class="text-center text-muted">{{ r.min_days|int }}</td>
+            <td class="text-center text-muted">{{ r.max_days|int }}</td>
+            <td class="text-end">${{ "{:,.2f}".format(r.total_commission) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot class="table-secondary fw-semibold">
+          <tr>
+            <td>TOTAL / AVERAGE</td>
+            <td class="text-center">{{ totals_row.num_payments }}</td>
+            <td class="text-center">{{ "%.1f"|format(totals_row.avg_days) }}</td>
+            <td class="text-center">{{ totals_row.min_days|int }}</td>
+            <td class="text-center">{{ totals_row.max_days|int }}</td>
+            <td class="text-end">${{ "{:,.2f}".format(totals_row.total_commission) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+{# Legend #}
+<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+  <span class="text-muted small">Avg days color guide:</span>
+  <span class="badge bg-success">Under 60</span>
+  <span class="badge bg-info text-dark">60–89</span>
+  <span class="badge bg-warning text-dark">90–119</span>
+  <span class="badge bg-danger">120+</span>
+</div>
+
+{{ brand_table(kristin_rows, kristin_totals,
+   'Kristin House — by Brand', 'bg-primary', 'bi-person-circle') }}
+
+{{ brand_table(team_rows, team_totals,
+   'Team (All Others) — by Brand', 'bg-secondary', 'bi-people') }}
+
+{% endblock %}
