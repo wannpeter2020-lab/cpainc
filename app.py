@@ -2990,6 +2990,17 @@ def report_proforma():
         for who in ('kristin', 'team'):
             data[yr][who].sort(key=lambda x: x['paid_date'])
 
+    # ── Pre-compute monthly summary totals ────────────────────────────────────
+    # summary[year][who] = list of 12 monthly totals
+    summary = {}
+    for yr in sorted(data.keys()):
+        summary[yr] = {'kristin': [0.0]*12, 'team': [0.0]*12}
+        for who in ('kristin', 'team'):
+            for rd in data[yr][who]:
+                mo = rd['month']
+                if 1 <= mo <= 12:
+                    summary[yr][who][mo-1] += rd['amount']
+
     # ── Build Excel ───────────────────────────────────────────────────────────
     MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun',
                   'Jul','Aug','Sep','Oct','Nov','Dec']
@@ -3017,6 +3028,138 @@ def report_proforma():
     if not years:
         years = [today.year]
 
+    # ── Summary sheet ─────────────────────────────────────────────────────────
+    ws_sum = wb.create_sheet('Summary')
+    SUM_HDRS  = ['Year', 'Kristin / Team'] + MONTH_ABBR + ['Year Total']
+    SUM_WIDTHS = [8, 14] + [11]*12 + [13]
+    n_sum_cols = len(SUM_HDRS)
+    sum_last_col = get_column_letter(n_sum_cols)
+
+    adj_sign_str = ('+' if adj_pct >= 0 else '') + f'{adj_pct:.1f}%'
+
+    # Title
+    ws_sum.merge_cells(f'A1:{sum_last_col}1')
+    t = ws_sum['A1']
+    t.value     = 'Commission Proforma — Monthly Summary by Year'
+    t.font      = Font(name='Calibri', bold=True, size=14, color='FFFFFF')
+    t.fill      = hfill(C['title'])
+    t.alignment = Alignment(horizontal='center', vertical='center')
+    ws_sum.row_dimensions[1].height = 26
+
+    # Subtitle
+    ws_sum.merge_cells(f'A2:{sum_last_col}2')
+    s = ws_sum['A2']
+    s.value = (f'Generated {today.strftime("%B %d, %Y")}  │  '
+               f'Projected adjustment: {adj_sign_str}  │  '
+               f'Includes actual payments + HHR-sourced + contracted estimates')
+    s.font      = Font(name='Calibri', italic=True, color='555555', size=9)
+    s.alignment = Alignment(horizontal='center')
+    ws_sum.row_dimensions[2].height = 14
+    ws_sum.row_dimensions[3].height = 5
+
+    # Column headers
+    for ci, h in enumerate(SUM_HDRS, 1):
+        cell = ws_sum.cell(row=4, column=ci, value=h)
+        cell.font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+        cell.fill      = hfill(C['header'])
+        cell.alignment = Alignment(horizontal='center', wrap_text=True)
+        cell.border    = bdr
+    ws_sum.row_dimensions[4].height = 30
+
+    grand_total = [0.0] * 12
+
+    data_row = 5
+    for yr in years:
+        k_mo  = summary[yr]['kristin']
+        t_mo  = summary[yr]['team']
+        yr_k  = sum(k_mo)
+        yr_t  = sum(t_mo)
+        yr_tot = yr_k + yr_t
+
+        for mo_i in range(12):
+            grand_total[mo_i] += k_mo[mo_i] + t_mo[mo_i]
+
+        ROWS = [
+            (str(yr), 'Kristin',    k_mo,                            yr_k,   'DEEAF1', False),
+            ('',      'Team',       t_mo,                            yr_t,   'FFFFFF', False),
+            ('',      f'{yr} TOTAL',[k_mo[i]+t_mo[i] for i in range(12)], yr_tot, 'D9D9D9', True),
+        ]
+
+        for label_yr, label_who, monthly, yr_sum, bg, is_total in ROWS:
+            fnt = Font(name='Calibri', size=9, bold=is_total)
+            fill = hfill(bg)
+
+            ws_sum.cell(row=data_row, column=1, value=label_yr).font = fnt
+            ws_sum.cell(row=data_row, column=1).fill   = fill
+            ws_sum.cell(row=data_row, column=1).border = bdr
+            ws_sum.cell(row=data_row, column=1).alignment = Alignment(horizontal='center')
+
+            ws_sum.cell(row=data_row, column=2, value=label_who).font  = fnt
+            ws_sum.cell(row=data_row, column=2).fill   = fill
+            ws_sum.cell(row=data_row, column=2).border = bdr
+            ws_sum.cell(row=data_row, column=2).alignment = Alignment(horizontal='left')
+
+            for mo_i, mo_val in enumerate(monthly):
+                cell = ws_sum.cell(row=data_row, column=3 + mo_i,
+                                   value=mo_val if mo_val else None)
+                cell.font          = fnt
+                cell.fill          = fill
+                cell.border        = bdr
+                cell.number_format = '$#,##0'
+                cell.alignment     = Alignment(horizontal='right')
+
+            tot_cell = ws_sum.cell(row=data_row, column=n_sum_cols, value=yr_sum if yr_sum else None)
+            tot_cell.font          = Font(name='Calibri', size=9, bold=True)
+            tot_cell.fill          = fill
+            tot_cell.border        = bdr
+            tot_cell.number_format = '$#,##0'
+            tot_cell.alignment     = Alignment(horizontal='right')
+
+            ws_sum.row_dimensions[data_row].height = 14
+            data_row += 1
+
+        # Spacer between years
+        for ci in range(1, n_sum_cols + 1):
+            ws_sum.cell(row=data_row, column=ci).fill   = hfill('F2F2F2')
+            ws_sum.cell(row=data_row, column=ci).border = Border(
+                bottom=Side(style='thin', color='AAAAAA'))
+        ws_sum.row_dimensions[data_row].height = 4
+        data_row += 1
+
+    # Grand Total row
+    gt_total = sum(grand_total)
+    ws_sum.cell(row=data_row, column=1, value='ALL').font   = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    ws_sum.cell(row=data_row, column=1).fill   = hfill(C['title'])
+    ws_sum.cell(row=data_row, column=1).border = bdr
+    ws_sum.cell(row=data_row, column=1).alignment = Alignment(horizontal='center')
+
+    ws_sum.cell(row=data_row, column=2, value='GRAND TOTAL').font  = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    ws_sum.cell(row=data_row, column=2).fill   = hfill(C['title'])
+    ws_sum.cell(row=data_row, column=2).border = bdr
+    ws_sum.cell(row=data_row, column=2).alignment = Alignment(horizontal='left')
+
+    for mo_i, mo_val in enumerate(grand_total):
+        cell = ws_sum.cell(row=data_row, column=3 + mo_i, value=mo_val if mo_val else None)
+        cell.font          = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+        cell.fill          = hfill(C['title'])
+        cell.border        = bdr
+        cell.number_format = '$#,##0'
+        cell.alignment     = Alignment(horizontal='right')
+
+    gt_cell = ws_sum.cell(row=data_row, column=n_sum_cols, value=gt_total if gt_total else None)
+    gt_cell.font          = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
+    gt_cell.fill          = hfill(C['title'])
+    gt_cell.border        = bdr
+    gt_cell.number_format = '$#,##0'
+    gt_cell.alignment     = Alignment(horizontal='right')
+    ws_sum.row_dimensions[data_row].height = 18
+
+    # Column widths & freeze
+    for ci, w in enumerate(SUM_WIDTHS, 1):
+        ws_sum.column_dimensions[get_column_letter(ci)].width = w
+    ws_sum.freeze_panes = 'A5'
+
+    # ── Year detail sheets ────────────────────────────────────────────────────
     for year in years:
         for who_key, who_label, who_full in [
             ('kristin', 'Kristin', 'Kristin House'),
