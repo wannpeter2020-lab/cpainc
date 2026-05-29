@@ -2857,6 +2857,7 @@ def report_proforma():
     paid_rows = db.execute('''
         SELECT r.BookingId,
                r.BookingAssociate,
+               COALESCE(r.AccountName,'') AS customer_name,
                COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
                COALESCE(r.Customer,'')   AS hotel,
                COALESCE(r.StartDate,'') AS start_date,
@@ -2920,6 +2921,7 @@ def report_proforma():
     unpaid_rows = db.execute('''
         SELECT r.BookingId,
                r.BookingAssociate,
+               COALESCE(r.AccountName,'') AS customer_name,
                COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
                COALESCE(r.Customer,'')            AS hotel,
                COALESCE(r.StartDate,'')           AS start_date,
@@ -2972,6 +2974,7 @@ def report_proforma():
             rev = float(r['Revenue'] or 0)
         data[year][who].append({
             'bid':       bid,
+            'customer':  r['customer_name'],
             'associate': r['BookingAssociate'] or '',
             'meeting':   r['meeting_name'],
             'hotel':     r['hotel'],
@@ -3025,6 +3028,7 @@ def report_proforma():
 
         data[year][who].append({
             'bid':       bid,
+            'customer':  r['customer_name'],
             'associate': r['BookingAssociate'] or '',
             'meeting':   r['meeting_name'],
             'hotel':     r['hotel'],
@@ -3548,15 +3552,15 @@ def report_proforma():
             # Column definitions
             # fixed cols: Booking ID | ...text... | Revenue | Commission | % Comm | Jan...Dec | Year Total
             if is_team:
-                fixed_hdr   = ['Booking ID', 'Team Member', 'Meeting Name', 'Hotel',
+                fixed_hdr   = ['Booking ID', 'Customer', 'Team Member', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
                                 'Revenue', 'Commission', '% Comm']
-                fixed_w     = [11, 20, 35, 28, 12, 12, 14, 16, 14, 9]
+                fixed_w     = [11, 30, 20, 35, 28, 12, 12, 14, 16, 14, 9]
             else:
-                fixed_hdr   = ['Booking ID', 'Meeting Name', 'Hotel',
+                fixed_hdr   = ['Booking ID', 'Customer', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
                                 'Revenue', 'Commission', '% Comm']
-                fixed_w     = [11, 38, 28, 12, 12, 14, 16, 14, 9]
+                fixed_w     = [11, 30, 38, 28, 12, 12, 14, 16, 14, 9]
 
             nf          = len(fixed_hdr)
             rev_col_i   = nf - 2     # 1-based index of Revenue column
@@ -3623,12 +3627,12 @@ def report_proforma():
                 rev = rd.get('revenue', 0.0) or 0.0
                 amt = rd['amount']
                 if is_team:
-                    fvals = [rd.get('bid',''), rd['associate'], rd['meeting'], rd['hotel'],
+                    fvals = [rd.get('bid',''), rd.get('customer',''), rd['associate'], rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
                              rd['paid_date'].strftime('%m/%d/%Y'),
                              rev if rev else None, amt, None]   # None = % formula below
                 else:
-                    fvals = [rd.get('bid',''), rd['meeting'], rd['hotel'],
+                    fvals = [rd.get('bid',''), rd.get('customer',''), rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
                              rd['paid_date'].strftime('%m/%d/%Y'),
                              rev if rev else None, amt, None]   # None = % formula below
@@ -3648,8 +3652,8 @@ def report_proforma():
                                        color='555555' if is_proj else '000000')
                     if ci <= nf:
                         if ci < rev_col_i:   # text columns
-                            # wrap Meeting Name and Hotel but not Booking ID (col 1) or date/associate cols
-                            wrap = (2 <= ci <= (4 if is_team else 3))
+                            # wrap Customer, Meeting Name, Hotel; not Booking ID or date/name cols
+                            wrap = (2 <= ci <= (5 if is_team else 4))
                             cell.alignment = Alignment(horizontal='left', wrap_text=wrap)
                         elif ci == rev_col_i:   # Revenue
                             cell.number_format = '$#,##0'
