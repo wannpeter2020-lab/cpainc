@@ -2954,6 +2954,7 @@ def report_proforma():
         return 'kristin' in (associate or '').lower()
 
     # ── Assemble year→who→rows ────────────────────────────────────────────────
+    kristin_split = get_kristin_split()   # Kristin's personal cut (e.g. 0.70)
     data = defaultdict(lambda: {'kristin': [], 'team': []})
 
     for r in paid_rows:
@@ -2998,13 +2999,14 @@ def report_proforma():
 
         if who == 'kristin':
             # Kristin: HHR commission → green; else CommissionPercent × revenue → yellow
+            # Apply her personal split (e.g. 70%) to all unpaid projections
             if bid in hhr_commissions:
-                amt = hhr_commissions[bid]
+                amt = round(hhr_commissions[bid] * kristin_split, 2)
                 rev = hhr_revenues.get(bid, 0.0)
                 src = 'hhr'
             else:
                 rev = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
-                amt = round(rev * float(r['CommissionPercent'] or 0) * adj_mult, 2)
+                amt = round(rev * float(r['CommissionPercent'] or 0) * adj_mult * kristin_split, 2)
                 src = 'calc'
         else:
             # Team: Pipeline Revenue, always 1% × adj
