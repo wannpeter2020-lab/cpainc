@@ -2730,6 +2730,9 @@ def report_proforma():
     import json as _json, io, openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.chart import BarChart, LineChart, Reference
+    from openpyxl.chart.series import DataPoint
+    from openpyxl.chart.label import DataLabel
 
     db    = get_db()
     today = _date.today()
@@ -3189,6 +3192,73 @@ def report_proforma():
         ws_sum.column_dimensions[get_column_letter(ci)].width = w
     ws_sum.freeze_panes = 'A5'
 
+    # ── Summary charts ────────────────────────────────────────────────────────
+    grand_total_row = data_row   # row number of the Grand Total row
+
+    # Chart 1: Monthly grand totals (column chart) — placed below the table
+    cht_monthly = BarChart()
+    cht_monthly.type    = 'col'
+    cht_monthly.title   = 'Monthly Commission — All Years Combined'
+    cht_monthly.y_axis.title = 'Commission ($)'
+    cht_monthly.x_axis.title = 'Month'
+    cht_monthly.style   = 10
+    cht_monthly.width   = 22
+    cht_monthly.height  = 12
+    cht_monthly.y_axis.numFmt = '$#,##0'
+    cht_monthly.y_axis.majorGridlines = None
+
+    data_ref_mo = Reference(ws_sum, min_col=3, max_col=14,
+                            min_row=grand_total_row, max_row=grand_total_row)
+    cats_ref_mo = Reference(ws_sum, min_col=3, max_col=14, min_row=4)
+    cht_monthly.add_data(data_ref_mo, from_rows=True)
+    cht_monthly.set_categories(cats_ref_mo)
+    cht_monthly.series[0].title.v        = 'Total Commission'
+    cht_monthly.series[0].graphicalProperties.solidFill = '2E75B6'
+    cht_monthly.series[0].graphicalProperties.line.solidFill = '1F3864'
+    ws_sum.add_chart(cht_monthly, f'A{grand_total_row + 3}')
+
+    # Chart 2: Year totals — Kristin vs Team (clustered column)
+    # Build a mini data table below the main table for year-level chart data
+    tbl_start = grand_total_row + 3 + 22   # below chart 1 (~22 rows tall at default height)
+    ws_sum.cell(row=tbl_start, column=1, value='Year').font = Font(name='Calibri', bold=True, size=8)
+    ws_sum.cell(row=tbl_start, column=2, value='Kristin').font = Font(name='Calibri', bold=True, size=8)
+    ws_sum.cell(row=tbl_start, column=3, value='Team').font = Font(name='Calibri', bold=True, size=8)
+    for yi, yr in enumerate(years):
+        r = tbl_start + 1 + yi
+        ws_sum.cell(row=r, column=1, value=str(yr)).font = Font(name='Calibri', size=8)
+        ws_sum.cell(row=r, column=2, value=sum(summary[yr]['kristin'])).number_format = '$#,##0'
+        ws_sum.cell(row=r, column=2).font = Font(name='Calibri', size=8)
+        ws_sum.cell(row=r, column=3, value=sum(summary[yr]['team'])).number_format = '$#,##0'
+        ws_sum.cell(row=r, column=3).font = Font(name='Calibri', size=8)
+
+    cht_yr = BarChart()
+    cht_yr.type    = 'col'
+    cht_yr.title   = 'Annual Commission — Kristin vs Team'
+    cht_yr.y_axis.title = 'Commission ($)'
+    cht_yr.x_axis.title = 'Year'
+    cht_yr.style   = 10
+    cht_yr.width   = 16
+    cht_yr.height  = 12
+    cht_yr.y_axis.numFmt = '$#,##0'
+    cht_yr.y_axis.majorGridlines = None
+    cht_yr.grouping = 'clustered'
+
+    yr_data_rows = tbl_start + 1 + len(years)
+    k_ref = Reference(ws_sum, min_col=2, max_col=2,
+                      min_row=tbl_start, max_row=yr_data_rows - 1)
+    t_ref = Reference(ws_sum, min_col=3, max_col=3,
+                      min_row=tbl_start, max_row=yr_data_rows - 1)
+    yr_cats = Reference(ws_sum, min_col=1, max_col=1,
+                        min_row=tbl_start + 1, max_row=yr_data_rows - 1)
+    cht_yr.add_data(k_ref, titles_from_data=True)
+    cht_yr.add_data(t_ref, titles_from_data=True)
+    cht_yr.set_categories(yr_cats)
+    cht_yr.series[0].graphicalProperties.solidFill = '2E75B6'   # Kristin — blue
+    cht_yr.series[0].graphicalProperties.line.solidFill = '1F3864'
+    cht_yr.series[1].graphicalProperties.solidFill = 'ED7D31'   # Team — orange
+    cht_yr.series[1].graphicalProperties.line.solidFill = 'C55A11'
+    ws_sum.add_chart(cht_yr, f'N{grand_total_row + 3}')
+
     # ── Avg Days sheet ───────────────────────────────────────────────────────
     ws_avg = wb.create_sheet('Avg Days — Payment Timing')
 
@@ -3386,6 +3456,56 @@ def report_proforma():
                               top=Side(style='thin', color='AAAAAA'),
                               bottom=Side(style='thin', color='AAAAAA'))
     ws_avg.row_dimensions[ch_row].height = 14
+
+    # ── Avg Days charts ───────────────────────────────────────────────────────
+    n_brands = len(brand_detail)
+    n_chains = len(chain_detail)
+
+    def _avg_bar_chart(ws, title, hdr_row, n_rows, anchor, color_hex, width=18, height=None):
+        """Horizontal bar chart for avg days by brand or chain."""
+        chart = BarChart()
+        chart.type    = 'bar'   # horizontal
+        chart.barDir  = 'bar'
+        chart.title   = title
+        chart.x_axis.title = 'Avg Days'
+        chart.style   = 10
+        chart.width   = width
+        chart.height  = height or max(8, min(n_rows * 0.38, 22))
+        chart.x_axis.numFmt = '0'
+        chart.y_axis.majorGridlines = None
+        chart.x_axis.majorGridlines = None
+        chart.grouping = 'clustered'
+
+        vals = Reference(ws, min_col=2, max_col=2,
+                         min_row=hdr_row, max_row=hdr_row + n_rows)
+        cats = Reference(ws, min_col=1, max_col=1,
+                         min_row=hdr_row + 1, max_row=hdr_row + n_rows)
+        chart.add_data(vals, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.series[0].graphicalProperties.solidFill    = color_hex
+        chart.series[0].graphicalProperties.line.solidFill = color_hex
+        # Invert axis so slowest payers appear at top (already sorted desc)
+        chart.y_axis.delete = False
+        ws.add_chart(chart, anchor)
+        return chart
+
+    if n_brands > 0:
+        _avg_bar_chart(ws_avg,
+                       title  = 'Avg Days to Commission — by Brand  (6-month window)',
+                       hdr_row= br_hdr_row,
+                       n_rows = n_brands,
+                       anchor = 'E4',
+                       color_hex = '2E75B6')
+
+    if n_chains > 0:
+        # position chain chart to the right of (or below) brand chart
+        chain_chart_anchor = f'E{ch_hdr_row}'
+        _avg_bar_chart(ws_avg,
+                       title  = 'Avg Days to Commission — by Chain  (6-month window)',
+                       hdr_row= ch_hdr_row,
+                       n_rows = n_chains,
+                       anchor = chain_chart_anchor,
+                       color_hex = '4472C4')
 
     # Column widths
     ws_avg.column_dimensions['A'].width = 42
