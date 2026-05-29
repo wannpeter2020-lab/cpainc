@@ -2858,6 +2858,7 @@ def report_proforma():
                COALESCE(r.StartDate,'') AS start_date,
                COALESCE(r.EndDate,'')   AS end_date,
                r.Brand, r.Chain,
+               r.USDCommissionableAmount, r.Revenue,
                c.DateOnCheck, c.FinalPayment, c.Advance
         FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
         WHERE c.Cancelled=0
@@ -2869,6 +2870,7 @@ def report_proforma():
 
     # ── HHR commissions: actual room revenue from hhr_data blob or Pickup table
     hhr_commissions = {}   # booking_id (str) → commission amount
+    hhr_revenues    = {}   # booking_id (str) → room revenue (base for % calc)
 
     # Priority 1: parse uploaded HHR Excel files in pickup_config
     for pc in db.execute('''
@@ -2883,8 +2885,10 @@ def report_proforma():
             stats    = _parse_hhr(bytes(pc['hhr_data']))
             room_rev = stats.get('room_revenue') or stats.get('room_revenue_calc')
             if room_rev and room_rev > 0:
-                hhr_commissions[str(pc['booking_id'])] = round(
+                bid = str(pc['booking_id'])
+                hhr_commissions[bid] = round(
                     float(room_rev) * float(pc['CommissionPercent']), 2)
+                hhr_revenues[bid]    = round(float(room_rev), 2)
         except Exception:
             pass
 
@@ -2902,12 +2906,11 @@ def report_proforma():
     ''').fetchall():
         bid = str(row['BookingID'])
         if bid not in hhr_commissions:
-            amt = round(
-                float(row['total_rn'] or 0) *
-                float(row['RoomRate'] or 0) *
-                float(row['CommissionPercent'] or 0), 2)
+            rev = round(float(row['total_rn'] or 0) * float(row['RoomRate'] or 0), 2)
+            amt = round(rev * float(row['CommissionPercent'] or 0), 2)
             if amt > 0:
                 hhr_commissions[bid] = amt
+                hhr_revenues[bid]    = rev
 
     # ── Unpaid/projected rows: meetings ending 2025-07-01+ with no payment ───
     unpaid_rows = db.execute('''
@@ -2955,6 +2958,7 @@ def report_proforma():
             continue
         year = pd.year
         who  = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
+        rev  = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
         data[year][who].append({
             'associate': r['BookingAssociate'] or '',
             'meeting':   r['meeting_name'],
@@ -2962,6 +2966,7 @@ def report_proforma():
             'start':     fmt_date(r['start_date']),
             'end':       fmt_date(r['end_date']),
             'paid_date': pd,
+            'revenue':   rev,
             'amount':    float(r['FinalPayment'] or 0),
             'month':     pd.month,
             'projected': False,
@@ -2981,15 +2986,12 @@ def report_proforma():
 
         # Priority: HHR actual revenue > contracted estimate
         if bid in hhr_commissions:
-            amt     = hhr_commissions[bid]
-            src     = 'hhr'          # green in Excel
+            amt = hhr_commissions[bid]
+            rev = hhr_revenues.get(bid, 0.0)
+            src = 'hhr'          # green in Excel
         else:
-            base = 0.0
-            if r['USDCommissionableAmount'] and r['CommissionPercent']:
-                base = float(r['USDCommissionableAmount']) * float(r['CommissionPercent'])
-            elif r['Revenue'] and r['CommissionPercent']:
-                base = float(r['Revenue']) * float(r['CommissionPercent'])
-            amt = round(base * adj_mult, 2)   # apply adjustment %
+            rev = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
+            amt = round(rev * float(r['CommissionPercent'] or 0) * adj_mult, 2)
             src = 'calc'             # yellow in Excel
 
         if amt <= 0:
@@ -3003,6 +3005,7 @@ def report_proforma():
             'start':     fmt_date(r['start_date']),
             'end':       fmt_date(r['end_date']),
             'paid_date': pd,
+            'revenue':   rev,
             'amount':    amt,
             'month':     pd.month,
             'projected': True,
@@ -3194,21 +3197,29 @@ def report_proforma():
             is_team = (who_key == 'team')
 
             # Column definitions
+            # fixed cols end: ...Paid/Proj Date | Revenue | Commission | % Comm | Jan...Dec | Year Total
             if is_team:
                 fixed_hdr   = ['Team Member', 'Meeting Name', 'Hotel',
-                                'Start Date', 'End Date', 'Paid / Proj Date', 'Commission']
-                fixed_w     = [20, 35, 28, 12, 12, 14, 14]
+                                'Start Date', 'End Date', 'Paid / Proj Date',
+                                'Revenue', 'Commission', '% Comm']
+                fixed_w     = [20, 35, 28, 12, 12, 14, 16, 14, 9]
             else:
                 fixed_hdr   = ['Meeting Name', 'Hotel',
-                                'Start Date', 'End Date', 'Paid / Proj Date', 'Commission']
-                fixed_w     = [38, 28, 12, 12, 14, 14]
+                                'Start Date', 'End Date', 'Paid / Proj Date',
+                                'Revenue', 'Commission', '% Comm']
+                fixed_w     = [38, 28, 12, 12, 14, 16, 14, 9]
 
             nf          = len(fixed_hdr)
+            rev_col_i   = nf - 2     # 1-based index of Revenue column
+            comm_col_i  = nf - 1     # 1-based index of Commission column
+            pct_col_i   = nf         # 1-based index of % Comm column
             all_hdr     = fixed_hdr + MONTH_ABBR + ['Year Total']
             all_w       = fixed_w + [10]*12 + [14]
             ncols       = len(all_hdr)
             last_col    = get_column_letter(ncols)
-            comm_col    = get_column_letter(nf)       # Commission column letter
+            rev_col     = get_column_letter(rev_col_i)
+            comm_col    = get_column_letter(comm_col_i)
+            pct_col     = get_column_letter(pct_col_i)
             jan_col     = get_column_letter(nf + 1)
             dec_col     = get_column_letter(nf + 12)
             total_col   = get_column_letter(nf + 13)
@@ -3229,7 +3240,8 @@ def report_proforma():
             sc.value = (
                 f'Generated {today.strftime("%B %d, %Y")}  │  '
                 f'Commission adjustment applied to projected: {adj_sign}{adj_pct:.1f}%  │  '
-                f'Green = HHR actuals · Yellow = contracted estimate · Blue/White = paid'
+                f'Green = HHR actuals · Yellow = contracted estimate · Blue/White = paid  │  '
+                f'Revenue = HHR/pickup room revenue (green) or contracted commissionable revenue'
             )
             sc.font      = Font(name='Calibri', italic=True, color='555555', size=9)
             sc.alignment = Alignment(horizontal='center')
@@ -3257,14 +3269,18 @@ def report_proforma():
                 else:
                     bg = C['actual_a'] if ri % 2 == 0 else C['actual_b']
 
+                rev = rd.get('revenue', 0.0) or 0.0
+                amt = rd['amount']
                 if is_team:
                     fvals = [rd['associate'], rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
-                             rd['paid_date'].strftime('%m/%d/%Y'), rd['amount']]
+                             rd['paid_date'].strftime('%m/%d/%Y'),
+                             rev if rev else None, amt, None]   # None = % formula below
                 else:
                     fvals = [rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
-                             rd['paid_date'].strftime('%m/%d/%Y'), rd['amount']]
+                             rd['paid_date'].strftime('%m/%d/%Y'),
+                             rev if rev else None, amt, None]   # None = % formula below
 
                 monthly = [None] * 12
                 mo = rd['month']
@@ -3280,9 +3296,19 @@ def report_proforma():
                     cell.font   = Font(name='Calibri', size=9, italic=is_proj,
                                        color='555555' if is_proj else '000000')
                     if ci <= nf:
-                        cell.alignment = Alignment(horizontal='left', wrap_text=(ci <= (3 if is_team else 2)))
-                        if ci == nf:   # Commission
+                        if ci < rev_col_i:   # text columns
+                            cell.alignment = Alignment(horizontal='left', wrap_text=(ci <= (3 if is_team else 2)))
+                        elif ci == rev_col_i:   # Revenue
+                            cell.number_format = '$#,##0'
+                            cell.alignment = Alignment(horizontal='right')
+                        elif ci == comm_col_i:   # Commission
                             cell.number_format = '$#,##0.00'
+                            cell.alignment = Alignment(horizontal='right')
+                        elif ci == pct_col_i:   # % Comm — insert formula
+                            if rev and rev > 0:
+                                cell.value         = f'={comm_col}{rn}/{rev_col}{rn}'
+                                cell.number_format = '0.0%'
+                            cell.alignment = Alignment(horizontal='right')
                     else:
                         cell.alignment    = Alignment(horizontal='right')
                         cell.number_format = '$#,##0.00'
@@ -3312,12 +3338,18 @@ def report_proforma():
             if rows:
                 d_start = 5
                 d_end   = tr - 1
-                for ci in range(nf, ncols + 1):
+                for ci in range(rev_col_i, ncols + 1):
                     col_ltr = get_column_letter(ci)
-                    cell = ws.cell(row=tr, column=ci,
-                                   value=f'=SUM({col_ltr}{d_start}:{col_ltr}{d_end})')
-                    cell.number_format = '$#,##0.00'
-                    cell.alignment     = Alignment(horizontal='right')
+                    cell = ws.cell(row=tr, column=ci)
+                    cell.fill      = hfill(C['subtotal'])
+                    cell.border    = bdr
+                    cell.font      = Font(name='Calibri', bold=True, size=9)
+                    cell.alignment = Alignment(horizontal='right')
+                    if ci == pct_col_i:   # % Comm total — blank
+                        pass
+                    else:
+                        cell.value         = f'=SUM({col_ltr}{d_start}:{col_ltr}{d_end})'
+                        cell.number_format = '$#,##0.00'
             ws.row_dimensions[tr].height = 16
 
             # ── No-data placeholder ───────────────────────────────────────────
