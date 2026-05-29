@@ -3012,7 +3012,13 @@ def report_proforma():
             # Team: Pipeline Revenue, always 1% × adj
             rev = float(r['Revenue'] or 0)
             amt = round(rev * 0.01 * adj_mult, 2)
-            src = 'calc'
+            # Overdue: projected date already passed — flag red and move to today
+            if pd < today:
+                pd   = today
+                year = today.year
+                src  = 'overdue'
+            else:
+                src  = 'calc'
 
         if amt <= 0:
             continue
@@ -3065,6 +3071,7 @@ def report_proforma():
         'actual_b': 'FFFFFF',   # white (odd rows)
         'hhr':      'E2EFDA',   # light green (HHR-sourced projection)
         'calc':     'FFF9C4',   # light yellow (calculated projection)
+        'overdue':  'FFCCCC',   # light red (team unpaid past due)
         'subtotal': 'D9D9D9',   # gray totals row
     }
 
@@ -3604,7 +3611,9 @@ def report_proforma():
                 rn      = ri + 5
                 is_proj = rd['projected']
                 src     = rd.get('src', 'paid')
-                if src == 'hhr':
+                if src == 'overdue':
+                    bg = C['overdue']
+                elif src == 'hhr':
                     bg = C['hhr']
                 elif src == 'calc':
                     bg = C['calc']
