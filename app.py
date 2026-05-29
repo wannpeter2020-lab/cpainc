@@ -2963,8 +2963,7 @@ def report_proforma():
         year = pd.year
         who  = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
         bid  = str(r['BookingId'])
-        # Use HHR/pickup room revenue if available; else fall back to contracted
-        rev  = hhr_revenues.get(bid) or float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
+        rev  = float(r['Revenue'] or 0)   # always use Pipeline Revenue
         data[year][who].append({
             'bid':       bid,
             'associate': r['BookingAssociate'] or '',
@@ -2990,16 +2989,9 @@ def report_proforma():
             year = 2026   # if projected into the past, place in 2026
 
         bid = str(r['BookingId'])
-
-        # Priority: HHR actual revenue > contracted estimate
-        if bid in hhr_commissions:
-            amt = hhr_commissions[bid]
-            rev = hhr_revenues.get(bid, 0.0)
-            src = 'hhr'          # green in Excel
-        else:
-            rev = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
-            amt = round(rev * float(r['CommissionPercent'] or 0) * adj_mult, 2)
-            src = 'calc'             # yellow in Excel
+        rev = float(r['Revenue'] or 0)          # always Pipeline Revenue
+        amt = round(rev * 0.01 * adj_mult, 2)   # always 1% × adj
+        src = 'calc'
 
         if amt <= 0:
             continue
@@ -3570,8 +3562,8 @@ def report_proforma():
             sc.value = (
                 f'Generated {today.strftime("%B %d, %Y")}  │  '
                 f'Commission adjustment applied to projected: {adj_sign}{adj_pct:.1f}%  │  '
-                f'Green = HHR actuals · Yellow = contracted estimate · Blue/White = paid  │  '
-                f'Revenue = HHR/pickup room revenue (green) or contracted commissionable revenue'
+                f'Blue/White = actual payment received · Yellow = projected (1% of Pipeline Revenue × adj%)  │  '
+                f'Revenue = Pipeline Revenue · Commission adj: {adj_sign}{adj_pct:.1f}%'
             )
             sc.font      = Font(name='Calibri', italic=True, color='555555', size=9)
             sc.alignment = Alignment(horizontal='center')
