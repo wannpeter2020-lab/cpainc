@@ -3214,7 +3214,6 @@ def report_proforma():
     cats_ref_mo = Reference(ws_sum, min_col=3, max_col=14, min_row=4)
     cht_monthly.add_data(data_ref_mo, from_rows=True)
     cht_monthly.set_categories(cats_ref_mo)
-    cht_monthly.series[0].title.v        = 'Total Commission'
     cht_monthly.series[0].graphicalProperties.solidFill = '2E75B6'
     cht_monthly.series[0].graphicalProperties.line.solidFill = '1F3864'
     ws_sum.add_chart(cht_monthly, f'A{grand_total_row + 3}')
