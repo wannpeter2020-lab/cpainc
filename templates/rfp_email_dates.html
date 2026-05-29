@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Email Critical Dates — {{ rfp['event_name'] or rfp['client_org'] }}{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left"></i> Back to RFP
+  </a>
+  <h4 class="mt-1">Email Critical Contract Dates</h4>
+  <div class="text-muted small">{{ rfp['event_name'] or rfp['client_org'] }}</div>
+</div>
+
+<div style="max-width:780px">
+
+  {# ── Email preview card ── #}
+  <div class="card mb-3">
+    <div class="card-header fw-semibold">Email Preview</div>
+    <div class="card-body">
+
+      <div class="row g-2 mb-2">
+        <div class="col-auto"><span class="fw-semibold text-muted" style="min-width:60px;display:inline-block">To:</span></div>
+        <div class="col">
+          {% if client_email %}
+          <span class="badge bg-light text-dark border font-monospace">{{ client_email }}</span>
+          {% else %}
+          <span class="text-muted small fst-italic">No client email on file — you can add it in Outlook</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="row g-2 mb-3">
+        <div class="col-auto"><span class="fw-semibold text-muted" style="min-width:60px;display:inline-block">Subject:</span></div>
+        <div class="col"><strong>{{ subject }}</strong></div>
+      </div>
+
+      {% if hotel_name %}
+      <div class="alert alert-info py-2 mb-3">
+        <i class="bi bi-building me-1"></i>Email references <strong>{{ hotel_name }}</strong>
+      </div>
+      {% endif %}
+
+      {% if critical_dates %}
+      <div class="table-responsive mb-3">
+        <table class="table table-sm table-bordered mb-0" style="max-width:560px">
+          <thead class="table-light">
+            <tr><th>Date</th><th>Description</th><th>Amount</th></tr>
+          </thead>
+          <tbody>
+            {% for cd in critical_dates %}
+            <tr>
+              <td class="font-monospace small">{{ cd.date | us_date if cd.date else '—' }}</td>
+              <td>{{ cd.label }}</td>
+              <td>{% if cd.amount %}${{ '{:,.2f}'.format(cd.amount | float) }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="alert alert-warning mb-3">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        No critical dates on file. <a href="{{ url_for('rfp_rescan_contract_dates', rid=rfp['id']) }}">Scan the contract</a> to extract them.
+      </div>
+      {% endif %}
+
+      {# Attachment badge #}
+      {% if rfp['contract_filename'] %}
+      <div class="d-flex align-items-center gap-2 mb-3">
+        <span class="badge bg-light text-dark border">
+          <i class="bi bi-paperclip me-1"></i>{{ rfp['contract_filename'] }}
+        </span>
+        <span class="text-muted small">will be attached automatically</span>
+      </div>
+      {% else %}
+      <div class="alert alert-warning py-2 mb-3">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        No contract on file — email will be sent without an attachment.
+        <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}">Upload the signed contract</a> first.
+      </div>
+      {% endif %}
+
+      {# Full body preview toggle #}
+      <button class="btn btn-link btn-sm text-muted p-0 mb-3" type="button"
+              data-bs-toggle="collapse" data-bs-target="#bodyPreview">
+        <i class="bi bi-chevron-down me-1"></i>Preview full email body
+      </button>
+      <div class="collapse" id="bodyPreview">
+        <pre class="bg-light border rounded p-3 small mb-3" style="white-space:pre-wrap;max-height:300px;overflow-y:auto">{{ body }}</pre>
+      </div>
+
+      {# Send button #}
+      <form method="post" action="{{ url_for('rfp_dates_email_launch', rid=rfp['id']) }}">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-envelope-open me-1"></i>Open in Outlook
+        </button>
+        <a href="{{ url_for('rfp_detail', rid=rfp['id']) }}" class="btn btn-outline-secondary ms-2">Cancel</a>
+      </form>
+
+    </div>
+  </div>
+
+  {# ── Sent status ── #}
+  {% if rfp['critical_dates_sent_at'] %}
+  <div class="text-muted small">
+    <i class="bi bi-clock-history me-1"></i>
+    Last sent {{ rfp['critical_dates_sent_at'][:10] | us_date }}
+    &nbsp;·&nbsp;
+    <form method="post" action="{{ url_for('rfp_mark_dates_sent', rid=rfp['id']) }}" class="d-inline">
+      <button class="btn btn-link btn-sm text-muted p-0">Update sent date</button>
+    </form>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

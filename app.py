@@ -4707,6 +4707,13 @@ def ensure_pickup_tables():
         db.commit()
     except Exception:
         pass
+    # Add critical dates columns to rfp if not present
+    for _col, _typ in [('critical_dates_json', 'TEXT'), ('critical_dates_sent_at', 'TEXT')]:
+        try:
+            db.execute(f'ALTER TABLE rfp ADD COLUMN {_col} {_typ}')
+            db.commit()
+        except Exception:
+            pass
 
     _ensure_hotel_points_tables(db)
     _ensure_cost_savings_tables(db)
@@ -8497,6 +8504,15 @@ def pickup_event(cid):
                     'ORDER BY id DESC LIMIT 1',
                     (cid, points_program['id'])).fetchone()
 
+    # RFP critical dates lookup (for Email Dates button)
+    rfp_for_dates = None
+    if config.get('booking_id'):
+        rfp_for_dates = db.execute(
+            "SELECT id, critical_dates_json, critical_dates_sent_at "
+            "FROM rfp WHERE booking_id=? LIMIT 1",
+            (config['booking_id'],)
+        ).fetchone()
+
     return render_template('pickup_event.html',
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
@@ -8515,7 +8531,8 @@ def pickup_event(cid):
                            show_rate_issue=show_rate_issue,
                            amendments=amendments,
                            points_program=points_program,
-                           points_request=points_request)
+                           points_request=points_request,
+                           rfp_for_dates=rfp_for_dates)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -12556,9 +12573,288 @@ def rfp_parse_document():
         return jsonify({'_error': str(e)})
 
 
+def _build_critical_dates_email(rfp, client_email='', hotel_name=''):
+    """Return (subject, body) for the critical-dates client email."""
+    event_name = rfp['event_name'] or rfp['client_org'] or 'Your Event'
+    start_date = rfp['start_date'] or ''
+    if start_date:
+        try:
+            from datetime import datetime as _dta
+            start_date_fmt = _dta.strptime(start_date, '%Y-%m-%d').strftime('%-m/%-d/%Y')
+        except Exception:
+            start_date_fmt = start_date
+    else:
+        start_date_fmt = ''
+    subject = event_name
+    if start_date_fmt:
+        subject += f' — {start_date_fmt}'
+
+    raw_cd = rfp['critical_dates_json'] if rfp['critical_dates_json'] else '[]'
+    try:
+        critical_dates = sorted(json.loads(raw_cd), key=lambda x: x.get('date', ''))
+    except Exception:
+        critical_dates = []
+
+    hotel_phrase = f'the {hotel_name}' if hotel_name else 'your contracted hotel'
+    body_lines = [
+        'Hi,',
+        '',
+        f'I wanted to share some important dates related to your upcoming event at {hotel_phrase}.',
+        'Please add these to your calendar and set reminders in Outlook so nothing is missed.',
+        '',
+        '── CRITICAL CONTRACT DATES ──',
+        '',
+    ]
+    if critical_dates:
+        for cd in critical_dates:
+            date_str = cd.get('date', '')
+            try:
+                from datetime import datetime as _dtb
+                date_str = _dtb.strptime(date_str, '%Y-%m-%d').strftime('%-m/%-d/%Y')
+            except Exception:
+                pass
+            label  = cd.get('label', '')
+            amount = cd.get('amount')
+            line   = f'  {date_str}  —  {label}'
+            if amount:
+                try:
+                    line += f'  (${float(amount):,.2f})'
+                except Exception:
+                    line += f'  ({amount})'
+            body_lines.append(line)
+    else:
+        body_lines.append('  (No critical dates on file — upload the signed contract to extract them)')
+
+    body_lines += [
+        '',
+        '── OUTLOOK REMINDER TIP ──',
+        '',
+        'For each date above, we recommend creating a calendar reminder in Outlook at least 2 weeks',
+        'in advance so you have time to take action if needed.',
+        '',
+        'A copy of the signed contract is attached for your reference.',
+        '',
+        'Please reach out if you have any questions.',
+    ]
+    body = '\r\n'.join(body_lines)
+    return subject, body
+
+
+def _rfp_email_lookup(db, rfp):
+    """Return (client_email, hotel_name) for an rfp row."""
+    client_email = ''
+    hotel_name   = ''
+    if rfp['booking_id']:
+        pc = db.execute(
+            "SELECT group_contact_email, hotel FROM pickup_config "
+            "WHERE booking_id=? LIMIT 1", (rfp['booking_id'],)
+        ).fetchone()
+        if pc:
+            client_email = pc['group_contact_email'] or ''
+            hotel_name   = pc['hotel'] or ''
+    if not hotel_name:
+        sel = db.execute(
+            "SELECT hotel_name FROM rfp_hotel WHERE rfp_id=? AND status='selected' "
+            "ORDER BY updated_at DESC LIMIT 1", (rfp['id'],)
+        ).fetchone()
+        if sel:
+            hotel_name = sel['hotel_name'] or ''
+    return client_email, hotel_name
+
+
+@app.route('/rfp/<int:rid>/email-dates')
+def rfp_client_dates_email(rid):
+    """Show email preview page."""
+    db  = get_db()
+    rfp = db.execute("SELECT * FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not rfp:
+        db.close()
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    client_email, hotel_name = _rfp_email_lookup(db, rfp)
+    db.close()
+
+    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name)
+    raw_cd = rfp['critical_dates_json'] if rfp['critical_dates_json'] else '[]'
+    try:
+        critical_dates = sorted(json.loads(raw_cd), key=lambda x: x.get('date', ''))
+    except Exception:
+        critical_dates = []
+
+    return render_template('rfp_email_dates.html',
+                           rfp=rfp,
+                           subject=subject,
+                           body=body,
+                           critical_dates=critical_dates,
+                           client_email=client_email,
+                           hotel_name=hotel_name)
+
+
+@app.route('/rfp/<int:rid>/email-dates/launch', methods=['POST'])
+def rfp_dates_email_launch(rid):
+    """Open Outlook compose window with body + contract attached via osascript/PowerShell."""
+    import subprocess, tempfile, platform, os as _os
+
+    db  = get_db()
+    rfp = db.execute("SELECT * FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not rfp:
+        db.close()
+        flash('RFP not found.', 'error')
+        return redirect(url_for('rfp_dashboard'))
+    client_email, hotel_name = _rfp_email_lookup(db, rfp)
+    contract_data     = bytes(rfp['contract_data']) if rfp['contract_data'] else None
+    contract_filename = rfp['contract_filename'] or 'contract.pdf'
+    # Mark as sent at the same time
+    db.execute(
+        "UPDATE rfp SET critical_dates_sent_at=datetime('now'), updated_at=datetime('now') WHERE id=?",
+        (rid,)
+    )
+    db.commit()
+    db.close()
+
+    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name)
+
+    def write_tmp(content, suffix, mode='w', encoding='utf-8'):
+        t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
+                                        encoding=encoding if mode == 'w' else None)
+        t.write(content); t.close(); return t.name
+
+    def write_named_att(data, filename):
+        d = tempfile.mkdtemp()
+        p = _os.path.join(d, filename)
+        with open(p, 'wb') as fh:
+            fh.write(data)
+        return p
+
+    try:
+        if platform.system() == 'Windows':
+            ps_lines = [
+                f'$body = Get-Content -Path \'{write_tmp(body, ".txt")}\' -Raw -Encoding UTF8',
+                '$ol = New-Object -ComObject Outlook.Application',
+                '$mail = $ol.CreateItem(0)',
+                f'$mail.Subject = \'{subject.replace(chr(39), chr(39)*2)}\'',
+                '$mail.Body = $body',
+            ]
+            if client_email:
+                ps_lines.append(f'$mail.To = \'{client_email.replace(chr(39), chr(39)*2)}\'')
+            if contract_data:
+                att_path = write_named_att(contract_data, contract_filename).replace('\\', '\\\\')
+                ps_lines.append(f'$mail.Attachments.Add(\'{att_path}\') | Out-Null')
+            ps_lines.append('$mail.Display()')
+            ps_path = write_tmp('\r\n'.join(ps_lines), '.ps1')
+            subprocess.Popen(['powershell.exe', '-ExecutionPolicy', 'Bypass',
+                               '-WindowStyle', 'Hidden', '-File', ps_path])
+        else:
+            # macOS: write body to temp file, JXA reads it onto clipboard as plain text,
+            # AppleScript opens Outlook with To/Subject/attachment then Cmd+V pastes body.
+            def esc(s):
+                return s.replace('\\', '\\\\').replace('"', '\\"')
+
+            tmp_txt = write_tmp(body, '.txt')
+
+            clip_jxa = (
+                "ObjC.import('AppKit'); ObjC.import('Foundation');\n"
+                f"var nsStr = $.NSString.alloc.initWithContentsOfFileEncodingError('{tmp_txt}', $.NSUTF8StringEncoding, null);\n"
+                "var txt = ObjC.unwrap(nsStr);\n"
+                "var pb = $.NSPasteboard.generalPasteboard; pb.clearContents;\n"
+                "pb.setStringForType($.NSString.alloc.initWithUTF8String(txt), $.NSPasteboardTypeString);"
+            )
+
+            attach_line = ''
+            if contract_data:
+                att_path = write_named_att(contract_data, contract_filename)
+                attach_line = f'make new attachment at theMsg with properties {{file:POSIX file "{esc(att_path)}"}}'
+
+            to_line = (
+                f'make new to recipient at theMsg with properties {{email address:{{name:"", address:"{esc(client_email)}"}}}}'
+                if client_email else ''
+            )
+
+            outlook_script = (
+                'tell application "Microsoft Outlook"\n'
+                f'    set theMsg to make new outgoing message with properties {{subject:"{esc(subject)}"}}\n'
+                + (f'    {to_line}\n' if to_line else '')
+                + (f'    {attach_line}\n' if attach_line else '')
+                + '    open theMsg\n'
+                + '    activate\n'
+                + 'end tell\n'
+                + 'delay 2\n'
+                + 'tell application "System Events"\n'
+                + '    keystroke "v" using {command down}\n'
+                + 'end tell\n'
+            )
+
+            clip_path    = write_tmp(clip_jxa,      '.js')
+            outlook_path = write_tmp(outlook_script, '.applescript')
+            subprocess.run(['osascript', '-l', 'JavaScript', clip_path], check=True)
+            subprocess.Popen(['osascript', outlook_path])
+
+    except Exception as exc:
+        flash(f'Could not launch Outlook: {exc}', 'error')
+        return redirect(url_for('rfp_client_dates_email', rid=rid))
+
+    att_note = f' with {contract_filename} attached' if contract_data else ''
+    flash(f'Email opened in Outlook{att_note}.', 'success')
+    return redirect(url_for('rfp_detail', rid=rid))
+
+
+@app.route('/rfp/<int:rid>/mark-dates-sent', methods=['POST'])
+def rfp_mark_dates_sent(rid):
+    """Record that the critical-dates email was sent (manual override)."""
+    db = get_db()
+    db.execute(
+        "UPDATE rfp SET critical_dates_sent_at=datetime('now'), updated_at=datetime('now') WHERE id=?",
+        (rid,)
+    )
+    db.commit()
+    db.close()
+    flash('Email marked as sent.', 'success')
+    return redirect(url_for('rfp_detail', rid=rid))
+
+
+@app.route('/rfp/<int:rid>/rescan-contract-dates')
+def rfp_rescan_contract_dates(rid):
+    """Re-parse the stored contract to extract critical dates."""
+    from pickup_utils import parse_contract_document
+    db  = get_db()
+    rfp = db.execute(
+        "SELECT contract_data, contract_filename FROM rfp WHERE id=?", (rid,)
+    ).fetchone()
+    if not rfp or not rfp['contract_data']:
+        db.close()
+        flash('No contract file stored — upload the signed contract first.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
+
+    file_bytes = bytes(rfp['contract_data'])
+    filename   = rfp['contract_filename'] or 'contract.pdf'
+    db.close()
+
+    extracted = parse_contract_document(file_bytes, filename=filename)
+    critical_dates = extracted.get('critical_dates', [])
+
+    if not critical_dates:
+        flash('No critical dates found in the contract. You can add them manually by re-importing the contract.', 'warning')
+        return redirect(url_for('rfp_detail', rid=rid))
+
+    db2 = get_db()
+    db2.execute(
+        "UPDATE rfp SET critical_dates_json=?, updated_at=datetime('now') WHERE id=?",
+        (json.dumps(critical_dates), rid)
+    )
+    db2.commit()
+    db2.close()
+    flash(f'Found {len(critical_dates)} critical date(s) from the stored contract.', 'success')
+    return redirect(url_for('rfp_detail', rid=rid))
+
+
 @app.route('/rfp/<int:rid>/archive', methods=['POST'])
 def rfp_archive(rid):
     db = get_db()
+    rfp = db.execute("SELECT contract_filename FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not rfp or not rfp['contract_filename']:
+        db.close()
+        flash('Cannot archive: no signed contract has been uploaded for this RFP.', 'error')
+        return redirect(url_for('rfp_detail', rid=rid))
     db.execute("UPDATE rfp SET archived=1 WHERE id=?", (rid,))
     db.commit()
     flash('RFP archived.', 'success')
@@ -12760,9 +13056,14 @@ def rfp_upload_contract(rid):
         ).fetchone()
 
     extracted = parse_contract_document(file_bytes, filename=f.filename)
-    if extracted.get('error'):
-        flash(f'Could not parse contract: {extracted["error"]}', 'error')
+    err = extracted.get('error') or ''
+    # Hard error: no block data at all — redirect back
+    if err and not extracted.get('contracted_block') and not extracted.get('years'):
+        flash(f'Could not parse contract: {err}', 'error')
         return redirect(url_for('rfp_detail', rid=rid))
+    # Soft error: AI failed but direct parse succeeded — show warning on review page
+    if err:
+        flash(f'Note: {err}', 'warning')
 
     # Save to temp file so confirm step doesn't need a re-upload
     tmp_id   = str(uuid.uuid4())
@@ -12801,6 +13102,12 @@ def rfp_upload_contract_confirm(rid):
     hotel_contact2_email = request.form.get('hotel_contact2_email', '').strip() or hotel_contact_email
     group_contact        = request.form.get('group_contact', '').strip() or None
     group_contact_email  = request.form.get('group_contact_email', '').strip() or None
+    critical_dates_raw   = request.form.get('critical_dates_json', '[]').strip()
+    # Validate JSON; default to empty list on failure
+    try:
+        json.loads(critical_dates_raw)
+    except Exception:
+        critical_dates_raw = '[]'
 
     contracted_rate = float(rate_str) if rate_str else None
     attrition_pct   = float(atr_str)  if atr_str  else None
@@ -12836,18 +13143,21 @@ def rfp_upload_contract_confirm(rid):
     # ── Update rfp record ─────────────────────────────────────────────────────
     db.execute('''
         UPDATE rfp SET
-            start_date        = COALESCE(?, start_date),
-            end_date          = COALESCE(?, end_date),
-            peak_rooms        = COALESCE(?, peak_rooms),
-            total_room_nights = COALESCE(?, total_room_nights),
-            contract_filename = ?,
-            contract_data     = ?,
-            status            = CASE WHEN status NOT IN ('contracted','dead')
-                                     THEN 'contracted' ELSE status END,
-            updated_at        = datetime('now')
+            start_date          = COALESCE(?, start_date),
+            end_date            = COALESCE(?, end_date),
+            peak_rooms          = COALESCE(?, peak_rooms),
+            total_room_nights   = COALESCE(?, total_room_nights),
+            contract_filename   = ?,
+            contract_data       = ?,
+            critical_dates_json = ?,
+            status              = CASE WHEN status NOT IN ('contracted','dead')
+                                       THEN 'contracted' ELSE status END,
+            updated_at          = datetime('now')
         WHERE id=?
     ''', (start_date, end_date, peak_rooms, total_room_nights,
-          contract_filename or None, file_blob, rid))
+          contract_filename or None, file_blob,
+          critical_dates_raw if critical_dates_raw != '[]' else None,
+          rid))
 
     # ── Update selected hotel record ──────────────────────────────────────────
     selected_hotel = db.execute(
@@ -12859,6 +13169,19 @@ def rfp_upload_contract_confirm(rid):
             "SELECT * FROM rfp_hotel WHERE rfp_id=? "
             "AND status NOT IN ('declined','eliminated') "
             "ORDER BY updated_at DESC LIMIT 1", (rid,)
+        ).fetchone()
+    # If still no hotel but the contract named one, create it automatically
+    extracted_hotel_name = request.form.get('_extracted_hotel', '').strip()
+    if not selected_hotel and extracted_hotel_name:
+        db.execute('''
+            INSERT INTO rfp_hotel (rfp_id, hotel_name, status, proposed_rate, attrition_pct,
+                                   cutoff_days, contact_name, contact_email, updated_at)
+            VALUES (?, ?, 'selected', ?, ?, ?, ?, ?, datetime('now'))
+        ''', (rid, extracted_hotel_name, contracted_rate, attrition_pct, cutoff_days,
+              hotel_contact, hotel_contact_email))
+        db.commit()
+        selected_hotel = db.execute(
+            "SELECT * FROM rfp_hotel WHERE rfp_id=? ORDER BY id DESC LIMIT 1", (rid,)
         ).fetchone()
     if selected_hotel:
         db.execute('''

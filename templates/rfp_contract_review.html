@@ -29,8 +29,48 @@
 <form method="post" action="{{ url_for('rfp_upload_contract_confirm', rid=rfp['id']) }}">
   <input type="hidden" name="_contract_filename" value="{{ filename }}">
   <input type="hidden" name="_tmp_id" value="{{ tmp_id }}">
+  <input type="hidden" name="_extracted_hotel" value="{{ extracted.hotel or '' }}">
   <input type="hidden" name="contracted_block" id="block_json"
          value="{{ extracted.contracted_block | tojson }}">
+  <input type="hidden" name="critical_dates_json" id="critical_dates_json"
+         value="{{ (extracted.critical_dates or []) | tojson }}">
+
+  {# ── Multi-year picker ── #}
+  {% if extracted.years and extracted.years | length > 1 %}
+  <div class="card mb-4 border-warning" style="max-width:780px">
+    <div class="card-header bg-warning text-dark">
+      <i class="bi bi-calendar3-range me-2"></i>
+      Multi-Year Contract — Select the Year to Import
+    </div>
+    <div class="card-body">
+      <div class="row g-2">
+        {% for yr in extracted.years %}
+        {% set blk = yr.contracted_block or {} %}
+        {% set dates = blk.keys() | sort %}
+        {% set total_rn = blk.values() | sum %}
+        <div class="col-md-4">
+          <div class="card year-card h-100" data-year-idx="{{ loop.index0 }}"
+               style="cursor:pointer;border:2px solid #dee2e6;transition:border-color .15s"
+               onclick="selectYear({{ loop.index0 }})">
+            <div class="card-body p-3">
+              <div class="fw-bold fs-5 mb-1">{{ yr.year or ('Year ' ~ loop.index) }}</div>
+              {% if dates %}
+              <div class="small text-muted">{{ dates | first }} → {{ dates | last }}</div>
+              {% endif %}
+              <div class="mt-2 small">
+                {% if yr.contracted_rate %}<div><i class="bi bi-tag me-1"></i>${{ yr.contracted_rate | int }}/night</div>{% endif %}
+                {% if yr.cutoff_date %}<div><i class="bi bi-calendar-x me-1"></i>Cutoff: {{ yr.cutoff_date }}</div>{% endif %}
+                {% if total_rn %}<div><i class="bi bi-moon me-1"></i>{{ total_rn }} room nights</div>{% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-text mt-2">Click a year card to load its data into the form below.</div>
+    </div>
+  </div>
+  {% endif %}
 
   {# ── Key Terms ── #}
   <div class="row g-3 mb-4" style="max-width:780px">
@@ -117,7 +157,7 @@
       <span class="text-muted small" id="block_total_label"></span>
     </div>
     <div class="card-body p-0">
-      {% if extracted.contracted_block %}
+      {% if extracted.contracted_block or extracted.years %}
       <table class="table table-sm table-bordered mb-0" id="block_table">
         <thead class="table-light">
           <tr><th>Date</th><th>Day</th><th>Rooms</th></tr>
@@ -130,6 +170,37 @@
         No room block could be extracted — the contract may not include a night-by-night breakdown.
         The RFP dates and peak rooms will not be updated.
       </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Critical Dates ── #}
+  <div class="card mb-4" style="max-width:780px">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-calendar-event me-1"></i>Critical Dates</span>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addCriticalDateRow()">
+        <i class="bi bi-plus-circle me-1"></i>Add Date
+      </button>
+    </div>
+    <div class="card-body p-0">
+      {% if extracted.critical_dates %}
+      <table class="table table-sm table-bordered mb-0" id="cd_table">
+        <thead class="table-light">
+          <tr><th style="width:130px">Date</th><th>Description</th><th style="width:130px">Amount ($)</th><th style="width:40px"></th></tr>
+        </thead>
+        <tbody id="cd_tbody"></tbody>
+      </table>
+      {% else %}
+      <div class="p-3 text-muted small" id="cd_empty_msg">
+        <i class="bi bi-info-circle me-1"></i>
+        No critical dates extracted — you can add them manually or they will be found on contracts with clearer date sections.
+      </div>
+      <table class="table table-sm table-bordered mb-0 d-none" id="cd_table">
+        <thead class="table-light">
+          <tr><th style="width:130px">Date</th><th>Description</th><th style="width:130px">Amount ($)</th><th style="width:40px"></th></tr>
+        </thead>
+        <tbody id="cd_tbody"></tbody>
+      </table>
       {% endif %}
     </div>
   </div>
@@ -147,6 +218,44 @@
 <script>
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 let block = {{ extracted.contracted_block | tojson }};
+
+// Multi-year data
+const ALL_YEARS = {{ (extracted.years or []) | tojson }};
+
+function selectYear(idx) {
+  const yr = ALL_YEARS[idx];
+  if (!yr) return;
+
+  // Highlight selected card
+  document.querySelectorAll('.year-card').forEach(function(c, i) {
+    c.style.borderColor = i === idx ? '#0d6efd' : '#dee2e6';
+    c.style.background  = i === idx ? '#f0f6ff' : '';
+  });
+
+  // Update block
+  block = yr.contracted_block || {};
+  renderTable();
+  syncJson();
+
+  // Update rate
+  const rateEl = document.querySelector('[name="contracted_rate"]');
+  if (rateEl && yr.contracted_rate != null) rateEl.value = yr.contracted_rate;
+
+  // Update cutoff
+  const cutoffEl = document.querySelector('[name="cutoff_date"]');
+  if (cutoffEl && yr.cutoff_date) cutoffEl.value = yr.cutoff_date;
+
+  // Update attrition
+  const atrEl = document.getElementById('atr_input');
+  if (atrEl && yr.attrition_pct != null) atrEl.value = Math.round(yr.attrition_pct * 100);
+}
+
+// Auto-select first year on load
+if (ALL_YEARS.length > 0 && (!block || !Object.keys(block).length)) {
+  selectYear(0);
+} else if (ALL_YEARS.length > 1) {
+  selectYear(0);
+}
 
 function renderTable() {
   const dates = Object.keys(block).sort();
@@ -192,6 +301,55 @@ document.querySelector('form').addEventListener('submit', function() {
 });
 
 renderTable();
+
+// ── Critical dates editor ──
+let criticalDates = {{ (extracted.critical_dates or []) | tojson }};
+
+function renderCriticalDates() {
+  const tbody = document.getElementById('cd_tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const emptyMsg = document.getElementById('cd_empty_msg');
+  const table    = document.getElementById('cd_table');
+  if (criticalDates.length > 0) {
+    if (emptyMsg) emptyMsg.classList.add('d-none');
+    if (table)    table.classList.remove('d-none');
+  }
+  criticalDates.forEach(function(cd, i) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="date" class="form-control form-control-sm" value="${cd.date || ''}"
+                 onchange="criticalDates[${i}].date=this.value;syncCriticalDatesJson()"></td>
+      <td><input type="text" class="form-control form-control-sm" value="${(cd.label||'').replace(/"/g,'&quot;')}"
+                 onchange="criticalDates[${i}].label=this.value;syncCriticalDatesJson()"></td>
+      <td><input type="number" step="0.01" min="0" class="form-control form-control-sm"
+                 value="${cd.amount != null ? cd.amount : ''}"
+                 onchange="criticalDates[${i}].amount=this.value?parseFloat(this.value):null;syncCriticalDatesJson()"></td>
+      <td><button type="button" class="btn btn-sm btn-outline-danger px-1 py-0"
+                  onclick="removeCriticalDate(${i})"><i class="bi bi-trash"></i></button></td>`;
+    tbody.appendChild(tr);
+  });
+  syncCriticalDatesJson();
+}
+
+function syncCriticalDatesJson() {
+  document.getElementById('critical_dates_json').value = JSON.stringify(criticalDates);
+}
+
+function addCriticalDateRow() {
+  criticalDates.push({date:'', label:'', amount:null});
+  renderCriticalDates();
+  // Focus the new date input
+  const rows = document.querySelectorAll('#cd_tbody tr');
+  if (rows.length) rows[rows.length-1].querySelector('input').focus();
+}
+
+function removeCriticalDate(idx) {
+  criticalDates.splice(idx, 1);
+  renderCriticalDates();
+}
+
+renderCriticalDates();
 
 // Keep secondary in sync with primary while still unedited
 function syncSecondary() {

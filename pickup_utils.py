@@ -3772,6 +3772,12 @@ The JSON object must have exactly these keys:
   contracted_block      — object mapping each night's date (YYYY-MM-DD) to the number of rooms
                           blocked for that night (integer). Only include nights with a room
                           count > 0. Example: {"2026-10-31": 200, "2026-11-01": 350}
+  critical_dates        — array of important dates the client must know about:
+                          [{"date":"YYYY-MM-DD","label":"description","amount":number_or_null}, ...]
+                          Include: deposit due dates + amounts, cutoff date, block review dates,
+                          cancellation deadlines, rooming list due dates, attrition review dates,
+                          any other contractual deadlines. Use null for amount if no $ amount.
+                          Return [] if none found.
 
 Rules:
 - For contracted_block, look for a night-by-night room schedule or block grid. Dates are
@@ -3856,6 +3862,20 @@ Contract text:
         else:
             data['block_review_date'] = None
 
+        # Normalise critical_dates — must be list of {date, label, amount}
+        _raw_cd = data.get('critical_dates') or []
+        if not isinstance(_raw_cd, list):
+            _raw_cd = []
+        critical_dates = []
+        for _cd in _raw_cd:
+            if isinstance(_cd, dict) and _cd.get('date') and _cd.get('label'):
+                critical_dates.append({
+                    'date':   str(_cd['date']),
+                    'label':  str(_cd['label']),
+                    'amount': _cd.get('amount'),
+                })
+        data['critical_dates'] = critical_dates
+
         data.setdefault('error', None)
         return data
 
@@ -3865,79 +3885,345 @@ Contract text:
 
 def parse_contract_document(file_bytes, filename=''):
     """
-    Parse a hotel contract PDF or Word file and return extracted data.
+    Extract the contracted room block and key terms from a hotel group contract
+    (PDF or Word .docx).
+
+    Uses pdfplumber for PDFs, python-docx for Word files, then sends the raw
+    text to Claude to extract structured data.
 
     Returns a dict:
-      contracted_block      — {YYYY-MM-DD: rooms, ...}
-      contracted_rate       — float or None
-      cutoff_date           — 'YYYY-MM-DD' or None
-      attrition_pct         — float 0-1 or None
-      hotel                 — str or None
-      hotel_contact         — str or None
-      hotel_contact_email   — str or None
-      group_contact         — str or None
-      group_contact_email   — str or None
-      error                 — str or None (None = success)
+      {
+        'contracted_block': {'YYYY-MM-DD': n_rooms, ...},
+        'contracted_rate':  float or None,
+        'cutoff_date':      'YYYY-MM-DD' or None,
+        'attrition_pct':    float (0.80 = 80%) or None,
+        'hotel':            str or None,
+        'organization':     str or None,
+        'event_name':       str or None,
+        'hotel_contact':    str or None,
+        'hotel_contact_email': str or None,
+        'group_contact':    str or None,
+        'group_contact_email': str or None,
+        'critical_dates':   [...],
+        'years':            [...],
+        'error':            str or None,   # present only on failure
+        'raw_text':         str,           # full extracted text (for debugging)
+      }
     """
-    empty = {
-        'contracted_block': {}, 'contracted_rate': None, 'cutoff_date': None,
-        'attrition_pct': None, 'hotel': None, 'hotel_contact': None,
-        'hotel_contact_email': None, 'group_contact': None, 'group_contact_email': None,
-        'block_review_date': None, 'error': None,
-    }
+    import sys, importlib, os
 
-    text = _extract_text_from_contract(file_bytes, filename)
-    fname = (filename or '').lower()
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
 
-    # Treat as image-only if text is empty, too short, or contains no contract keywords
-    # (some PDFs only extract e-signature boilerplate like Sertifi overlay text)
-    # Use whole-word matching to avoid false positives like "millenniumhotels.com"
-    # containing "hotel" as a substring.
+    # ── Extract raw text ──────────────────────────────────────────────────────
+    raw_text = ''
+    try:
+        if ext == 'pdf':
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                raw_text = '\n'.join(
+                    (page.extract_text() or '') for page in pdf.pages
+                )
+        elif ext in ('docx', 'doc'):
+            try:
+                import docx, io
+                doc = docx.Document(io.BytesIO(file_bytes))
+                raw_text = '\n'.join(p.text for p in doc.paragraphs)
+                # Also grab table cells
+                for table in doc.tables:
+                    for row in table.rows:
+                        raw_text += '\n' + '\t'.join(c.text for c in row.cells)
+            except ImportError:
+                return {'contracted_block': {}, 'raw_text': '',
+                        'error': 'python-docx not installed — run: pip install python-docx'}
+        else:
+            return {'contracted_block': {}, 'raw_text': '',
+                    'error': f'Unsupported file type .{ext} — use PDF or DOCX'}
+    except Exception as e:
+        return {'contracted_block': {}, 'raw_text': '', 'error': f'Could not read file: {e}'}
+
+    # Treat as scanned if: no text, too short, or lacks contract keywords
+    import re as _re
     _CONTRACT_KEYWORDS = {'rate', 'room', 'block', 'arrival', 'departure', 'cutoff',
                           'night', 'hotel', 'group', 'suite', 'meeting', 'attrition',
                           'reservation', 'check', 'guest', 'contract', 'agreement'}
-    import re as _re_kw
-    text_lower = (text or '').lower()
-    text_words = text_lower.split()
-    has_keywords = any(_re_kw.search(r'\b' + kw + r'\b', text_lower) for kw in _CONTRACT_KEYWORDS)
-    text_meaningful = text and len(text_words) >= 50 and has_keywords
-    if not text_meaningful:
-        # Scanned / image-only PDF — fall back to vision-based extraction
-        if fname.endswith('.pdf'):
-            api_key = ''
-            try:
-                import importlib, sys
-                if 'config' in sys.modules:
-                    importlib.reload(sys.modules['config'])
-                else:
-                    import config as _cfg
-                    sys.modules['config'] = _cfg
-                api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
-            except Exception:
-                pass
-            if not api_key:
-                import os
-                api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
-            if not api_key:
-                return {**empty, 'error': 'Anthropic API key not configured'}
-            images = _pdf_pages_to_images(file_bytes, max_pages=10, dpi=100)
-            if not images:
-                return {**empty, 'error': 'Could not extract text or render pages from PDF — pymupdf may not be installed.'}
-            result = _ai_parse_contract_vision(images, api_key)
-            for k in empty:
-                if k not in result:
-                    result[k] = empty[k]
-            return result
-        return {**empty, 'error': 'Could not extract text from file — is it a scanned image PDF?'}
+    _text_lower = (raw_text or '').lower()
+    _text_words = _text_lower.split()
+    _plain_words = set(_re.findall(r'\b[a-z]{3,}\b', _text_lower))
+    _has_keywords = bool(_CONTRACT_KEYWORDS & _plain_words)
+    _text_meaningful = raw_text and len(_text_words) >= 50 and _has_keywords
+    is_scanned_pdf = (ext == 'pdf' and not _text_meaningful)
 
-    result = _ai_parse_contract(text)
+    # ── Get API key ───────────────────────────────────────────────────────────
+    api_key = ''
+    try:
+        if 'config' in sys.modules:
+            importlib.reload(sys.modules['config'])
+        else:
+            import config as _cfg
+            sys.modules['config'] = _cfg
+        api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return {'contracted_block': {}, 'raw_text': raw_text,
+                'error': 'No Anthropic API key configured — cannot parse contract'}
 
-    # Merge into empty so all keys are always present
-    for k in empty:
-        if k not in result:
-            result[k] = empty[k]
+    # ── Direct block parser: position-based "Date … Cut Off" row search ─────────
+    import re as _re
 
-    return result
+    def _md_to_iso(raw_d):
+        """Convert M/D/YY or M/D/YYYY to YYYY-MM-DD, or None."""
+        parts = raw_d.split('/')
+        if len(parts) != 3:
+            return None
+        try:
+            mo, dy, yr = int(parts[0]), int(parts[1]), int(parts[2])
+            if yr < 100:
+                yr += 2000
+            return f'{yr}-{mo:02d}-{dy:02d}'
+        except Exception:
+            return None
+
+    _direct_years = []
+    _date_row_re  = _re.compile(
+        r'Date[ \t]+((?:\d{1,2}/\d{1,2}/\d{2,4}[ \t]+)+)Cut[ \t]+Off[ \t]+(\d{1,2}/\d{1,2}/\d{2,4})',
+        _re.IGNORECASE)
+
+    for _drm in _date_row_re.finditer(raw_text):
+        _raw_dates  = _drm.group(1).strip().split()
+        _cutoff_raw = _drm.group(2).strip()
+        _cutoff_iso = _md_to_iso(_cutoff_raw)
+        _iso_dates  = [d for d in (_md_to_iso(x) for x in _raw_dates) if d]
+        if not _iso_dates:
+            continue
+
+        # Look ahead for the Total row (within 600 chars)
+        _ahead = raw_text[_drm.end(): _drm.end() + 600]
+        _total_m = _re.search(r'(?:^|\n)Total[ \t]+([\d .]+)', _ahead)
+        if not _total_m:
+            continue
+        _total_nums = [int(float(x)) for x in _total_m.group(1).split() if _re.match(r'^\d+\.?\d*$', x)]
+        _night_counts = _total_nums[:len(_iso_dates)]
+        if len(_night_counts) != len(_iso_dates):
+            continue
+        _block = {d: c for d, c in zip(_iso_dates, _night_counts)}
+
+        # Look back 800 chars for year, rate, attrition
+        _back = raw_text[max(0, _drm.start() - 800): _drm.start()]
+
+        _yr_m   = _re.search(r'(?:Event\s+Year|Year)\s+(\d{4})', _back, _re.IGNORECASE)
+        _yr_num = int(_yr_m.group(1)) if _yr_m else None
+        # Fallback: infer year from first ISO date
+        if not _yr_num and _iso_dates:
+            _yr_num = int(_iso_dates[0][:4])
+
+        _rate_m = _re.search(r'Group\s+rate[:\s]+\$(\d+(?:\.\d+)?)\s+per\s+room', _back, _re.IGNORECASE)
+        _rate   = float(_rate_m.group(1)) if _rate_m else None
+
+        _atr_m  = _re.search(
+            r'(\d{2,3})\s*%[^\n]*(?:attrition|commitment)|(?:attrition|commitment)[^\n]*?(\d{2,3})\s*%',
+            _back, _re.IGNORECASE)
+        _atr = None
+        if _atr_m:
+            _atr_raw = _atr_m.group(1) or _atr_m.group(2)
+            if _atr_raw:
+                _atr = int(_atr_raw) / 100.0
+
+        _direct_years.append({
+            'year':              _yr_num,
+            'event_name':        None,
+            'contracted_block':  _block,
+            'contracted_rate':   _rate,
+            'rebate_per_room':   None,
+            'cutoff_date':       _cutoff_iso,
+            'block_review_date': None,
+            'attrition_pct':     _atr,
+        })
+
+    # ── Ask Claude for contacts/org/attrition only ────────────────────────────
+    import json as _json, re as _re2
+    ai_data = {}
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+
+        # For long contracts send only pages that contain the header/signature block
+        _text_for_ai = raw_text[:15000]
+
+        _critical_dates_instructions = (
+            '  "critical_dates"     — array of important dates the client must know about:\n'
+            '                         [{"date":"YYYY-MM-DD","label":"description","amount":number_or_null}, ...]\n'
+            '                         Include: deposit due dates + amounts, cutoff date, block review dates,\n'
+            '                         cancellation deadlines, rooming list due dates, attrition review dates,\n'
+            '                         any other contractual deadlines. Use null for amount if no $ amount.\n'
+            '                         Return [] if none found.\n'
+        )
+        if is_scanned_pdf:
+            import fitz, base64
+            doc  = fitz.open(stream=file_bytes, filetype='pdf')
+            content = [{'type': 'text', 'text': (
+                'Extract ONLY the fields listed below from this hotel contract. '
+                'Return a JSON object with ONLY these keys — do NOT invent or guess room block data.\n'
+            )}]
+            for page_num in range(min(len(doc), 8)):
+                page    = doc[page_num]
+                mat     = fitz.Matrix(100/72, 100/72)
+                pix     = page.get_pixmap(matrix=mat)
+                img_b64 = base64.standard_b64encode(pix.tobytes('png')).decode()
+                content.append({'type': 'image',
+                                 'source': {'type': 'base64', 'media_type': 'image/png',
+                                            'data': img_b64}})
+            doc.close()
+            content.append({'type': 'text', 'text': (
+                'Return ONLY this JSON (no markdown):\n'
+                '{"hotel":null,"organization":null,"hotel_contact":null,'
+                '"hotel_contact_email":null,"group_contact":null,'
+                '"group_contact_email":null,"attrition_pct":null,'
+                '"rebate_per_room":null,"block_review_date":null,'
+                '"critical_dates":[]}'
+            )})
+            response = client.messages.create(
+                model='claude-opus-4-5', max_tokens=1024,
+                messages=[{'role': 'user', 'content': content}])
+        else:
+            extraction_prompt = (
+                'Extract ONLY the fields below from this hotel contract text. '
+                'Return ONLY valid JSON — no markdown, no explanation.\n'
+                '\nRequired keys:\n'
+                '  "hotel"               — full hotel name, or null\n'
+                '  "organization"        — group/client org name, or null\n'
+                '  "hotel_contact"       — hotel contact full name, or null\n'
+                '  "hotel_contact_email" — hotel contact email, or null\n'
+                '  "group_contact"       — client contact full name, or null\n'
+                '  "group_contact_email" — client contact email, or null\n'
+                '  "attrition_pct"       — attrition as decimal (80%→0.80), or null\n'
+                '  "rebate_per_room"     — $/room/night rebate if any, or null\n'
+                '  "block_review_date"   — block review date YYYY-MM-DD, or null\n'
+                + _critical_dates_instructions +
+                '\nDO NOT return contracted_block or contracted_rate — those are handled separately.\n'
+                '\nContract text:\n' + _text_for_ai
+            )
+            response = client.messages.create(
+                model='claude-opus-4-5', max_tokens=1024,
+                messages=[{'role': 'user', 'content': extraction_prompt}])
+
+        raw_json = response.content[0].text.strip()
+        raw_json = _re2.sub(r'^```[a-z]*\n?', '', raw_json)
+        raw_json = _re2.sub(r'\n?```$',        '', raw_json)
+        ai_data  = _json.loads(raw_json)
+    except Exception:
+        pass   # AI is supplemental — failures are silent, direct parse still used
+
+    # ── Build final result: direct parse is authoritative for block/rate/cutoff ──
+    years = []
+    base_years = _direct_years if _direct_years else []
+
+    # If no direct years, ask Claude for block too (short single-year contract)
+    if not base_years and not is_scanned_pdf and raw_text.strip():
+        try:
+            full_prompt = (
+                'Extract group room block data from this hotel contract. '
+                'Return ONLY valid JSON.\n'
+                '\nKeys:\n'
+                '  "contracted_block": {"YYYY-MM-DD": rooms, ...} or {}\n'
+                '  "contracted_rate": number or null\n'
+                '  "cutoff_date": "YYYY-MM-DD" or null\n'
+                '  "attrition_pct": decimal or null\n'
+                '  "year": integer or null\n'
+                '  "rebate_per_room": number or null\n'
+                '  "block_review_date": "YYYY-MM-DD" or null\n'
+                '\nContract text:\n' + raw_text[:20000]
+            )
+            resp2 = client.messages.create(
+                model='claude-opus-4-5', max_tokens=1024,
+                messages=[{'role': 'user', 'content': full_prompt}])
+            raw2  = resp2.content[0].text.strip()
+            raw2  = _re2.sub(r'^```[a-z]*\n?', '', raw2)
+            raw2  = _re2.sub(r'\n?```$',        '', raw2)
+            blk_data = _json.loads(raw2)
+            from datetime import datetime as _dt2
+            blk = {}
+            for k, v in (blk_data.get('contracted_block') or {}).items():
+                try:
+                    _dt2.strptime(k, '%Y-%m-%d'); blk[k] = int(v)
+                except Exception:
+                    pass
+
+            def _sf(val):
+                try:
+                    return float(val) if val is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            base_years = [{
+                'year':              blk_data.get('year'),
+                'event_name':        None,
+                'contracted_block':  blk,
+                'contracted_rate':   _sf(blk_data.get('contracted_rate')),
+                'rebate_per_room':   _sf(blk_data.get('rebate_per_room')),
+                'cutoff_date':       blk_data.get('cutoff_date') or None,
+                'block_review_date': blk_data.get('block_review_date') or None,
+                'attrition_pct':     _sf(blk_data.get('attrition_pct')),
+            }]
+        except Exception:
+            pass
+
+    def _safe_float_local(val):
+        try:
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    for dy in sorted(base_years, key=lambda y: (y.get('year') or 0)):
+        years.append({
+            'year':              dy.get('year'),
+            'event_name':        None,
+            'contracted_block':  dy.get('contracted_block', {}),
+            'contracted_rate':   dy.get('contracted_rate'),
+            'rebate_per_room':   _safe_float_local(ai_data.get('rebate_per_room')),
+            'cutoff_date':       dy.get('cutoff_date'),
+            'block_review_date': ai_data.get('block_review_date') or None,
+            'attrition_pct':     dy.get('attrition_pct') or _safe_float_local(ai_data.get('attrition_pct')),
+        })
+
+    if not years:
+        return {'contracted_block': {}, 'raw_text': raw_text,
+                'error': 'Could not extract room block — contract format not recognized'}
+
+    # Normalise critical_dates from AI: must be a list of {date, label, amount}
+    _raw_cd = ai_data.get('critical_dates') or []
+    if not isinstance(_raw_cd, list):
+        _raw_cd = []
+    critical_dates = []
+    for _cd in _raw_cd:
+        if isinstance(_cd, dict) and _cd.get('date') and _cd.get('label'):
+            critical_dates.append({
+                'date':   str(_cd['date']),
+                'label':  str(_cd['label']),
+                'amount': _cd.get('amount'),
+            })
+
+    first = years[0]
+    return {
+        'contracted_block':     first.get('contracted_block', {}),
+        'contracted_rate':      first.get('contracted_rate'),
+        'rebate_per_room':      first.get('rebate_per_room'),
+        'cutoff_date':          first.get('cutoff_date'),
+        'block_review_date':    first.get('block_review_date'),
+        'attrition_pct':        first.get('attrition_pct'),
+        'event_name':           None,
+        'hotel':                ai_data.get('hotel') or None,
+        'organization':         ai_data.get('organization') or None,
+        'hotel_contact':        ai_data.get('hotel_contact') or None,
+        'hotel_contact_email':  ai_data.get('hotel_contact_email') or None,
+        'group_contact':        ai_data.get('group_contact') or None,
+        'group_contact_email':  ai_data.get('group_contact_email') or None,
+        'critical_dates':       critical_dates,
+        'raw_text':             raw_text,
+        'years':                years,
+    }
 
 
 # ── Amendment / Addendum parsing ──────────────────────────────────────────────

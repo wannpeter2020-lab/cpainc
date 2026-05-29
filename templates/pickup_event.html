@@ -253,6 +253,14 @@
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-envelope-heart me-1"></i>Email Client
     </a>
+    {% if rfp_for_dates and rfp_for_dates['critical_dates_json'] %}
+    <a href="{{ url_for('rfp_client_dates_email', rid=rfp_for_dates['id']) }}"
+       class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff"
+       title="{{ 'Resend critical dates email' if rfp_for_dates['critical_dates_sent_at'] else 'Email critical contract dates to client' }}">
+      <i class="bi bi-envelope-check me-1"></i>
+      {{ 'Resend Dates Email' if rfp_for_dates['critical_dates_sent_at'] else 'Email Dates' }}
+    </a>
+    {% endif %}
     {% if meeting_ended %}
     <a href="{{ url_for('pickup_email_housing', cid=config['id']) }}"
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
