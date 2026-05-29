@@ -375,8 +375,8 @@ def dashboard():
     cats = {
         1: {'label': 'Completed & Paid',               'color': '#198754', 'count': 0, 'revenue': 0, 'value': 0},
         2: {'label': 'Future & Paid (Incentive)',       'color': '#20c997', 'count': 0, 'revenue': 0, 'value': 0},
-        3: {'label': 'Completed – Has Pickup, Unpaid', 'color': '#fd7e14', 'count': 0, 'revenue': 0, 'value': 0},
-        4: {'label': 'Completed – No Pickup Yet',      'color': '#dc3545', 'count': 0, 'revenue': 0, 'value': 0},
+        3: {'label': 'Completed – Has HHR, Unpaid',  'color': '#fd7e14', 'count': 0, 'revenue': 0, 'value': 0},
+        4: {'label': 'Completed – No HHR Yet',        'color': '#dc3545', 'count': 0, 'revenue': 0, 'value': 0},
         5: {'label': 'Future / Not Paid (2026-04-10 – 2026-09-30)', 'color': '#1a3a5c', 'count': 0, 'revenue': 0, 'value': 0},
     }
     meetings_next30 = 0
@@ -2850,7 +2850,7 @@ def report_proforma():
     ).fetchone()
     max_meeting_year = int(row[0]) if row and row[0] else today.year + 2
 
-    # ── Paid rows: actual payments for 2026+ meetings ─────────────────────────
+    # ── Paid rows: payments received in 2026+ (any meeting end date) ──────────
     paid_rows = db.execute('''
         SELECT r.BookingAssociate,
                COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
@@ -2863,13 +2863,14 @@ def report_proforma():
         WHERE c.Cancelled=0
           AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
           AND c.FinalPayment > 0
-          AND r.EndDate IS NOT NULL AND r.EndDate != ''
-          AND r.EndDate >= '2026-01-01'
+          AND c.DateOnCheck >= '2026-01-01'
         ORDER BY c.DateOnCheck
     ''').fetchall()
 
-    # ── HHR commissions: parse hhr_data blobs where available ────────────────
+    # ── HHR commissions: actual room revenue from hhr_data blob or Pickup table
     hhr_commissions = {}   # booking_id (str) → commission amount
+
+    # Priority 1: parse uploaded HHR Excel files in pickup_config
     for pc in db.execute('''
         SELECT pc.booking_id, pc.hhr_data, r.CommissionPercent
         FROM pickup_config pc
@@ -2887,7 +2888,28 @@ def report_proforma():
         except Exception:
             pass
 
-    # ── Unpaid/projected rows: 2026+ events with no payment yet ──────────────
+    # Priority 2: fall back to old Pickup table (actual room nights × rate × pct)
+    for row in db.execute('''
+        SELECT p.BookingID,
+               SUM(p.ActualPickup) AS total_rn,
+               r.RoomRate, r.CommissionPercent
+        FROM Pickup p
+        JOIN ReportPipeline r ON r.BookingId = p.BookingID
+        WHERE p.ActualPickup IS NOT NULL AND p.ActualPickup > 0
+          AND r.RoomRate IS NOT NULL AND r.RoomRate > 0
+          AND r.CommissionPercent IS NOT NULL AND r.CommissionPercent > 0
+        GROUP BY p.BookingID
+    ''').fetchall():
+        bid = str(row['BookingID'])
+        if bid not in hhr_commissions:
+            amt = round(
+                float(row['total_rn'] or 0) *
+                float(row['RoomRate'] or 0) *
+                float(row['CommissionPercent'] or 0), 2)
+            if amt > 0:
+                hhr_commissions[bid] = amt
+
+    # ── Unpaid/projected rows: meetings ending 2025-07-01+ with no payment ───
     unpaid_rows = db.execute('''
         SELECT r.BookingId,
                r.BookingAssociate,
@@ -2899,7 +2921,7 @@ def report_proforma():
                r.USDCommissionableAmount, r.CommissionPercent, r.Revenue
         FROM ReportPipeline r
         WHERE r.EndDate IS NOT NULL AND r.EndDate != ''
-          AND r.EndDate >= '2026-01-01'
+          AND r.EndDate >= '2025-07-01'
           AND COALESCE(r.BookingStatus,'') NOT IN ('Cancelled','Lost','Tentative')
           AND r.CommissionPercent IS NOT NULL AND r.CommissionPercent > 0
           AND r.BookingId NOT IN (
@@ -2952,6 +2974,8 @@ def report_proforma():
         days = proj_days(r['Brand'], r['Chain'])
         pd   = ed + _td(days=days)
         year = min(pd.year, max_meeting_year + 2)
+        if year < 2026:
+            year = 2026   # if projected into the past, place in 2026
 
         bid = str(r['BookingId'])
 
