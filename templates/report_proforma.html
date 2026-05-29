@@ -79,16 +79,22 @@
       <div class="card-header"><i class="bi bi-info-circle me-2"></i>Report Structure &amp; Logic</div>
       <div class="card-body small">
         <p class="mb-2">One Excel workbook covering <strong>2026 through the last meeting year on record</strong>. Each year = two tabs (Kristin / Team).</p>
+        <p class="mb-2 text-muted fst-italic" style="font-size:.8rem">Kristin and Team tabs use different commission logic for unpaid rows.</p>
         <table class="table table-sm table-borderless mb-3" style="font-size:.82rem">
           <tr>
             <td><span class="badge" style="background:#DEEAF1;color:#333;border:1px solid #ccc">Blue/White</span></td>
-            <td>Actual commission payment received — amount exactly as recorded. Revenue column = Pipeline Revenue.</td>
+            <td>Actual commission payment received — amount exactly as recorded</td>
+          </tr>
+          <tr>
+            <td class="text-nowrap"><span class="badge" style="background:#E2EFDA;color:#333;border:1px solid #ccc">Green</span> <span class="text-muted small">Kristin only</span></td>
+            <td>Unpaid event with HHR data — commission from HHR room revenue &times; commission %. No adjustment applied</td>
           </tr>
           <tr>
             <td><span class="badge" style="background:#FFF9C4;color:#333;border:1px solid #ccc">Yellow</span></td>
-            <td>Unpaid/projected — commission = <strong>1% of Pipeline Revenue &times; your adjustment %</strong>. Pay date projected using brand/chain avg days.</td>
+            <td><strong>Kristin:</strong> contracted revenue &times; commission % &times; adj%. &nbsp;<strong>Team:</strong> Pipeline Revenue &times; 1% &times; adj%</td>
           </tr>
         </table>
+        <p class="mb-1"><strong>Revenue column:</strong> Kristin = HHR room revenue (if available) or contracted commissionable revenue &middot; Team = Pipeline Revenue</p>
         <p class="mb-1"><strong>Rollover logic:</strong> if a meeting's projected pay date falls in 2027 or later, it appears on that year's tab automatically.</p>
         <p class="mb-0"><strong>Days timing:</strong> brand 6-month avg → chain 6-month avg → 90-day default.</p>
       </div>

@@ -2963,7 +2963,12 @@ def report_proforma():
         year = pd.year
         who  = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
         bid  = str(r['BookingId'])
-        rev  = float(r['Revenue'] or 0)   # always use Pipeline Revenue
+        if who == 'kristin':
+            # Kristin: HHR room revenue if available, else contracted commissionable
+            rev = hhr_revenues.get(bid) or float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
+        else:
+            # Team: always Pipeline Revenue
+            rev = float(r['Revenue'] or 0)
         data[year][who].append({
             'bid':       bid,
             'associate': r['BookingAssociate'] or '',
@@ -2989,14 +2994,27 @@ def report_proforma():
             year = 2026   # if projected into the past, place in 2026
 
         bid = str(r['BookingId'])
-        rev = float(r['Revenue'] or 0)          # always Pipeline Revenue
-        amt = round(rev * 0.01 * adj_mult, 2)   # always 1% × adj
-        src = 'calc'
+        who = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
+
+        if who == 'kristin':
+            # Kristin: HHR commission → green; else CommissionPercent × revenue → yellow
+            if bid in hhr_commissions:
+                amt = hhr_commissions[bid]
+                rev = hhr_revenues.get(bid, 0.0)
+                src = 'hhr'
+            else:
+                rev = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
+                amt = round(rev * float(r['CommissionPercent'] or 0) * adj_mult, 2)
+                src = 'calc'
+        else:
+            # Team: Pipeline Revenue, always 1% × adj
+            rev = float(r['Revenue'] or 0)
+            amt = round(rev * 0.01 * adj_mult, 2)
+            src = 'calc'
 
         if amt <= 0:
             continue
 
-        who = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
         data[year][who].append({
             'bid':       bid,
             'associate': r['BookingAssociate'] or '',
@@ -3562,8 +3580,8 @@ def report_proforma():
             sc.value = (
                 f'Generated {today.strftime("%B %d, %Y")}  │  '
                 f'Commission adjustment applied to projected: {adj_sign}{adj_pct:.1f}%  │  '
-                f'Blue/White = actual payment received · Yellow = projected (1% of Pipeline Revenue × adj%)  │  '
-                f'Revenue = Pipeline Revenue · Commission adj: {adj_sign}{adj_pct:.1f}%'
+                f'Blue/White = paid · Green = HHR (Kristin) · Yellow = projected  │  '
+                f'Kristin: HHR/contracted rev × comm% · Team: Pipeline rev × 1%  │  Adj: {adj_sign}{adj_pct:.1f}%'
             )
             sc.font      = Font(name='Calibri', italic=True, color='555555', size=9)
             sc.alignment = Alignment(horizontal='center')
