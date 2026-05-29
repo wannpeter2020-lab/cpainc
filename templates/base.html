@@ -139,6 +139,7 @@
             {% if has_perm('admin_panel') %}
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item {% if request.path.startswith('/reports/days-outstanding') %}active{% endif %}" href="/reports/days-outstanding"><i class="bi bi-clock-history me-2"></i>Days Outstanding <span class="badge bg-secondary ms-1" style="font-size:.65rem">Admin</span></a></li>
+            <li><a class="dropdown-item {% if request.path.startswith('/reports/proforma') %}active{% endif %}" href="/reports/proforma"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Commission Proforma <span class="badge bg-secondary ms-1" style="font-size:.65rem">Admin</span></a></li>
             {% endif %}
           </ul>
         </li>

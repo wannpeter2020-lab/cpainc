@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Commission Proforma{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Commission Proforma</h4>
+    <div class="text-muted small mt-1">Annual commission projections for tax planning &nbsp;&middot;&nbsp;
+      <span class="badge bg-secondary">Admin Only</span>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header bg-primary text-white"><i class="bi bi-file-earmark-excel me-2"></i>Generate Report</div>
+      <div class="card-body">
+        <p class="mb-3">Downloads a multi-tab Excel workbook covering <strong>2026 through the last meeting year on record</strong>. Each year gets two tabs — Kristin and Team.</p>
+        <ul class="small text-muted mb-4">
+          <li>Paid commissions show actual paid date and amount</li>
+          <li>Unpaid events show <span class="badge bg-warning text-dark">projected</span> payment date + estimated commission</li>
+          <li>Projections use a <strong>6-month moving average</strong> of days outstanding by brand, then chain, then 90-day default</li>
+          <li>Meetings projected to pay in a later year roll to that year's tab automatically</li>
+          <li>Monthly columns (Jan–Dec) show when each dollar is expected to land</li>
+        </ul>
+        <a href="/reports/proforma?export=xlsx" class="btn btn-success btn-lg">
+          <i class="bi bi-file-earmark-excel me-2"></i>Generate &amp; Download Excel
+        </a>
+        <div class="text-muted small mt-2">File will be named <code>Commission_Proforma_YYYYMMDD.xlsx</code></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>How Projections Work</div>
+      <div class="card-body small">
+        <p>For every unpaid Definite event with a meeting end date in 2026 or later:</p>
+        <ol class="mb-3">
+          <li>Look up the <strong>brand's 6-month average</strong> days from meeting end to commission received (rolling window ending today)</li>
+          <li>If no brand match → use the <strong>chain's 6-month average</strong></li>
+          <li>If no chain match → use <strong>90 days</strong></li>
+          <li>Projected payment date = Meeting End Date + avg days</li>
+          <li>Estimated commission = Commissionable Amount × Commission %</li>
+        </ol>
+        <p class="mb-2">If the projected date falls in a <strong>later year</strong>, the event automatically rolls to that year's tab.</p>
+        <div class="d-flex gap-2 flex-wrap">
+          <span class="badge bg-light text-dark border">White/Blue = Actual payment</span>
+          <span class="badge bg-warning text-dark">Yellow = Projected estimate</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

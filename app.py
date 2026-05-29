@@ -2718,6 +2718,355 @@ from cs_report_utils import (
     _build_word_doc, _build_pptx, build_city_map_data
 )
 
+@app.route('/reports/proforma')
+def report_proforma():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('This report is restricted to administrators.', 'error')
+        return redirect(url_for('pipeline'))
+
+    if request.args.get('export') != 'xlsx':
+        return render_template('report_proforma.html')
+
+    from datetime import date as _date, datetime as _dt, timedelta as _td
+    from collections import defaultdict
+    import io, openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    db    = get_db()
+    today = _date.today()
+    six_months_ago = str(today - _td(days=182))
+
+    # ── 6-month moving average by brand ──────────────────────────────────────
+    brand_avg = {}
+    for row in db.execute('''
+        SELECT COALESCE(NULLIF(r.Brand,''),'') AS b,
+               AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)) AS avg_days
+        FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0 AND c.DateOnCheck >= ?
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND r.EndDate   IS NOT NULL AND r.EndDate   != ''
+          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+        GROUP BY r.Brand
+    ''', (six_months_ago,)).fetchall():
+        if row[0]:
+            brand_avg[row[0]] = row[1]
+
+    # ── 6-month moving average by chain ──────────────────────────────────────
+    chain_avg = {}
+    for row in db.execute('''
+        SELECT COALESCE(NULLIF(r.Chain,''),'') AS ch,
+               AVG(julianday(c.DateOnCheck) - julianday(r.EndDate)) AS avg_days
+        FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0 AND c.DateOnCheck >= ?
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND r.EndDate   IS NOT NULL AND r.EndDate   != ''
+          AND (julianday(c.DateOnCheck) - julianday(r.EndDate)) > 0
+        GROUP BY r.Chain
+    ''', (six_months_ago,)).fetchall():
+        if row[0]:
+            chain_avg[row[0]] = row[1]
+
+    def proj_days(brand, chain):
+        b  = (brand or '').strip()
+        ch = (chain or '').strip()
+        return int(round(brand_avg.get(b) or chain_avg.get(ch) or 90.0))
+
+    # ── Max meeting year ──────────────────────────────────────────────────────
+    row = db.execute(
+        "SELECT MAX(CAST(substr(EndDate,1,4) AS INTEGER)) FROM ReportPipeline "
+        "WHERE EndDate IS NOT NULL AND EndDate!='' AND length(EndDate)>=4"
+    ).fetchone()
+    max_meeting_year = int(row[0]) if row and row[0] else today.year + 2
+
+    # ── Paid rows: actual payments for 2026+ meetings ─────────────────────────
+    paid_rows = db.execute('''
+        SELECT r.BookingAssociate,
+               COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
+               COALESCE(r.Customer,'')   AS hotel,
+               COALESCE(r.StartDate,'') AS start_date,
+               COALESCE(r.EndDate,'')   AS end_date,
+               r.Brand, r.Chain,
+               c.DateOnCheck, c.FinalPayment, c.Advance
+        FROM ChkRegNote c JOIN ReportPipeline r ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND c.FinalPayment > 0
+          AND r.EndDate IS NOT NULL AND r.EndDate != ''
+          AND r.EndDate >= '2026-01-01'
+        ORDER BY c.DateOnCheck
+    ''').fetchall()
+
+    # ── Unpaid/projected rows: Definite 2026+ events with no payment yet ─────
+    unpaid_rows = db.execute('''
+        SELECT r.BookingAssociate,
+               COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
+               COALESCE(r.Customer,'')            AS hotel,
+               COALESCE(r.StartDate,'')           AS start_date,
+               COALESCE(r.EndDate,'')             AS end_date,
+               r.Brand, r.Chain,
+               r.USDCommissionableAmount, r.CommissionPercent, r.Revenue
+        FROM ReportPipeline r
+        WHERE r.EndDate IS NOT NULL AND r.EndDate != ''
+          AND r.EndDate >= '2026-01-01'
+          AND COALESCE(r.BookingStatus,'') NOT IN ('Cancelled','Lost','Tentative')
+          AND r.CommissionPercent IS NOT NULL AND r.CommissionPercent > 0
+          AND r.BookingId NOT IN (
+              SELECT DISTINCT BookingID FROM ChkRegNote
+              WHERE Cancelled=0
+                AND DateOnCheck IS NOT NULL AND DateOnCheck != ''
+                AND FinalPayment > 0
+          )
+        ORDER BY r.EndDate
+    ''').fetchall()
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    def parse_dt(s):
+        if not s: return None
+        try:    return _dt.strptime(s[:10], '%Y-%m-%d').date()
+        except: return None
+
+    def fmt_date(s):
+        d = parse_dt(s)
+        return d.strftime('%m/%d/%Y') if d else ''
+
+    def is_kristin(associate):
+        return 'kristin' in (associate or '').lower()
+
+    # ── Assemble year→who→rows ────────────────────────────────────────────────
+    data = defaultdict(lambda: {'kristin': [], 'team': []})
+
+    for r in paid_rows:
+        pd = parse_dt(r['DateOnCheck'])
+        if not pd or pd.year < 2026:
+            continue
+        year = pd.year
+        who  = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
+        data[year][who].append({
+            'associate': r['BookingAssociate'] or '',
+            'meeting':   r['meeting_name'],
+            'hotel':     r['hotel'],
+            'start':     fmt_date(r['start_date']),
+            'end':       fmt_date(r['end_date']),
+            'paid_date': pd,
+            'amount':    float(r['FinalPayment'] or 0),
+            'month':     pd.month,
+            'projected': False,
+        })
+
+    for r in unpaid_rows:
+        ed = parse_dt(r['end_date'])
+        if not ed: continue
+        days  = proj_days(r['Brand'], r['Chain'])
+        pd    = ed + _td(days=days)
+        year  = pd.year
+        # Cap runaway projections at max meeting year + 2
+        year  = min(year, max_meeting_year + 2)
+
+        amt = 0.0
+        if r['USDCommissionableAmount'] and r['CommissionPercent']:
+            amt = float(r['USDCommissionableAmount']) * float(r['CommissionPercent'])
+        elif r['Revenue'] and r['CommissionPercent']:
+            amt = float(r['Revenue']) * float(r['CommissionPercent'])
+
+        if amt <= 0:
+            continue   # skip zero-value projections
+
+        who = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
+        data[year][who].append({
+            'associate': r['BookingAssociate'] or '',
+            'meeting':   r['meeting_name'],
+            'hotel':     r['hotel'],
+            'start':     fmt_date(r['start_date']),
+            'end':       fmt_date(r['end_date']),
+            'paid_date': pd,
+            'amount':    round(amt, 2),
+            'month':     pd.month,
+            'projected': True,
+        })
+
+    # Sort each bucket by payment date
+    for yr in data:
+        for who in ('kristin', 'team'):
+            data[yr][who].sort(key=lambda x: x['paid_date'])
+
+    # ── Build Excel ───────────────────────────────────────────────────────────
+    MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun',
+                  'Jul','Aug','Sep','Oct','Nov','Dec']
+
+    thin = Side(style='thin', color='CCCCCC')
+    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def hfill(hex_str):
+        return PatternFill('solid', fgColor=hex_str)
+
+    C = {
+        'title':    '1F3864',   # dark navy
+        'header':   '2E75B6',   # medium blue
+        'actual_a': 'DEEAF1',   # light blue (alternating)
+        'proj':     'FFF9C4',   # light yellow (projected)
+        'subtotal': 'D9D9D9',   # gray totals row
+        'grand':    'E2EFDA',   # green grand total
+    }
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)    # drop default Sheet
+
+    years = sorted(data.keys())
+    if not years:
+        years = [today.year]
+
+    for year in years:
+        for who_key, who_label, who_full in [
+            ('kristin', 'Kristin', 'Kristin House'),
+            ('team',    'Team',    'Team'),
+        ]:
+            rows = data[year][who_key]
+            ws   = wb.create_sheet(f'{year} — {who_label}')
+            is_team = (who_key == 'team')
+
+            # Column definitions
+            if is_team:
+                fixed_hdr   = ['Team Member', 'Meeting Name', 'Hotel',
+                                'Start Date', 'End Date', 'Paid / Proj Date', 'Commission']
+                fixed_w     = [20, 35, 28, 12, 12, 14, 14]
+            else:
+                fixed_hdr   = ['Meeting Name', 'Hotel',
+                                'Start Date', 'End Date', 'Paid / Proj Date', 'Commission']
+                fixed_w     = [38, 28, 12, 12, 14, 14]
+
+            nf          = len(fixed_hdr)
+            all_hdr     = fixed_hdr + MONTH_ABBR + ['Year Total']
+            all_w       = fixed_w + [10]*12 + [14]
+            ncols       = len(all_hdr)
+            last_col    = get_column_letter(ncols)
+            comm_col    = get_column_letter(nf)       # Commission column letter
+            jan_col     = get_column_letter(nf + 1)
+            dec_col     = get_column_letter(nf + 12)
+            total_col   = get_column_letter(nf + 13)
+
+            # ── Row 1: Title ──────────────────────────────────────────────────
+            ws.merge_cells(f'A1:{last_col}1')
+            tc = ws['A1']
+            tc.value     = f'{who_full} — {year} Commission Proforma'
+            tc.font      = Font(name='Calibri', bold=True, size=14, color='FFFFFF')
+            tc.fill      = hfill(C['title'])
+            tc.alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 26
+
+            # ── Row 2: Subtitle ───────────────────────────────────────────────
+            ws.merge_cells(f'A2:{last_col}2')
+            sc = ws['A2']
+            sc.value = (
+                f'Generated {today.strftime("%B %d, %Y")}  │  '
+                f'Projected rows (yellow) estimated via 6-month brand/chain avg days outstanding  │  '
+                f'90-day default if no brand/chain data'
+            )
+            sc.font      = Font(name='Calibri', italic=True, color='555555', size=9)
+            sc.alignment = Alignment(horizontal='center')
+            ws.row_dimensions[2].height = 14
+            ws.row_dimensions[3].height = 5
+
+            # ── Row 4: Column headers ─────────────────────────────────────────
+            for ci, h in enumerate(all_hdr, 1):
+                cell = ws.cell(row=4, column=ci, value=h)
+                cell.font      = Font(name='Calibri', bold=True, color='FFFFFF', size=9)
+                cell.fill      = hfill(C['header'])
+                cell.alignment = Alignment(horizontal='center', wrap_text=True)
+                cell.border    = bdr
+            ws.row_dimensions[4].height = 32
+
+            # ── Data rows ─────────────────────────────────────────────────────
+            for ri, rd in enumerate(rows):
+                rn      = ri + 5
+                is_proj = rd['projected']
+                bg      = C['proj'] if is_proj else (C['actual_a'] if ri % 2 == 0 else 'FFFFFF')
+
+                if is_team:
+                    fvals = [rd['associate'], rd['meeting'], rd['hotel'],
+                             rd['start'], rd['end'],
+                             rd['paid_date'].strftime('%m/%d/%Y'), rd['amount']]
+                else:
+                    fvals = [rd['meeting'], rd['hotel'],
+                             rd['start'], rd['end'],
+                             rd['paid_date'].strftime('%m/%d/%Y'), rd['amount']]
+
+                monthly = [None] * 12
+                mo = rd['month']
+                if 1 <= mo <= 12:
+                    monthly[mo - 1] = rd['amount']
+
+                all_vals = fvals + monthly + [None]   # Year Total = formula
+
+                for ci, v in enumerate(all_vals, 1):
+                    cell = ws.cell(row=rn, column=ci, value=v)
+                    cell.fill   = hfill(bg)
+                    cell.border = bdr
+                    cell.font   = Font(name='Calibri', size=9, italic=is_proj,
+                                       color='555555' if is_proj else '000000')
+                    if ci <= nf:
+                        cell.alignment = Alignment(horizontal='left', wrap_text=(ci <= (3 if is_team else 2)))
+                        if ci == nf:   # Commission
+                            cell.number_format = '$#,##0.00'
+                    else:
+                        cell.alignment    = Alignment(horizontal='right')
+                        cell.number_format = '$#,##0.00'
+
+                # Year Total formula
+                yt = ws.cell(row=rn, column=ncols,
+                             value=f'=SUM({jan_col}{rn}:{dec_col}{rn})')
+                yt.fill          = hfill(bg)
+                yt.border        = bdr
+                yt.font          = Font(name='Calibri', size=9, italic=is_proj, bold=True,
+                                        color='555555' if is_proj else '000000')
+                yt.number_format = '$#,##0.00'
+                yt.alignment     = Alignment(horizontal='right')
+
+                ws.row_dimensions[rn].height = 14
+
+            # ── Totals row ────────────────────────────────────────────────────
+            tr = len(rows) + 5
+            ws.cell(row=tr, column=1, value='TOTAL')
+            for ci in range(1, ncols + 1):
+                cell = ws.cell(row=tr, column=ci)
+                cell.fill   = hfill(C['subtotal'])
+                cell.border = bdr
+                cell.font   = Font(name='Calibri', bold=True, size=9)
+            ws.cell(row=tr, column=1).alignment = Alignment(horizontal='left')
+
+            if rows:
+                d_start = 5
+                d_end   = tr - 1
+                for ci in range(nf, ncols + 1):
+                    col_ltr = get_column_letter(ci)
+                    cell = ws.cell(row=tr, column=ci,
+                                   value=f'=SUM({col_ltr}{d_start}:{col_ltr}{d_end})')
+                    cell.number_format = '$#,##0.00'
+                    cell.alignment     = Alignment(horizontal='right')
+            ws.row_dimensions[tr].height = 16
+
+            # ── No-data placeholder ───────────────────────────────────────────
+            if not rows:
+                ws.merge_cells(f'A5:{last_col}5')
+                nc = ws['A5']
+                nc.value     = 'No commission activity for this period.'
+                nc.font      = Font(name='Calibri', italic=True, color='888888')
+                nc.alignment = Alignment(horizontal='center')
+
+            # ── Column widths & freeze ────────────────────────────────────────
+            for ci, w in enumerate(all_w, 1):
+                ws.column_dimensions[get_column_letter(ci)].width = w
+            ws.freeze_panes = 'A5'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f'Commission_Proforma_{today.strftime("%Y%m%d")}.xlsx'
+    return send_file(buf, download_name=fname, as_attachment=True,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
 @app.route('/reports/customer-summary', methods=['GET', 'POST'])
 def report_customer_summary():
     user = get_current_user()
