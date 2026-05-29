@@ -2852,7 +2852,8 @@ def report_proforma():
 
     # ── Paid rows: payments received in 2026+ (any meeting end date) ──────────
     paid_rows = db.execute('''
-        SELECT r.BookingAssociate,
+        SELECT r.BookingId,
+               r.BookingAssociate,
                COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
                COALESCE(r.Customer,'')   AS hotel,
                COALESCE(r.StartDate,'') AS start_date,
@@ -2958,7 +2959,9 @@ def report_proforma():
             continue
         year = pd.year
         who  = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
-        rev  = float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
+        bid  = str(r['BookingId'])
+        # Use HHR/pickup room revenue if available; else fall back to contracted
+        rev  = hhr_revenues.get(bid) or float(r['USDCommissionableAmount'] or r['Revenue'] or 0)
         data[year][who].append({
             'associate': r['BookingAssociate'] or '',
             'meeting':   r['meeting_name'],
