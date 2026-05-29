@@ -12,46 +12,109 @@
 </div>
 
 <div class="row g-4 mb-4">
-  <div class="col-md-6">
-    <div class="card h-100">
-      <div class="card-header bg-primary text-white"><i class="bi bi-file-earmark-excel me-2"></i>Generate Report</div>
+
+  {# ── Variance + Adjustment card ── #}
+  <div class="col-md-5">
+    <div class="card h-100 border-primary">
+      <div class="card-header bg-primary text-white">
+        <i class="bi bi-sliders me-2"></i>Commission Adjustment
+      </div>
       <div class="card-body">
-        <p class="mb-3">Downloads a multi-tab Excel workbook covering <strong>2026 through the last meeting year on record</strong>. Each year gets two tabs — Kristin and Team.</p>
-        <ul class="small text-muted mb-4">
-          <li>Paid commissions show actual paid date and amount</li>
-          <li>Unpaid events show <span class="badge bg-warning text-dark">projected</span> payment date + estimated commission</li>
-          <li>Projections use a <strong>6-month moving average</strong> of days outstanding by brand, then chain, then 90-day default</li>
-          <li>Meetings projected to pay in a later year roll to that year's tab automatically</li>
-          <li>Monthly columns (Jan–Dec) show when each dollar is expected to land</li>
-        </ul>
-        <a href="/reports/proforma?export=xlsx" class="btn btn-success btn-lg">
-          <i class="bi bi-file-earmark-excel me-2"></i>Generate &amp; Download Excel
-        </a>
-        <div class="text-muted small mt-2">File will be named <code>Commission_Proforma_YYYYMMDD.xlsx</code></div>
+
+        {# Moving average display #}
+        <div class="mb-3 p-3 rounded" style="background:#f8f9fa;border:1px solid #dee2e6">
+          <div class="fw-semibold small mb-1 text-muted text-uppercase" style="letter-spacing:.05em">
+            Last 12 Months — Actual vs Contracted
+          </div>
+          <div class="d-flex align-items-baseline gap-2">
+            <span class="fs-3 fw-bold
+              {% if avg_ratio_pct >= 95 %}text-success
+              {% elif avg_ratio_pct >= 85 %}text-warning
+              {% else %}text-danger{% endif %}">
+              {{ avg_ratio_pct }}%
+            </span>
+            <span class="text-muted">of contracted received</span>
+          </div>
+          <div class="text-muted small mt-1">
+            {% if avg_pct_off < 0 %}
+              On average, commissions came in <strong>{{ avg_pct_off|abs }}% below</strong> the contracted amount.
+            {% elif avg_pct_off > 0 %}
+              On average, commissions came in <strong>{{ avg_pct_off }}% above</strong> the contracted amount.
+            {% else %}
+              On average, commissions matched the contracted amount exactly.
+            {% endif %}
+            Based on {{ n_variance }} qualifying bookings
+            <span class="text-info" title="Hilton and Marriott advance payments excluded from this calculation">
+              <i class="bi bi-info-circle"></i>
+            </span>
+            (excl. Hilton/Marriott advances)
+          </div>
+        </div>
+
+        {# Adjustment input form #}
+        <form method="get" action="/reports/proforma" id="proformaForm">
+          <input type="hidden" name="export" value="xlsx">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Apply to projected commissions</label>
+            <div class="input-group" style="max-width:220px">
+              <input type="number" name="adj_pct" id="adjPct" class="form-control"
+                     value="{{ default_adj }}" step="0.5" min="-50" max="50"
+                     oninput="updatePreview()">
+              <span class="input-group-text">%</span>
+            </div>
+            <div class="form-text" id="adjPreview">Loading…</div>
+          </div>
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-file-earmark-excel me-2"></i>Generate &amp; Download Excel
+          </button>
+        </form>
+
       </div>
     </div>
   </div>
 
-  <div class="col-md-6">
+  {# ── Info card ── #}
+  <div class="col-md-7">
     <div class="card h-100">
-      <div class="card-header"><i class="bi bi-info-circle me-2"></i>How Projections Work</div>
+      <div class="card-header"><i class="bi bi-info-circle me-2"></i>Report Structure &amp; Logic</div>
       <div class="card-body small">
-        <p>For every unpaid Definite event with a meeting end date in 2026 or later:</p>
-        <ol class="mb-3">
-          <li>Look up the <strong>brand's 6-month average</strong> days from meeting end to commission received (rolling window ending today)</li>
-          <li>If no brand match → use the <strong>chain's 6-month average</strong></li>
-          <li>If no chain match → use <strong>90 days</strong></li>
-          <li>Projected payment date = Meeting End Date + avg days</li>
-          <li>Estimated commission = Commissionable Amount × Commission %</li>
-        </ol>
-        <p class="mb-2">If the projected date falls in a <strong>later year</strong>, the event automatically rolls to that year's tab.</p>
-        <div class="d-flex gap-2 flex-wrap">
-          <span class="badge bg-light text-dark border">White/Blue = Actual payment</span>
-          <span class="badge bg-warning text-dark">Yellow = Projected estimate</span>
-        </div>
+        <p class="mb-2">One Excel workbook covering <strong>2026 through the last meeting year on record</strong>. Each year = two tabs (Kristin / Team).</p>
+        <table class="table table-sm table-borderless mb-3" style="font-size:.82rem">
+          <tr>
+            <td><span class="badge" style="background:#DEEAF1;color:#333;border:1px solid #ccc">Blue/White</span></td>
+            <td>Actual commission payment from ChkRegNote — date &amp; amount exactly as received</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:#E2EFDA;color:#333;border:1px solid #ccc">Green</span></td>
+            <td>Commission estimated from <strong>HHR actual room revenue</strong> — no adjustment applied</td>
+          </tr>
+          <tr>
+            <td><span class="badge" style="background:#FFF9C4;color:#333;border:1px solid #ccc">Yellow</span></td>
+            <td>Projected from contracted amount &times; your adjustment % — uses 6-month brand/chain average days to project when payment lands</td>
+          </tr>
+        </table>
+        <p class="mb-1"><strong>Rollover logic:</strong> if a meeting's projected pay date falls in 2027 or later, it appears on that year's tab automatically.</p>
+        <p class="mb-0"><strong>Days timing:</strong> brand 6-month avg → chain 6-month avg → 90-day default.</p>
       </div>
     </div>
   </div>
+
 </div>
+
+<script>
+function updatePreview() {
+  const pct = parseFloat(document.getElementById('adjPct').value) || 0;
+  const preview = document.getElementById('adjPreview');
+  const ratio = (1 + pct/100);
+  const sign = pct >= 0 ? '+' : '';
+  if (Math.abs(pct) < 0.1) {
+    preview.textContent = 'No adjustment — projected commissions used at 100% of contracted.';
+  } else {
+    preview.innerHTML = `Projected commissions will be multiplied by <strong>${ratio.toFixed(3)}×</strong> (${sign}${pct}%). ` +
+      `Example: $10,000 contracted → <strong>$${(10000*ratio).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})}</strong> projected.`;
+  }
+}
+updatePreview();
+</script>
 
 {% endblock %}

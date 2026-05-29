@@ -2725,18 +2725,88 @@ def report_proforma():
         flash('This report is restricted to administrators.', 'error')
         return redirect(url_for('pipeline'))
 
-    if request.args.get('export') != 'xlsx':
-        return render_template('report_proforma.html')
-
     from datetime import date as _date, datetime as _dt, timedelta as _td
     from collections import defaultdict
-    import io, openpyxl
+    import json as _json, io, openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
     db    = get_db()
     today = _date.today()
     six_months_ago = str(today - _td(days=182))
+    one_year_ago   = str(today - _td(days=365))
+
+    # ── 12-month variance: contracted vs actual (excl. Hilton/Marriott advances) ─
+    variance_raw = db.execute('''
+        SELECT r.BookingId, r.Brand, r.Chain,
+               r.USDCommissionableAmount, r.CommissionPercent,
+               c.FinalPayment, c.Advance
+        FROM ReportPipeline r
+        JOIN ChkRegNote c ON c.BookingID = r.BookingId
+        WHERE c.Cancelled=0
+          AND c.DateOnCheck IS NOT NULL AND c.DateOnCheck != ''
+          AND c.DateOnCheck >= ?
+          AND r.USDCommissionableAmount IS NOT NULL AND r.USDCommissionableAmount > 0
+          AND r.CommissionPercent IS NOT NULL AND r.CommissionPercent > 0
+          AND c.FinalPayment > 0
+    ''', (one_year_ago,)).fetchall()
+
+    # Better contracted commission via pickup_config block × rate
+    pc_contracted = {}
+    for pc in db.execute('''
+        SELECT booking_id, contracted_block, contracted_rate FROM pickup_config
+        WHERE contracted_block IS NOT NULL AND contracted_block NOT IN ('{}','')
+          AND contracted_rate IS NOT NULL AND contracted_rate > 0
+    ''').fetchall():
+        try:
+            block = _json.loads(pc['contracted_block'] or '{}')
+            rooms = sum(v for v in block.values() if v)
+            if rooms > 0:
+                pc_contracted[str(pc['booking_id'])] = rooms * float(pc['contracted_rate'])
+        except Exception:
+            pass
+
+    booking_actuals = {}
+    for row in variance_raw:
+        bid   = str(row['BookingId'])
+        brand = (row['Brand'] or '').strip()
+        chain = (row['Chain'] or '').strip()
+        is_hm = ('hilton' in brand.lower() or 'marriott' in brand.lower() or
+                 'hilton' in chain.lower() or 'marriott' in chain.lower())
+        if bid not in booking_actuals:
+            if bid in pc_contracted and row['CommissionPercent']:
+                contracted = pc_contracted[bid] * float(row['CommissionPercent'])
+            else:
+                contracted = float(row['USDCommissionableAmount'] or 0) * float(row['CommissionPercent'] or 0)
+            booking_actuals[bid] = {'contracted': contracted, 'actual': 0.0}
+        if is_hm and row['Advance'] == 1:
+            continue                      # skip Hilton/Marriott advance payments
+        booking_actuals[bid]['actual'] += float(row['FinalPayment'] or 0)
+
+    ratios = []
+    for d in booking_actuals.values():
+        if d['contracted'] > 10 and d['actual'] > 0:
+            r_ = d['actual'] / d['contracted']
+            if 0.3 <= r_ <= 1.5:          # exclude extreme outliers
+                ratios.append(r_)
+    avg_ratio   = sum(ratios) / len(ratios) if ratios else 1.0
+    avg_pct_off = round((avg_ratio - 1.0) * 100, 1)   # negative = below contracted
+    n_variance  = len(ratios)
+
+    # ── Landing page (no export) ──────────────────────────────────────────────
+    if request.args.get('export') != 'xlsx':
+        return render_template('report_proforma.html',
+                               avg_ratio_pct=round(avg_ratio * 100, 1),
+                               avg_pct_off=avg_pct_off,
+                               n_variance=n_variance,
+                               default_adj=int(round(avg_pct_off, 0)))
+
+    # ── Adjustment % from form (default = historical variance) ────────────────
+    try:
+        adj_pct = float(request.args.get('adj_pct', avg_pct_off) or avg_pct_off)
+    except ValueError:
+        adj_pct = avg_pct_off
+    adj_mult = 1.0 + adj_pct / 100.0    # e.g., -12% → 0.88×
 
     # ── 6-month moving average by brand ──────────────────────────────────────
     brand_avg = {}
@@ -2798,9 +2868,29 @@ def report_proforma():
         ORDER BY c.DateOnCheck
     ''').fetchall()
 
-    # ── Unpaid/projected rows: Definite 2026+ events with no payment yet ─────
+    # ── HHR commissions: parse hhr_data blobs where available ────────────────
+    hhr_commissions = {}   # booking_id (str) → commission amount
+    for pc in db.execute('''
+        SELECT pc.booking_id, pc.hhr_data, r.CommissionPercent
+        FROM pickup_config pc
+        JOIN ReportPipeline r ON r.BookingId = pc.booking_id
+        WHERE pc.hhr_data IS NOT NULL
+          AND r.CommissionPercent IS NOT NULL AND r.CommissionPercent > 0
+    ''').fetchall():
+        try:
+            from pickup_utils import parse_hhr_excel as _parse_hhr
+            stats    = _parse_hhr(bytes(pc['hhr_data']))
+            room_rev = stats.get('room_revenue') or stats.get('room_revenue_calc')
+            if room_rev and room_rev > 0:
+                hhr_commissions[str(pc['booking_id'])] = round(
+                    float(room_rev) * float(pc['CommissionPercent']), 2)
+        except Exception:
+            pass
+
+    # ── Unpaid/projected rows: 2026+ events with no payment yet ──────────────
     unpaid_rows = db.execute('''
-        SELECT r.BookingAssociate,
+        SELECT r.BookingId,
+               r.BookingAssociate,
                COALESCE(NULLIF(r.EventName,''), r.AccountName, '') AS meeting_name,
                COALESCE(r.Customer,'')            AS hotel,
                COALESCE(r.StartDate,'')           AS start_date,
@@ -2853,25 +2943,33 @@ def report_proforma():
             'amount':    float(r['FinalPayment'] or 0),
             'month':     pd.month,
             'projected': False,
+            'src':       'paid',
         })
 
     for r in unpaid_rows:
         ed = parse_dt(r['end_date'])
         if not ed: continue
-        days  = proj_days(r['Brand'], r['Chain'])
-        pd    = ed + _td(days=days)
-        year  = pd.year
-        # Cap runaway projections at max meeting year + 2
-        year  = min(year, max_meeting_year + 2)
+        days = proj_days(r['Brand'], r['Chain'])
+        pd   = ed + _td(days=days)
+        year = min(pd.year, max_meeting_year + 2)
 
-        amt = 0.0
-        if r['USDCommissionableAmount'] and r['CommissionPercent']:
-            amt = float(r['USDCommissionableAmount']) * float(r['CommissionPercent'])
-        elif r['Revenue'] and r['CommissionPercent']:
-            amt = float(r['Revenue']) * float(r['CommissionPercent'])
+        bid = str(r['BookingId'])
+
+        # Priority: HHR actual revenue > contracted estimate
+        if bid in hhr_commissions:
+            amt     = hhr_commissions[bid]
+            src     = 'hhr'          # green in Excel
+        else:
+            base = 0.0
+            if r['USDCommissionableAmount'] and r['CommissionPercent']:
+                base = float(r['USDCommissionableAmount']) * float(r['CommissionPercent'])
+            elif r['Revenue'] and r['CommissionPercent']:
+                base = float(r['Revenue']) * float(r['CommissionPercent'])
+            amt = round(base * adj_mult, 2)   # apply adjustment %
+            src = 'calc'             # yellow in Excel
 
         if amt <= 0:
-            continue   # skip zero-value projections
+            continue
 
         who = 'kristin' if is_kristin(r['BookingAssociate']) else 'team'
         data[year][who].append({
@@ -2881,9 +2979,10 @@ def report_proforma():
             'start':     fmt_date(r['start_date']),
             'end':       fmt_date(r['end_date']),
             'paid_date': pd,
-            'amount':    round(amt, 2),
+            'amount':    amt,
             'month':     pd.month,
             'projected': True,
+            'src':       src,
         })
 
     # Sort each bucket by payment date
@@ -2904,10 +3003,11 @@ def report_proforma():
     C = {
         'title':    '1F3864',   # dark navy
         'header':   '2E75B6',   # medium blue
-        'actual_a': 'DEEAF1',   # light blue (alternating)
-        'proj':     'FFF9C4',   # light yellow (projected)
+        'actual_a': 'DEEAF1',   # light blue (alternating even rows)
+        'actual_b': 'FFFFFF',   # white (odd rows)
+        'hhr':      'E2EFDA',   # light green (HHR-sourced projection)
+        'calc':     'FFF9C4',   # light yellow (calculated projection)
         'subtotal': 'D9D9D9',   # gray totals row
-        'grand':    'E2EFDA',   # green grand total
     }
 
     wb = openpyxl.Workbook()
@@ -2958,10 +3058,11 @@ def report_proforma():
             # ── Row 2: Subtitle ───────────────────────────────────────────────
             ws.merge_cells(f'A2:{last_col}2')
             sc = ws['A2']
+            adj_sign = '+' if adj_pct >= 0 else ''
             sc.value = (
                 f'Generated {today.strftime("%B %d, %Y")}  │  '
-                f'Projected rows (yellow) estimated via 6-month brand/chain avg days outstanding  │  '
-                f'90-day default if no brand/chain data'
+                f'Commission adjustment applied to projected: {adj_sign}{adj_pct:.1f}%  │  '
+                f'Green = HHR actuals · Yellow = contracted estimate · Blue/White = paid'
             )
             sc.font      = Font(name='Calibri', italic=True, color='555555', size=9)
             sc.alignment = Alignment(horizontal='center')
@@ -2981,7 +3082,13 @@ def report_proforma():
             for ri, rd in enumerate(rows):
                 rn      = ri + 5
                 is_proj = rd['projected']
-                bg      = C['proj'] if is_proj else (C['actual_a'] if ri % 2 == 0 else 'FFFFFF')
+                src     = rd.get('src', 'paid')
+                if src == 'hhr':
+                    bg = C['hhr']
+                elif src == 'calc':
+                    bg = C['calc']
+                else:
+                    bg = C['actual_a'] if ri % 2 == 0 else C['actual_b']
 
                 if is_team:
                     fvals = [rd['associate'], rd['meeting'], rd['hotel'],
@@ -3062,7 +3169,8 @@ def report_proforma():
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    fname = f'Commission_Proforma_{today.strftime("%Y%m%d")}.xlsx'
+    adj_sign = 'p' if adj_pct >= 0 else 'm'
+    fname = f'Commission_Proforma_{today.strftime("%Y%m%d")}_{adj_sign}{abs(int(adj_pct))}pct.xlsx'
     return send_file(buf, download_name=fname, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
