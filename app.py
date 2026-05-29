@@ -2851,7 +2851,7 @@ def report_proforma():
     def proj_days(brand, chain):
         ch = (chain or '').strip()
         if ch and chain_avg.get(ch):
-            return int(round(chain_avg[ch])), 'Chain'
+            return int(round(chain_avg[ch])), ch   # actual chain name
         return default_days, 'Default'
 
     # ── Max meeting year ──────────────────────────────────────────────────────
@@ -3566,13 +3566,13 @@ def report_proforma():
             if is_team:
                 fixed_hdr   = ['Booking ID', 'Customer', 'Team Member', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
-                                'Timing Basis', 'Days',
+                                'Chain', 'Days',
                                 'Revenue', 'Commission', '% Comm']
                 fixed_w     = [11, 30, 20, 35, 28, 12, 12, 14, 12, 7, 16, 14, 9]
             else:
                 fixed_hdr   = ['Booking ID', 'Customer', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
-                                'Timing Basis', 'Days',
+                                'Chain', 'Days',
                                 'Revenue', 'Commission', '% Comm']
                 fixed_w     = [11, 30, 38, 28, 12, 12, 14, 12, 7, 16, 14, 9]
 
