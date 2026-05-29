@@ -2796,13 +2796,20 @@ def report_proforma():
     avg_pct_off = round((avg_ratio - 1.0) * 100, 1)   # negative = below contracted
     n_variance  = len(ratios)
 
+    # ── Parse default days (fallback when no brand/chain timing data) ─────────
+    try:
+        default_days = max(1, min(365, int(request.args.get('default_days', 90) or 90)))
+    except (ValueError, TypeError):
+        default_days = 90
+
     # ── Landing page (no export) ──────────────────────────────────────────────
     if request.args.get('export') != 'xlsx':
         return render_template('report_proforma.html',
                                avg_ratio_pct=round(avg_ratio * 100, 1),
                                avg_pct_off=avg_pct_off,
                                n_variance=n_variance,
-                               default_adj=int(round(avg_pct_off, 0)))
+                               default_adj=int(round(avg_pct_off, 0)),
+                               default_days=default_days)
 
     # ── Adjustment % from form (default = historical variance) ────────────────
     try:
@@ -2844,7 +2851,11 @@ def report_proforma():
     def proj_days(brand, chain):
         b  = (brand or '').strip()
         ch = (chain or '').strip()
-        return int(round(brand_avg.get(b) or chain_avg.get(ch) or 90.0))
+        if b and brand_avg.get(b):
+            return int(round(brand_avg[b])), 'Brand'
+        if ch and chain_avg.get(ch):
+            return int(round(chain_avg[ch])), 'Chain'
+        return default_days, 'Default'
 
     # ── Max meeting year ──────────────────────────────────────────────────────
     row = db.execute(
@@ -2973,25 +2984,27 @@ def report_proforma():
             # Team: always Pipeline Revenue
             rev = float(r['Revenue'] or 0)
         data[year][who].append({
-            'bid':       bid,
-            'customer':  r['customer_name'],
-            'associate': r['BookingAssociate'] or '',
-            'meeting':   r['meeting_name'],
-            'hotel':     r['hotel'],
-            'start':     fmt_date(r['start_date']),
-            'end':       fmt_date(r['end_date']),
-            'paid_date': pd,
-            'revenue':   rev,
-            'amount':    float(r['FinalPayment'] or 0),
-            'month':     pd.month,
-            'projected': False,
-            'src':       'paid',
+            'bid':            bid,
+            'customer':       r['customer_name'],
+            'associate':      r['BookingAssociate'] or '',
+            'meeting':        r['meeting_name'],
+            'hotel':          r['hotel'],
+            'start':          fmt_date(r['start_date']),
+            'end':            fmt_date(r['end_date']),
+            'paid_date':      pd,
+            'revenue':        rev,
+            'amount':         float(r['FinalPayment'] or 0),
+            'month':          pd.month,
+            'projected':      False,
+            'src':            'paid',
+            'days_src':       None,
+            'proj_days_used': None,
         })
 
     for r in unpaid_rows:
         ed = parse_dt(r['end_date'])
         if not ed: continue
-        days = proj_days(r['Brand'], r['Chain'])
+        days, days_src = proj_days(r['Brand'], r['Chain'])
         pd   = ed + _td(days=days)
         year = min(pd.year, max_meeting_year + 2)
         if year < 2026:
@@ -3027,19 +3040,21 @@ def report_proforma():
             continue
 
         data[year][who].append({
-            'bid':       bid,
-            'customer':  r['customer_name'],
-            'associate': r['BookingAssociate'] or '',
-            'meeting':   r['meeting_name'],
-            'hotel':     r['hotel'],
-            'start':     fmt_date(r['start_date']),
-            'end':       fmt_date(r['end_date']),
-            'paid_date': pd,
-            'revenue':   rev,
-            'amount':    amt,
-            'month':     pd.month,
-            'projected': True,
-            'src':       src,
+            'bid':            bid,
+            'customer':       r['customer_name'],
+            'associate':      r['BookingAssociate'] or '',
+            'meeting':        r['meeting_name'],
+            'hotel':          r['hotel'],
+            'start':          fmt_date(r['start_date']),
+            'end':            fmt_date(r['end_date']),
+            'paid_date':      pd,
+            'revenue':        rev,
+            'amount':         amt,
+            'month':          pd.month,
+            'projected':      True,
+            'src':            src,
+            'days_src':       days_src,
+            'proj_days_used': days,
         })
 
     # Sort each bucket by payment date
@@ -3298,7 +3313,7 @@ def report_proforma():
     ws_avg.merge_cells('A2:E2')
     s = ws_avg['A2']
     s.value = (f'Based on payments received {six_months_ago} – {today}  │  '
-               f'Brand avg used first → Chain avg → 90-day default')
+               f'Brand avg used first → Chain avg → {default_days}-day default')
     s.font      = Font(name='Calibri', italic=True, color='555555', size=9)
     s.alignment = Alignment(horizontal='center')
     ws_avg.row_dimensions[2].height = 14
@@ -3451,7 +3466,7 @@ def report_proforma():
     def_cell.fill      = hfill('808080')
     def_cell.border    = bdr
     def_cell.alignment = Alignment(horizontal='left')
-    def2 = ws_avg.cell(row=ch_row, column=2, value=90)
+    def2 = ws_avg.cell(row=ch_row, column=2, value=default_days)
     def2.font          = Font(name='Calibri', bold=True, size=9, color='FFFFFF')
     def2.fill          = hfill('808080')
     def2.border        = bdr
@@ -3550,22 +3565,26 @@ def report_proforma():
             is_team = (who_key == 'team')
 
             # Column definitions
-            # fixed cols: Booking ID | ...text... | Revenue | Commission | % Comm | Jan...Dec | Year Total
+            # fixed cols: Booking ID | ...text... | Timing Basis | Days | Revenue | Commission | % Comm | Jan...Dec | Year Total
             if is_team:
                 fixed_hdr   = ['Booking ID', 'Customer', 'Team Member', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
+                                'Timing Basis', 'Days',
                                 'Revenue', 'Commission', '% Comm']
-                fixed_w     = [11, 30, 20, 35, 28, 12, 12, 14, 16, 14, 9]
+                fixed_w     = [11, 30, 20, 35, 28, 12, 12, 14, 12, 7, 16, 14, 9]
             else:
                 fixed_hdr   = ['Booking ID', 'Customer', 'Meeting Name', 'Hotel',
                                 'Start Date', 'End Date', 'Paid / Proj Date',
+                                'Timing Basis', 'Days',
                                 'Revenue', 'Commission', '% Comm']
-                fixed_w     = [11, 30, 38, 28, 12, 12, 14, 16, 14, 9]
+                fixed_w     = [11, 30, 38, 28, 12, 12, 14, 12, 7, 16, 14, 9]
 
-            nf          = len(fixed_hdr)
-            rev_col_i   = nf - 2     # 1-based index of Revenue column
-            comm_col_i  = nf - 1     # 1-based index of Commission column
-            pct_col_i   = nf         # 1-based index of % Comm column
+            nf                 = len(fixed_hdr)
+            timing_basis_col_i = nf - 4     # 1-based index of Timing Basis column
+            timing_days_col_i  = nf - 3     # 1-based index of Days column
+            rev_col_i          = nf - 2     # 1-based index of Revenue column
+            comm_col_i         = nf - 1     # 1-based index of Commission column
+            pct_col_i          = nf         # 1-based index of % Comm column
             all_hdr     = fixed_hdr + MONTH_ABBR + ['Year Total']
             all_w       = fixed_w + [10]*12 + [14]
             ncols       = len(all_hdr)
@@ -3626,15 +3645,19 @@ def report_proforma():
 
                 rev = rd.get('revenue', 0.0) or 0.0
                 amt = rd['amount']
+                t_basis = rd.get('days_src') or ''           # e.g. 'Brand', 'Chain', 'Default', or ''
+                t_days  = rd.get('proj_days_used')           # int or None for paid rows
                 if is_team:
                     fvals = [rd.get('bid',''), rd.get('customer',''), rd['associate'], rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
                              rd['paid_date'].strftime('%m/%d/%Y'),
+                             t_basis, t_days,
                              rev if rev else None, amt, None]   # None = % formula below
                 else:
                     fvals = [rd.get('bid',''), rd.get('customer',''), rd['meeting'], rd['hotel'],
                              rd['start'], rd['end'],
                              rd['paid_date'].strftime('%m/%d/%Y'),
+                             t_basis, t_days,
                              rev if rev else None, amt, None]   # None = % formula below
 
                 monthly = [None] * 12
@@ -3651,7 +3674,12 @@ def report_proforma():
                     cell.font   = Font(name='Calibri', size=9, italic=is_proj,
                                        color='555555' if is_proj else '000000')
                     if ci <= nf:
-                        if ci < rev_col_i:   # text columns
+                        if ci == timing_basis_col_i:   # Timing Basis
+                            cell.alignment = Alignment(horizontal='center')
+                        elif ci == timing_days_col_i:  # Days
+                            cell.number_format = '0'
+                            cell.alignment = Alignment(horizontal='center')
+                        elif ci < rev_col_i:   # text columns
                             # wrap Customer, Meeting Name, Hotel; not Booking ID or date/name cols
                             wrap = (2 <= ci <= (5 if is_team else 4))
                             cell.alignment = Alignment(horizontal='left', wrap_text=wrap)

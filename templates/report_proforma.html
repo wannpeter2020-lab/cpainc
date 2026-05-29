@@ -64,6 +64,15 @@
             </div>
             <div class="form-text" id="adjPreview">Loading…</div>
           </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Default days <span class="text-muted fw-normal">(no brand/chain match)</span></label>
+            <div class="input-group" style="max-width:220px">
+              <input type="number" name="default_days" id="defaultDays" class="form-control"
+                     value="{{ default_days }}" step="1" min="1" max="365">
+              <span class="input-group-text">days</span>
+            </div>
+            <div class="form-text">Fallback when no brand or chain timing data is available. Shown in the report's <em>Timing Basis</em> column.</div>
+          </div>
           <button type="submit" class="btn btn-success">
             <i class="bi bi-file-earmark-excel me-2"></i>Generate &amp; Download Excel
           </button>
@@ -100,7 +109,7 @@
         </table>
         <p class="mb-1"><strong>Revenue column:</strong> Kristin = HHR room revenue (if available) or contracted commissionable revenue &middot; Team = Pipeline Revenue</p>
         <p class="mb-1"><strong>Rollover logic:</strong> if a meeting's projected pay date falls in 2027 or later, it appears on that year's tab automatically.</p>
-        <p class="mb-0"><strong>Days timing:</strong> brand 6-month avg → chain 6-month avg → 90-day default.</p>
+        <p class="mb-0"><strong>Days timing:</strong> brand 6-month avg → chain 6-month avg → {{ default_days }}-day default (editable). Each unpaid row shows its <em>Timing Basis</em> (Brand / Chain / Default) and the exact days used.</p>
       </div>
     </div>
   </div>
