@@ -2849,10 +2849,7 @@ def report_proforma():
             chain_avg[row[0]] = row[1]
 
     def proj_days(brand, chain):
-        b  = (brand or '').strip()
         ch = (chain or '').strip()
-        if b and brand_avg.get(b):
-            return int(round(brand_avg[b])), 'Brand'
         if ch and chain_avg.get(ch):
             return int(round(chain_avg[ch])), 'Chain'
         return default_days, 'Default'
@@ -3313,7 +3310,7 @@ def report_proforma():
     ws_avg.merge_cells('A2:E2')
     s = ws_avg['A2']
     s.value = (f'Based on payments received {six_months_ago} – {today}  │  '
-               f'Brand avg used first → Chain avg → {default_days}-day default')
+               f'Chain avg used first → {default_days}-day default')
     s.font      = Font(name='Calibri', italic=True, color='555555', size=9)
     s.alignment = Alignment(horizontal='center')
     ws_avg.row_dimensions[2].height = 14
