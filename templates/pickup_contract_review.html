@@ -76,48 +76,28 @@
 
   {# ── Contact Fields ── #}
   <div class="card mb-4" style="max-width:720px">
-    <div class="card-header">Contact Information <span class="text-muted small fw-normal">— extracted from contract</span></div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span>Current Contacts</span>
+      <span class="text-muted small fw-normal">— not changed by import · edit via the card</span>
+    </div>
     <div class="card-body">
-      {# Capture extracted hotel contact once for use in both primary and secondary fields #}
-      {% set hc_name  = extracted.hotel_contact or config['hotel_contact'] or '' %}
-      {% set hc_email = extracted.hotel_contact_email or config['hotel_contact_email'] or '' %}
-      <div class="row g-3">
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Hotel Contact Name <span class="text-muted fw-normal small">(Primary — TO:)</span></label>
-          <input type="text" name="hotel_contact" class="form-control"
-                 value="{{ hc_name }}"
-                 placeholder="e.g. Isabella Costa">
+      <div class="row g-2 small">
+        <div class="col-12"><div class="fw-semibold text-muted border-bottom pb-1 mb-1">Primary Hotel Contact (To:)</div></div>
+        <div class="col-md-6"><span class="text-muted">Name: </span><strong>{{ config['hotel_contact'] or '—' }}</strong></div>
+        <div class="col-md-6"><span class="text-muted">Email: </span>
+          {% if config['hotel_contact_email'] %}<a href="mailto:{{ config['hotel_contact_email'] }}">{{ config['hotel_contact_email'] }}</a>{% else %}—{% endif %}
         </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Hotel Contact Email <span class="text-muted fw-normal small">(Primary)</span></label>
-          <input type="text" name="hotel_contact_email" class="form-control"
-                 value="{{ hc_email }}"
-                 placeholder="e.g. i.costa@westin.com">
+        {% if config['hotel_contact2'] %}
+        <div class="col-12 mt-1"><div class="fw-semibold text-muted border-bottom pb-1 mb-1">Secondary Hotel Contact (CC:)</div></div>
+        <div class="col-md-6"><span class="text-muted">Name: </span><strong>{{ config['hotel_contact2'] or '—' }}</strong></div>
+        <div class="col-md-6"><span class="text-muted">Email: </span>
+          {% if config['hotel_contact2_email'] %}<a href="mailto:{{ config['hotel_contact2_email'] }}">{{ config['hotel_contact2_email'] }}</a>{% else %}—{% endif %}
         </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Hotel Contact 2 Name <span class="text-muted fw-normal small">(Secondary — CC:)</span></label>
-          <input type="text" name="hotel_contact2" class="form-control"
-                 value="{{ config['hotel_contact2'] or hc_name }}"
-                 placeholder="e.g. Isabella Costa">
-          <div class="form-text">Pre-filled to match primary — update to the pickup report contact later.</div>
-        </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Hotel Contact 2 Email <span class="text-muted fw-normal small">(Secondary)</span></label>
-          <input type="text" name="hotel_contact2_email" class="form-control"
-                 value="{{ config['hotel_contact2_email'] or hc_email }}"
-                 placeholder="e.g. i.costa@westin.com">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Client Contact Name</label>
-          <input type="text" name="group_contact" class="form-control"
-                 value="{{ extracted.group_contact or config['group_contact'] or '' }}"
-                 placeholder="e.g. Jane Smith">
-        </div>
-        <div class="col-md-6">
-          <label class="form-label fw-semibold">Client Contact Email</label>
-          <input type="text" name="group_contact_email" class="form-control"
-                 value="{{ extracted.group_contact_email or config['group_contact_email'] or '' }}"
-                 placeholder="e.g. jsmith@client.org">
+        {% endif %}
+        <div class="col-12 mt-1"><div class="fw-semibold text-muted border-bottom pb-1 mb-1">Client Contact</div></div>
+        <div class="col-md-6"><span class="text-muted">Name: </span><strong>{{ config['group_contact'] or '—' }}</strong></div>
+        <div class="col-md-6"><span class="text-muted">Email: </span>
+          {% if config['group_contact_email'] %}<a href="mailto:{{ config['group_contact_email'] }}">{{ config['group_contact_email'] }}</a>{% else %}—{% endif %}
         </div>
       </div>
     </div>

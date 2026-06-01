@@ -9974,21 +9974,8 @@ def pickup_upload_contract(cid):
                 rate       = float(rate_str)   if rate_str   else config['contracted_rate']
                 atr        = float(atr_str)    if atr_str    else config['attrition_pct']
                 rebate     = float(rebate_str) if rebate_str else None
-                hotel_contact       = request.form.get('hotel_contact', '').strip() or None
-                hotel_contact_email = request.form.get('hotel_contact_email', '').strip() or None
-                # Secondary hotel contact — defaults to same as primary (the sales person)
-                hotel_contact2      = request.form.get('hotel_contact2', '').strip() or hotel_contact
-                hotel_contact2_email= request.form.get('hotel_contact2_email', '').strip() or hotel_contact_email
-                group_contact       = request.form.get('group_contact', '').strip() or None
-                group_contact_email = request.form.get('group_contact_email', '').strip() or None
-
-                # Don't overwrite an existing hotel contact name — pass None so
-                # COALESCE(?, existing) preserves the card's current value.
-                if (config['hotel_contact'] or '').strip():
-                    hotel_contact        = None
-                    hotel_contact_email  = None
-                    hotel_contact2       = None
-                    hotel_contact2_email = None
+                # Contact fields are never updated on contract import —
+                # block/rate/cutoff/attrition only.
 
                 contract_data     = request.form.get('_contract_data_b64', '')
                 contract_filename = request.form.get('_contract_filename', '')
@@ -10006,20 +9993,11 @@ def pickup_upload_contract(cid):
                         block_is_estimated   = 0,
                         contract_filename    = ?,
                         contract_data        = ?,
-                        block_review_date    = COALESCE(?, block_review_date),
-                        hotel_contact        = COALESCE(?, hotel_contact),
-                        hotel_contact_email  = COALESCE(?, hotel_contact_email),
-                        hotel_contact2       = COALESCE(?, hotel_contact2),
-                        hotel_contact2_email = COALESCE(?, hotel_contact2_email),
-                        group_contact        = COALESCE(?, group_contact),
-                        group_contact_email  = COALESCE(?, group_contact_email)
+                        block_review_date    = COALESCE(?, block_review_date)
                     WHERE id = ?
                 ''', (json.dumps(block), rate, rebate, cutoff, atr,
                       contract_filename or None, file_blob,
-                      block_review_date,
-                      hotel_contact, hotel_contact_email,
-                      hotel_contact2, hotel_contact2_email,
-                      group_contact, group_contact_email, cid))
+                      block_review_date, cid))
 
                 # Cascade rich extraction → cost_savings_report rows
                 cs_flash = None
