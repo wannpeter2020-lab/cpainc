@@ -2792,6 +2792,231 @@ def parse_crf_excel(file_bytes):
     return {'rfp_meta': rfp_meta, 'hotels': hotels}
 
 
+def parse_cc_contract(file_bytes, filename=''):
+    """
+    Parse a convention/event center License Agreement or Use Agreement.
+    Extracts: venue_name, organization, rental_fee, net_rental_fee, fb_minimum,
+    move_in_date, move_out_date, critical_dates (deposits + cancellation deadlines).
+    Uses the same vision/text pipeline as parse_contract_document.
+    Returns dict with those keys + 'error', 'raw_text'.
+    """
+    import sys, importlib, os, re as _re, json as _json
+    import io as _io
+
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    raw_text = ''
+    try:
+        if ext == 'pdf':
+            import pdfplumber
+            with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+                raw_text = '\n'.join((p.extract_text() or '') for p in pdf.pages)
+        elif ext in ('docx', 'doc'):
+            try:
+                import docx
+                doc = docx.Document(_io.BytesIO(file_bytes))
+                raw_text = '\n'.join(p.text for p in doc.paragraphs)
+                for table in doc.tables:
+                    for row in table.rows:
+                        raw_text += '\n' + '\t'.join(c.text for c in row.cells)
+            except ImportError:
+                return {'error': 'python-docx not installed'}
+    except Exception as e:
+        return {'error': f'Could not read file: {e}', 'raw_text': ''}
+
+    _CONTRACT_KEYWORDS = {'license', 'rental', 'agreement', 'licensee', 'licensor',
+                          'convention', 'facility', 'venue', 'deposit', 'event',
+                          'operator', 'center', 'hall', 'exhibit', 'meeting'}
+    _text_lower = raw_text.lower()
+    _plain_words = set(_re.findall(r'\b[a-z]{3,}\b', _text_lower))
+    _has_keywords = bool(_CONTRACT_KEYWORDS & _plain_words)
+    _text_meaningful = bool(raw_text) and len(raw_text.split()) >= 50 and _has_keywords
+    is_scanned = (ext == 'pdf' and not _text_meaningful)
+
+    api_key = ''
+    try:
+        if 'config' in sys.modules:
+            importlib.reload(sys.modules['config'])
+        else:
+            import config as _cfg
+            sys.modules['config'] = _cfg
+        api_key = sys.modules['config'].ANTHROPIC_API_KEY.strip()
+    except Exception:
+        pass
+    if not api_key:
+        api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
+    if not api_key:
+        return {'error': 'No Anthropic API key configured', 'raw_text': raw_text}
+
+    import anthropic as _ant
+    client = _ant.Anthropic(api_key=api_key)
+
+    _cc_prompt = (
+        'Extract ALL of the following from this convention/event center License Agreement or Use Agreement. '
+        'Return ONLY valid JSON — no markdown, no explanation.\n\n'
+        'Required keys:\n'
+        '  "venue_name"       — full venue/facility name, or null\n'
+        '  "organization"     — the licensee/client organization name, or null\n'
+        '  "venue_contact"    — venue sales/event contact name, or null\n'
+        '  "venue_email"      — venue contact email, or null\n'
+        '  "rental_fee"       — gross/base rental fee as a number (e.g. 667655.00), or null\n'
+        '  "net_rental_fee"   — net rental fee after discounts (e.g. 133531.00), or null\n'
+        '  "fb_minimum"       — food and beverage minimum commitment as a number, or null\n'
+        '  "move_in_date"     — move-in date as "YYYY-MM-DD", or null\n'
+        '  "move_out_date"    — move-out date as "YYYY-MM-DD", or null\n'
+        '  "event_start_date" — first event/program day as "YYYY-MM-DD", or null\n'
+        '  "event_end_date"   — last event/program day as "YYYY-MM-DD", or null\n'
+        '  "critical_dates"   — array of important dates:\n'
+        '    [{"date":"YYYY-MM-DD","label":"description","amount":number_or_null}, ...]\n'
+        '    Include: ALL deposit due dates + amounts, cancellation deadlines with amounts,\n'
+        '    insurance certificate due date, F&B payment due date, contract return deadline.\n'
+        '    Return [] if none found.\n'
+        '\nReturn ONLY the JSON object.'
+    )
+
+    ai_data = {}
+    try:
+        if is_scanned:
+            import fitz, base64
+            from PIL import Image as _PILImage
+            doc = fitz.open(stream=file_bytes, filetype='pdf')
+            content = [{'type': 'text', 'text': _cc_prompt}]
+            images_added = 0
+            for page_num in range(min(len(doc), 10)):
+                page = doc[page_num]
+                embedded = sorted(page.get_images(full=True), key=lambda x: x[2]*x[3], reverse=True)
+                _added_this_page = False
+                for img_info in embedded[:1]:
+                    xref, w, h = img_info[0], img_info[2], img_info[3]
+                    img_data_e = doc.extract_image(xref)
+                    raw_img = img_data_e['image']
+                    if w*h < 100_000 or len(raw_img) < 30_000:
+                        continue
+                    if w > 1600:
+                        pil = _PILImage.open(_io.BytesIO(raw_img))
+                        scale = 1600/w
+                        pil = pil.resize((1600, int(h*scale)), _PILImage.LANCZOS)
+                        buf = _io.BytesIO()
+                        pil.save(buf, format='JPEG', quality=85)
+                        raw_img = buf.getvalue()
+                    mime = 'image/jpeg' if raw_img[:3] == b'\xff\xd8\xff' else 'image/png'
+                    img_b64 = base64.standard_b64encode(raw_img).decode()
+                    content.append({'type': 'image', 'source': {'type': 'base64', 'media_type': mime, 'data': img_b64}})
+                    images_added += 1
+                    _added_this_page = True
+                    break
+                # Fallback: render page at 150 DPI when no usable embedded image
+                if not _added_this_page:
+                    mat = fitz.Matrix(150/72, 150/72)
+                    pix = page.get_pixmap(matrix=mat)
+                    raw_render = pix.tobytes('jpeg')
+                    img_b64 = base64.standard_b64encode(raw_render).decode()
+                    content.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg', 'data': img_b64}})
+                    images_added += 1
+                if images_added >= 8:
+                    break
+            doc.close()
+            resp = client.messages.create(model='claude-opus-4-5', max_tokens=2048,
+                                           messages=[{'role': 'user', 'content': content}])
+        else:
+            text_for_ai = raw_text[:25000]
+            resp = client.messages.create(
+                model='claude-opus-4-5', max_tokens=2048,
+                messages=[{'role': 'user', 'content': _cc_prompt + '\n\nDocument text:\n' + text_for_ai}])
+
+        raw_j = resp.content[0].text.strip()
+        raw_j = _re.sub(r'^```[a-z]*\n?', '', raw_j)
+        raw_j = _re.sub(r'\n?```$', '', raw_j)
+        ai_data = _json.loads(raw_j)
+    except Exception as e:
+        return {'error': f'AI extraction failed: {e}', 'raw_text': raw_text}
+
+    def _sf(v):
+        try: return float(v) if v is not None else None
+        except: return None
+
+    def _norm_date(v):
+        """Parse a date string to YYYY-MM-DD, or None for null/invalid values."""
+        if not v or not isinstance(v, str): return None
+        v = v.strip()
+        if not v or v.lower() in ('none', 'null', 'n/a', 'na', 'tbd', 'upon execution',
+                                  'at signing', 'upon signing', 'at execution'): return None
+        try:
+            from datetime import datetime as _dt
+            for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m/%d/%y', '%B %d, %Y', '%b %d, %Y'):
+                try: return _dt.strptime(v[:len(fmt)+2], fmt).strftime('%Y-%m-%d')
+                except: pass
+        except: pass
+        return None
+
+    raw_cd = ai_data.get('critical_dates') or []
+    if isinstance(raw_cd, dict):
+        raw_cd = [{'date': v, 'label': k.replace('_', ' ').title(), 'amount': None}
+                  for k, v in raw_cd.items() if v]
+    critical_dates = []
+    seen = set()
+    _pending_relative = []
+    _rel_pat = _re.compile(r'(\d+)\s+days?\s+(?:prior|before)', _re.IGNORECASE)
+
+    for cd in (raw_cd if isinstance(raw_cd, list) else []):
+        if not isinstance(cd, dict): continue
+        raw_dt = cd.get('date')
+        lbl = str(cd.get('label', '')).strip()
+        amt = _sf(cd.get('amount'))
+        if raw_dt and isinstance(raw_dt, str) and any(
+                kw in raw_dt.lower() for kw in ('signing', 'execution', 'upon')):
+            key = ('signing', lbl[:20])
+            if key not in seen:
+                seen.add(key)
+                critical_dates.append({'date': 'At signing', 'label': lbl, 'amount': amt})
+            continue
+        if not raw_dt and _rel_pat.search(lbl):
+            _pending_relative.append({'label': lbl, 'amount': amt})
+            continue
+        iso = _norm_date(str(raw_dt)) if raw_dt is not None else None
+        if not iso: continue
+        key = (iso, lbl[:20])
+        if key not in seen:
+            seen.add(key)
+            critical_dates.append({'date': iso, 'label': lbl, 'amount': amt})
+
+    _anchor = (_norm_date(ai_data.get('move_in_date')) or
+               _norm_date(ai_data.get('event_start_date')))
+    if _anchor:
+        from datetime import datetime as _dt_cc, timedelta as _td_cc
+        _anchor_dt = _dt_cc.strptime(_anchor, '%Y-%m-%d').date()
+        for cd in _pending_relative:
+            _rm = _rel_pat.search(cd['label'])
+            if _rm:
+                try:
+                    n = int(_rm.group(1))
+                    calc_iso = (_anchor_dt - _td_cc(days=n)).strftime('%Y-%m-%d')
+                    key = (calc_iso, cd['label'][:20])
+                    if key not in seen:
+                        seen.add(key)
+                        critical_dates.append({'date': calc_iso, 'label': cd['label'], 'amount': cd['amount']})
+                except Exception:
+                    pass
+
+    critical_dates.sort(key=lambda x: ('0' if x['date'] == 'At signing' else '1') + (x['date'] or ''))
+
+    return {
+        'venue_name':       ai_data.get('venue_name') or None,
+        'organization':     ai_data.get('organization') or None,
+        'venue_contact':    ai_data.get('venue_contact') or None,
+        'venue_email':      ai_data.get('venue_email') or None,
+        'rental_fee':       _sf(ai_data.get('rental_fee')),
+        'net_rental_fee':   _sf(ai_data.get('net_rental_fee')),
+        'fb_minimum':       _sf(ai_data.get('fb_minimum')),
+        'move_in_date':     _norm_date(ai_data.get('move_in_date')),
+        'move_out_date':    _norm_date(ai_data.get('move_out_date')),
+        'event_start_date': _norm_date(ai_data.get('event_start_date')),
+        'event_end_date':   _norm_date(ai_data.get('event_end_date')),
+        'critical_dates':   critical_dates,
+        'raw_text':         raw_text,
+        'error':            None,
+    }
+
+
 # ── NCSL Pickup Report Excel Importer ────────────────────────────────────────
 
 def parse_pickup_xlsx(file_bytes):
