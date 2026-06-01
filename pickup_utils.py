@@ -4619,7 +4619,81 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
             _seen_dates.add(_key)
             _direct_critical.append({'date': _iso, 'label': 'Cancellation penalty deadline', 'amount': _amt})
 
-    # ── 8. Deposit due at signing (no calendar date) ──────────────────────────
+    # ── 8. Relative dates — "N days prior to the Event" ─────────────────────────
+    _event_start_iso = None
+    if _direct_years:
+        _blk0 = _direct_years[0].get('contracted_block', {})
+        if _blk0:
+            _event_start_iso = sorted(_blk0.keys())[0]
+    if not _event_start_iso and ai_data.get('contracted_block'):
+        _blk0 = ai_data.get('contracted_block', {})
+        if isinstance(_blk0, dict) and _blk0:
+            _event_start_iso = sorted(_blk0.keys())[0]
+
+    if _event_start_iso:
+        from datetime import datetime as _dt_rel, timedelta as _td_rel
+        try:
+            _event_start_dt = _dt_rel.strptime(_event_start_iso, '%Y-%m-%d').date()
+        except Exception:
+            _event_start_dt = None
+
+        if _event_start_dt:
+            _relative_re = _rer.compile(
+                r'(\d+)\s+days?\s+(?:prior\s+to|before)\s+'
+                r'(?:the\s+)?(?:event|meeting|arrival|check[- ]?in|first\s+day|start)',
+                _rer.IGNORECASE
+            )
+            for _rm in _relative_re.finditer(raw_text):
+                try:
+                    _n_days = int(_rm.group(1))
+                except Exception:
+                    continue
+                if _n_days <= 0 or _n_days > 730:
+                    continue
+                _calc_date = _event_start_dt - _td_rel(days=_n_days)
+                _calc_iso  = _calc_date.strftime('%Y-%m-%d')
+                _look_back = raw_text[max(0, _rm.start()-400):_rm.start()]
+                _label = None
+                _quoted = _rer.findall(r'"([^"]{3,60})"', _look_back)
+                if _quoted:
+                    _label = _quoted[-1].strip()
+                _TITLE_STOPS = _rer.compile(
+                    r'\s+(?:at\s+that\s+time|hotel\s+will|hotel\s+shall|group\s+must|'
+                    r'group\s+shall|no\s+later|the\s+hotel|all\s+room|prior\s+to)',
+                    _rer.IGNORECASE
+                )
+                _SKIP_LINES = {'timeline action', 'action', 'timeline', 'event', 'description', 'note', 'dates'}
+                if not _label:
+                    _lines = [ln.strip() for ln in _look_back.split('\n') if ln.strip()]
+                    for _ln in reversed(_lines[-6:]):
+                        _ll = _ln.lower()
+                        if (_ll in _SKIP_LINES or _ll.startswith('the ') or
+                                _ll.startswith('if ') or _ll.startswith('in order') or
+                                _ll.startswith('should ') or _ll.startswith('upon ')):
+                            continue
+                        _stop = _TITLE_STOPS.search(_ln)
+                        _candidate = _ln[:_stop.start()].strip() if _stop else _ln.strip()
+                        if (4 < len(_candidate) < 70
+                                and not _candidate.endswith('.')
+                                and not _candidate.endswith(',')
+                                and _candidate[0].isupper()):
+                            _label = _candidate
+                            break
+                if not _label:
+                    _label = f'{_n_days} days prior to event'
+                _label_full = f'{_label}  ({_n_days} days prior to event)'
+                from datetime import date as _today_date
+                _today_d = _today_date.today()
+                if _calc_date >= _event_start_dt:
+                    continue
+                if (_today_d - _calc_date).days > 1825:
+                    continue
+                _key = (_calc_iso, 'rel:' + str(_n_days))
+                if _key not in _seen_dates:
+                    _seen_dates.add(_key)
+                    _direct_critical.append({'date': _calc_iso, 'label': _label_full, 'amount': None})
+
+    # ── 9. Deposit due at signing (no calendar date) ──────────────────────────
     # If a deposit is mentioned without a specific date ("at the time of signing",
     # "upon execution"), record it with date = "At signing".
     _signing_deposit_re = _rer.compile(
