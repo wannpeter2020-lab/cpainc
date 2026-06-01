@@ -577,10 +577,10 @@ _GUEST_RE_SONESTA = re.compile(
 )
 
 # Holiday Inn / IHG "Group Rooming List" format:
-#   RoomNo  Last,First  Conf#(7-10 digits)  Arrival(MM-DD-YY)  Departure(MM-DD-YY)  RoomType  [Status]  Adl  Chl  Nts  Rms
-# Same column layout as Sonesta but with a REQUIRED leading room number.
+#   [RoomNo]  Last,First  Conf#(7-10 digits)  Arrival(MM-DD-YY)  Departure(MM-DD-YY)  RoomType  [Status]  Adl  Chl  Nts  Rms
+# Room number is OPTIONAL — IHG only prints it on the first guest in each room.
 _GUEST_RE_HOLIDAY_INN = re.compile(
-    r'^\d+[ \t]+'                                    # Room number (required, e.g. 101)
+    r'^(?:\d+[ \t]+)?'                               # Room number (optional, e.g. 101)
     r'([A-Za-z][A-Za-z,\'\-\.\ \t]{1,40}?)[ \t]+'  # Last,First name
     r'(\d{7,10})[ \t]+'                              # Conf# (7-10 digits)
     r'(\d{2}-\d{2}-\d{2})[ \t]+'                    # Arrival   MM-DD-YY (dashes)
@@ -591,6 +591,21 @@ _GUEST_RE_HOLIDAY_INN = re.compile(
     r'\d+[ \t]+'                                     # Children
     r'(\d+)[ \t]+'                                   # Nights (explicit)
     r'(\d+)',                                         # Rooms
+    re.MULTILINE
+)
+
+# IHG/Ana "Group Rooming List" format (conf# FIRST, then optional sharewithnum, then name):
+#   Conf#(7-10 digits)  [ShareWith#]  Last, First  M/D/YY  M/D/YY  RoomType  $Rate  [Billing]
+# Unlike all other parsers, the conf# appears BEFORE the guest name.
+# Dates use M/D/YY with possible single-digit month/day (e.g. 8/23/26).
+_GUEST_RE_IHG_CONF_FIRST = re.compile(
+    r'^(\d{7,10})[ \t]+'                         # Conf# (first)
+    r'(?:[\d,]{5,15}[ \t]+)?'                    # Optional sharewithnum (e.g. 50,019,561)
+    r'([A-Za-z][A-Za-z,\'\-\.\ ]+?)[ \t]*'      # Last, First name (lazy — stops before digit)
+    r'(\d{1,2}/\d{1,2}/\d{2})[ \t]+'            # Arrival   M/D/YY
+    r'(\d{1,2}/\d{1,2}/\d{2})[ \t]+'            # Departure M/D/YY
+    r'[A-Z]{2,6}[ \t]+'                          # Room type (TRAD, TRDD, PRKN, etc.)
+    r'\$[\d.]+',                                  # Rate
     re.MULTILINE
 )
 
@@ -992,6 +1007,33 @@ def parse_rooming_list_pdf(file_bytes):
                     'rooms':     rooms,
                 })
 
+        # ── Fallback: IHG/Ana "Group Rooming List" — conf# first, M/D/YY dates ──
+        if not guests:
+            for m in _GUEST_RE_IHG_CONF_FIRST.finditer(all_text):
+                conf_no  = m.group(1)
+                name_raw = m.group(2).strip().rstrip(',').rstrip()
+                arr_raw  = m.group(3)
+                dep_raw  = m.group(4)
+                if not name_raw:
+                    continue
+                try:
+                    arrival   = _mmddyy_to_iso(arr_raw)
+                    departure = _mmddyy_to_iso(dep_raw)
+                    nights    = (datetime.strptime(departure, '%Y-%m-%d') -
+                                 datetime.strptime(arrival,   '%Y-%m-%d')).days
+                except Exception:
+                    continue
+                if nights <= 0:
+                    continue
+                guests.append({
+                    'name':      name_raw,
+                    'conf_no':   conf_no,
+                    'arrival':   arrival,
+                    'departure': departure,
+                    'nights':    nights,
+                    'rooms':     1,
+                })
+
         # ── Final fallback: AI parser for unrecognized formats ──
         ai_parsed = False
         ai_error  = None
@@ -1063,18 +1105,27 @@ def _parse_date_flexible(val):
     """Try multiple date formats and return YYYY-MM-DD, or None."""
     if val is None:
         return None
+    # openpyxl returns datetime objects directly — handle first
+    from datetime import datetime as _dt, date as _date_cls
+    if isinstance(val, (_dt, _date_cls)):
+        try:
+            return val.strftime('%Y-%m-%d')
+        except Exception:
+            return None
     s = str(val).strip()
+    # Handle 'YYYY-MM-DD HH:MM:SS' from str(datetime) conversion
+    if len(s) > 10 and s[10] == ' ':
+        s = s[:10]
     for fmt in ('%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d', '%d-%b-%Y', '%b-%d-%Y',
                 '%d/%m/%Y', '%B %d, %Y', '%b %d, %Y', '%B-%d-%Y'):
         try:
-            from datetime import datetime as _dt
             return _dt.strptime(s, fmt).strftime('%Y-%m-%d')
         except ValueError:
             continue
     # Excel serial date (float/int)
     try:
         serial = float(s)
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import timedelta as _td
         base = _dt(1899, 12, 30)
         return (base + _td(days=serial)).strftime('%Y-%m-%d')
     except Exception:
@@ -3883,7 +3934,7 @@ Contract text:
         return {'error': str(e), 'contracted_block': {}}
 
 
-def parse_contract_document(file_bytes, filename=''):
+def parse_contract_document(file_bytes, filename='', hotel_hint=''):
     """
     Extract the contracted room block and key terms from a hotel group contract
     (PDF or Word .docx).
@@ -4049,6 +4100,11 @@ def parse_contract_document(file_bytes, filename=''):
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
 
+        hotel_hint_line = (
+            f'\nIMPORTANT: This contract covers multiple hotels. '
+            f'Extract data ONLY for the hotel named: "{hotel_hint}".\n'
+        ) if hotel_hint else ''
+
         # For long contracts send only pages that contain the header/signature block
         _text_for_ai = raw_text[:15000]
 
@@ -4066,6 +4122,7 @@ def parse_contract_document(file_bytes, filename=''):
             content = [{'type': 'text', 'text': (
                 'Extract ONLY the fields listed below from this hotel contract. '
                 'Return a JSON object with ONLY these keys — do NOT invent or guess room block data.\n'
+                + hotel_hint_line
             )}]
             images_added = 0
             for page_num in range(min(len(doc), 10)):
@@ -4121,6 +4178,7 @@ def parse_contract_document(file_bytes, filename=''):
             content.append({'type': 'text', 'text': (
                 'Extract ALL of the following from this hotel group contract. '
                 'Return ONLY valid JSON — no markdown, no explanation.\n'
+                + hotel_hint_line +
                 '\nRequired keys:\n'
                 '  "hotel"               — full hotel name, or null\n'
                 '  "organization"        — group/client org name, or null\n'
@@ -4144,6 +4202,7 @@ def parse_contract_document(file_bytes, filename=''):
             extraction_prompt = (
                 'Extract ONLY the fields below from this hotel contract text. '
                 'Return ONLY valid JSON — no markdown, no explanation.\n'
+                + hotel_hint_line +
                 '\nRequired keys:\n'
                 '  "hotel"               — full hotel name, or null\n'
                 '  "organization"        — group/client org name, or null\n'
@@ -4231,6 +4290,7 @@ def parse_contract_document(file_bytes, filename=''):
             full_prompt = (
                 'Extract group room block data from this hotel contract. '
                 'Return ONLY valid JSON.\n'
+                + hotel_hint_line +
                 '\nKeys:\n'
                 '  "contracted_block": {"YYYY-MM-DD": rooms, ...} or {}\n'
                 '  "contracted_rate": number or null\n'
