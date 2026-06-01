@@ -4192,18 +4192,301 @@ def parse_contract_document(file_bytes, filename=''):
         return {'contracted_block': {}, 'raw_text': raw_text,
                 'error': 'Could not extract room block — contract format not recognized'}
 
-    # Normalise critical_dates from AI: must be a list of {date, label, amount}
+    # ── Direct regex parser for critical dates (runs over full raw_text) ────────
+    # Catches deposit schedules, cancellation deadlines, and other dated clauses
+    # that may fall outside Claude's 15k-char window.
+
+    def _parse_any_date(s, min_year=2024):
+        """Try to parse a date string in multiple formats → YYYY-MM-DD or None.
+        Rejects dates before min_year to filter header/prep-date false positives."""
+        import re as _r2
+        from datetime import datetime as _DT
+        s = s.strip().rstrip(',').strip()
+        def _check(dt_obj):
+            if dt_obj and dt_obj.year >= min_year:
+                return dt_obj.strftime('%Y-%m-%d')
+            return None
+        # ISO
+        try:
+            return _check(_DT.strptime(s[:10], '%Y-%m-%d'))
+        except Exception: pass
+        # M/D/YY or M/D/YYYY
+        m = _r2.match(r'^(\d{1,2})/(\d{1,2})/(\d{2,4})$', s)
+        if m:
+            mo, dy, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if yr < 100: yr += 2000
+            try: return _check(_DT(yr, mo, dy))
+            except Exception: pass
+        # Month DD, YYYY  or  Month DD YYYY
+        MONTHS = {'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
+                  'july':7,'august':8,'september':9,'october':10,'november':11,'december':12}
+        m2 = _r2.match(r'^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$', s)
+        if m2:
+            mo_name = m2.group(1).lower()
+            if mo_name in MONTHS:
+                try: return _check(_DT(int(m2.group(3)), MONTHS[mo_name], int(m2.group(2))))
+                except Exception: pass
+        # DD Month YYYY
+        m3 = _r2.match(r'^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$', s)
+        if m3:
+            mo_name = m3.group(2).lower()
+            if mo_name in MONTHS:
+                try: return _check(_DT(int(m3.group(3)), MONTHS[mo_name], int(m3.group(1))))
+                except Exception: pass
+        return None
+
+    import re as _rer
+    _direct_critical = []
+    _seen_dates = set()  # deduplicate by (date, label[:20])
+
+    # Date token — matches most written and numeric date forms
+    _DT_PAT = (
+        r'(?:'
+        r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
+        r'\s+\d{1,2},?\s+\d{4}'
+        r'|\d{1,2}/\d{1,2}/\d{2,4}'
+        r'|\d{4}-\d{2}-\d{2}'
+        r'|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}'
+        r')'
+    )
+    _DOLLAR_PAT = r'\$\s*([\d,]+(?:\.\d{2})?)'
+
+    # ── 1. Deposit amounts with associated dates ──────────────────────────────
+    # Looks for patterns like:
+    #   "deposit of $X,XXX … due … [date]"
+    #   "[date] … deposit … $X,XXX"
+    #   "Initial/First/Second/Final deposit: $X,XXX … [date]"
+    _deposit_clause_re = _rer.compile(
+        r'(?P<prefix>(?:initial|first|second|third|fourth|final|non[-\s]?refundable|additional|advance|partial)?'
+        r'\s*deposit[^.]{0,250}?)'
+        r'(?P<date>' + _DT_PAT + r')',
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _deposit_clause_re.finditer(raw_text):
+        _clause = _m.group('prefix')
+        _date_str = _m.group('date').strip()
+        _iso = _parse_any_date(_date_str)
+        if not _iso:
+            continue
+        # Find dollar amount nearest to "deposit" in the clause
+        _amt = None
+        _amts = _rer.findall(_DOLLAR_PAT, _clause)
+        if _amts:
+            try: _amt = float(_amts[0].replace(',', ''))
+            except Exception: pass
+        # Build label from context
+        _prefix_lower = _clause.lower()
+        if 'initial' in _prefix_lower or 'first' in _prefix_lower:
+            _label = 'Initial deposit due'
+        elif 'second' in _prefix_lower:
+            _label = 'Second deposit due'
+        elif 'third' in _prefix_lower:
+            _label = 'Third deposit due'
+        elif 'final' in _prefix_lower:
+            _label = 'Final deposit due'
+        elif 'non' in _prefix_lower and 'refund' in _prefix_lower:
+            _label = 'Non-refundable deposit due'
+        else:
+            _label = 'Deposit due'
+        _key = (_iso, _label[:20])
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': _iso, 'label': _label, 'amount': _amt})
+
+    # Also catch date-first deposit patterns:
+    #   "[date] … deposit … $X,XXX"
+    _deposit_date_first_re = _rer.compile(
+        r'(?P<date>' + _DT_PAT + r')'
+        r'(?P<suffix>[^.]{0,200}?deposit[^.]{0,100}?)',
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _deposit_date_first_re.finditer(raw_text):
+        _date_str = _m.group('date').strip()
+        _iso = _parse_any_date(_date_str)
+        if not _iso:
+            continue
+        _suffix = _m.group('suffix')
+        _amts = _rer.findall(_DOLLAR_PAT, _suffix)
+        _amt = None
+        if _amts:
+            try: _amt = float(_amts[0].replace(',', ''))
+            except Exception: pass
+        _label = 'Deposit due'
+        _key = (_iso, _label[:20])
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': _iso, 'label': _label, 'amount': _amt})
+
+    # ── 2. Cancellation deadlines ─────────────────────────────────────────────
+    _cancel_re = _rer.compile(
+        r'cancel[^.]{0,200}?' + _DT_PAT,
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _cancel_re.finditer(raw_text):
+        _clause = _m.group(0)
+        _dates_found = _rer.findall(_DT_PAT, _clause)
+        for _ds in _dates_found:
+            _iso = _parse_any_date(_ds.strip())
+            if not _iso: continue
+            _amts = _rer.findall(_DOLLAR_PAT, _clause)
+            _amt = None
+            if _amts:
+                try: _amt = float(_amts[0].replace(',', ''))
+                except Exception: pass
+            _key = (_iso, 'Cancellation dead')
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                _direct_critical.append({'date': _iso, 'label': 'Cancellation deadline', 'amount': _amt})
+
+    # ── 3. Rooming list due date ──────────────────────────────────────────────
+    _rl_re = _rer.compile(
+        r'rooming\s+list[^.]{0,200}?' + _DT_PAT,
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _rl_re.finditer(raw_text):
+        _clause = _m.group(0)
+        _dates_found = _rer.findall(_DT_PAT, _clause)
+        for _ds in _dates_found:
+            _iso = _parse_any_date(_ds.strip())
+            if not _iso: continue
+            _key = (_iso, 'Rooming list due')
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                _direct_critical.append({'date': _iso, 'label': 'Rooming list due', 'amount': None})
+
+    # ── 4. Block / attrition review dates ────────────────────────────────────
+    _review_re = _rer.compile(
+        r'(?:block\s+review|attrition\s+review|pickup\s+review)[^.]{0,200}?' + _DT_PAT,
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _review_re.finditer(raw_text):
+        _clause = _m.group(0)
+        _dates_found = _rer.findall(_DT_PAT, _clause)
+        for _ds in _dates_found:
+            _iso = _parse_any_date(_ds.strip())
+            if not _iso: continue
+            _lbl = ('Attrition review date' if 'attrition' in _clause.lower() else 'Block review date')
+            _key = (_iso, _lbl[:20])
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                _direct_critical.append({'date': _iso, 'label': _lbl, 'amount': None})
+
+    # ── 5. Cutoff date — inject from the Exhibit A direct parser first ────────
+    # _direct_years already has the most accurate cutoff (parsed from the block table).
+    # Add it to critical_dates so it appears even if Claude missed it.
+    for _dy in _direct_years:
+        _co = _dy.get('cutoff_date')
+        if not _co: continue
+        _key = (_co, 'Cut-off date')
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': _co, 'label': 'Cut-off date', 'amount': None})
+
+    # Also scan the full text for cut-off mentions not in Exhibit A
+    _cutoff_re = _rer.compile(
+        r'cut[\s\-]?off[^.]{0,200}?' + _DT_PAT,
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _cutoff_re.finditer(raw_text):
+        _clause = _m.group(0)
+        _dates_found = _rer.findall(_DT_PAT, _clause)
+        for _ds in _dates_found:
+            _iso = _parse_any_date(_ds.strip())
+            if not _iso: continue
+            _key = (_iso, 'Cut-off date')
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                _direct_critical.append({'date': _iso, 'label': 'Cut-off date', 'amount': None})
+
+    # ── 6. Attrition review — require "review" or "damages" in same clause ──────
+    # This prevents meeting-block dates from being misidentified as review dates.
+    _atr_re = _rer.compile(
+        r'attrition[^.]{0,300}?(?:review|damages|waiver)[^.]{0,200}?' + _DT_PAT,
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _atr_re.finditer(raw_text):
+        _clause = _m.group(0)
+        _dates_found = _rer.findall(_DT_PAT, _clause)
+        for _ds in _dates_found:
+            _iso = _parse_any_date(_ds.strip())
+            if not _iso: continue
+            _key = (_iso, 'Attrition review d')
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                _direct_critical.append({'date': _iso, 'label': 'Attrition review date', 'amount': None})
+
+    # ── 7. Cancellation milestone schedule (liquidated damages table) ─────────
+    # Looks for date ranges followed by percentages and/or dollar amounts,
+    # typically in a cancellation schedule like:
+    #   "Date of signing to 3/11/2025  45% × rooms × rate = $65,712"
+    #   "3/12/2025 to 12/9/2025  65% × ... = $94,918"
+    # Match "Date of signing to [date] ... = $X,XXX" or "[date] to [date] ... = $X,XXX"
+    # Use [\s\S] instead of [^.] so decimal points in amounts like $129.00 don't stop the match.
+    _cancel_sched_re = _rer.compile(
+        r'(?:date\s+of\s+signing|' + _DT_PAT + r')\s+to\s+(' + _DT_PAT + r')'
+        r'[\s\S]{0,400}?=\s*\$\s*([\d,]+(?:\.\d{2})?)',
+        _rer.IGNORECASE
+    )
+    for _m in _cancel_sched_re.finditer(raw_text):
+        _ds = _m.group(1).strip() if _m.group(1) else ''
+        _iso = _parse_any_date(_ds)
+        if not _iso: continue
+        _raw_amt = _m.group(2) if _m.group(2) else ''
+        _amt = None
+        try: _amt = float(_raw_amt.replace(',', ''))
+        except Exception: pass
+        if _amt and _amt < 100: continue   # skip rates like $129.00 — penalty totals are much larger
+        _key = (_iso, 'Cancellation penalt')
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': _iso, 'label': 'Cancellation penalty deadline', 'amount': _amt})
+
+    # ── 8. Deposit due at signing (no calendar date) ──────────────────────────
+    # If a deposit is mentioned without a specific date ("at the time of signing",
+    # "upon execution"), record it with date = "At signing".
+    _signing_deposit_re = _rer.compile(
+        r'(?:'
+        # "$X deposit ... at signing"
+        r'\$\s*([\d,]+(?:\.\d{2})?)[^.]{0,150}?deposit[^.]{0,150}?(?:at\s+the\s+time|upon|at\s+signing|at\s+execution|when\s+signed)'
+        r'|'
+        # "deposit ... $X ... at signing"  or  "deposit in the amount of $X ... at/upon signing"
+        r'deposit[\s\S]{0,150}?\$\s*([\d,]+(?:\.\d{2})?)[\s\S]{0,150}?(?:at\s+the\s+time|upon|at\s+signing|at\s+execution|when\s+signed|is\s+due)'
+        r')',
+        _rer.IGNORECASE | _rer.DOTALL
+    )
+    for _m in _signing_deposit_re.finditer(raw_text):
+        _raw_amt = _m.group(1) or (_m.group(2) if _m.lastindex >= 2 else None) or ''
+        _amt = None
+        try: _amt = float(_raw_amt.replace(',', ''))
+        except Exception: pass
+        if not _amt or _amt > 500000: continue   # sanity check
+        _key = ('signing', 'Deposit due at sign')
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': 'At signing', 'label': 'Deposit due at contract signing', 'amount': _amt})
+
+    # ── Normalise critical_dates from AI + merge with direct results ──────────
     _raw_cd = ai_data.get('critical_dates') or []
     if not isinstance(_raw_cd, list):
         _raw_cd = []
     critical_dates = []
     for _cd in _raw_cd:
         if isinstance(_cd, dict) and _cd.get('date') and _cd.get('label'):
-            critical_dates.append({
-                'date':   str(_cd['date']),
-                'label':  str(_cd['label']),
-                'amount': _cd.get('amount'),
-            })
+            _iso = _parse_any_date(str(_cd['date']))
+            if not _iso:
+                continue
+            _key = (_iso, str(_cd['label'])[:20])
+            if _key not in _seen_dates:
+                _seen_dates.add(_key)
+                critical_dates.append({
+                    'date':   _iso,
+                    'label':  str(_cd['label']),
+                    'amount': _cd.get('amount'),
+                })
+    # Merge direct-parsed results (direct takes priority — added first)
+    critical_dates = _direct_critical + critical_dates
+    # Sort: "At signing" rows first, then chronologically by date
+    critical_dates.sort(key=lambda x: ('0' if x['date'] == 'At signing' else '1') + x['date'])
 
     first = years[0]
     return {
