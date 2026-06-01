@@ -4897,12 +4897,16 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                     _sent_bounds = [m.end() for m in
                                     _rer.finditer(r'(?:[.!?]\s+|\n\n|\n(?=[A-Z]))', _look_back)]
                     _sent_bounds.append(0)
+                    _HAS_DATE = _rer.compile(_DT_PAT, _rer.IGNORECASE)
                     for _sb in reversed(_sent_bounds):
                         _sent_text = _look_back[_sb:].strip()
                         _sent_text = _rer.sub(r'\s*\n\s*', ' ', _sent_text).strip()
                         _stop = _SENT_STOPS.search(_sent_text)
                         _candidate = _sent_text[:_stop.start()].strip() if _stop else _sent_text[:100]
-                        if (8 < len(_candidate) < 100 and not _candidate.endswith(',') and _candidate[0].isupper()):
+                        if (8 < len(_candidate) < 100
+                                and not _candidate.endswith(',')
+                                and _candidate[0].isupper()
+                                and not _HAS_DATE.search(_candidate)):
                             _label = _candidate
                             break
                 # Pass 3: last title-like line
@@ -4931,6 +4935,9 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                 if not _label:
                     _label = f'{_n_days} days prior to event'
                 _label_full = f'{_label}  ({_n_days} days prior to event)'
+                _immediate_context = raw_text[max(0, _rm.start()-80):_rm.start()]
+                if re.search(_DT_PAT, _immediate_context, re.IGNORECASE):
+                    continue   # explicit date right before "N days prior" — already captured
                 from datetime import date as _today_date
                 _today_d = _today_date.today()
                 if _calc_date >= _event_start_dt:
