@@ -5046,6 +5046,21 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                                 and _candidate[0].isupper()):
                             _label = _candidate
                             break
+                _wider_ctx = raw_text[max(0, _rm.start()-400):_rm.start()+200]
+                _is_cancel_ctx = bool(_rer.search(
+                    r'cancell|liquidated\s+damage|%\s+of\s+(total\s+)?room\s+revenue',
+                    _wider_ctx, _rer.IGNORECASE))
+                if _is_cancel_ctx:
+                    _after_match = raw_text[_rm.end():_rm.end()+200]
+                    _pct_m = _rer.search(r'(\d{2,3})\s*%\s+of\s+(?:total\s+)?room\s+revenue',
+                                         _after_match, _rer.IGNORECASE)
+                    if not _pct_m:
+                        _same_line = _after_match.split('\n')[0]
+                        _pct_m2 = _rer.search(r'(\d{2,3})\s*%', _same_line)
+                        _pct_str = f' ({_pct_m2.group(1)}% of room revenue)' if _pct_m2 else ''
+                    else:
+                        _pct_str = f' ({_pct_m.group(1)}% of room revenue)'
+                    _label = f'Cancellation penalty{_pct_str}'
                 if not _label:
                     _label = f'{_n_days} days prior to event'
                 _label_full = f'{_label}  ({_n_days} days prior to event)'
