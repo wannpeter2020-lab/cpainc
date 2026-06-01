@@ -4997,6 +4997,11 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                 _calc_iso  = _calc_date.strftime('%Y-%m-%d')
                 _look_back = raw_text[max(0, _rm.start()-400):_rm.start()]
                 _label = None
+                # Pass 0: all-caps section heading within 800 chars
+                _look_back_wide = raw_text[max(0, _rm.start()-800):_rm.start()]
+                _caps_m = list(_rer.finditer(r'\n([A-Z][A-Z /&\-]{3,50})\n', _look_back_wide))
+                if _caps_m:
+                    _label = _caps_m[-1].group(1).strip().title()
                 # Pass 1: quoted label
                 _quoted = _rer.findall(r'[""]([^""]{3,60})[""]', _look_back)
                 if _quoted:
