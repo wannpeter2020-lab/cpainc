@@ -4419,7 +4419,9 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
         if _atr_m:
             _atr_raw = _atr_m.group(1) or _atr_m.group(2)
             if _atr_raw:
-                _atr = int(_atr_raw) / 100.0
+                _atr_val = int(_atr_raw) / 100.0
+                # Flip release % to minimum % (20% release → 80% minimum)
+                _atr = (1.0 - _atr_val) if _atr_val < 0.5 else _atr_val
 
         _direct_years.append({
             'year':              _yr_num,
