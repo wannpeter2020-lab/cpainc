@@ -5051,16 +5051,27 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                     r'cancell|liquidated\s+damage|%\s+of\s+(total\s+)?room\s+revenue',
                     _wider_ctx, _rer.IGNORECASE))
                 if _is_cancel_ctx:
-                    _after_match = raw_text[_rm.end():_rm.end()+200]
+                    _after_match = raw_text[_rm.end():_rm.end()+300]
+                    _same_line_end = _after_match.find('\n')
+                    _row_text = _after_match[:_same_line_end] if _same_line_end >= 0 else _after_match[:150]
                     _pct_m = _rer.search(r'(\d{2,3})\s*%\s+of\s+(?:total\s+)?room\s+revenue',
-                                         _after_match, _rer.IGNORECASE)
+                                         _row_text, _rer.IGNORECASE)
                     if not _pct_m:
-                        _same_line = _after_match.split('\n')[0]
-                        _pct_m2 = _rer.search(r'(\d{2,3})\s*%', _same_line)
-                        _pct_str = f' ({_pct_m2.group(1)}% of room revenue)' if _pct_m2 else ''
+                        _pct_m = _rer.search(r'(\d{2,3})\s*%', _row_text)
+                    _pct_str = f' ({_pct_m.group(1)}% of room revenue)' if _pct_m else ''
+                    _fab_ctx = _after_match[:300]
+                    _fab_m = _rer.search(
+                        r'(?:plus|and|\+)\s*(?:(\d{2,3})\s*%\s+of\s+)?'
+                        r'(?:f(?:ood)?\s*(?:&|and)\s*b(?:everage)?|f\s*&\s*b)\s*'
+                        r'(?:minimum|min\.?|commitment|revenue)?',
+                        _fab_ctx, _rer.IGNORECASE
+                    )
+                    if _fab_m:
+                        _fab_pct = _fab_m.group(1)
+                        _fab_str = f' + {_fab_pct}% of F&B' if _fab_pct else ' + F&B minimum'
                     else:
-                        _pct_str = f' ({_pct_m.group(1)}% of room revenue)'
-                    _label = f'Cancellation penalty{_pct_str}'
+                        _fab_str = ''
+                    _label = f'Cancellation penalty{_pct_str}{_fab_str}'
                 if not _label:
                     _label = f'{_n_days} days prior to event'
                 _label_full = f'{_label}  ({_n_days} days prior to event)'
