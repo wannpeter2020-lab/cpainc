@@ -2621,7 +2621,7 @@ def parse_crf_excel(file_bytes):
 
     def _map_status(val):
         s = _sv(val).lower()
-        if 'submitted' in s:
+        if 'submitted' in s or 'awarded' in s or 'selected' in s:
             return 'proposal_received'
         if 'turned down' in s or 'withdrawn' in s or 'declined' in s:
             return 'declined'
@@ -2788,6 +2788,120 @@ def parse_crf_excel(file_bytes):
                 break
 
         hotels.append(hotel_dict)
+
+    # ── Fallback: read individual hotel sheets when Summary has no data rows ──
+    # This happens when the CRF was exported before hotels filled in the Summary
+    # grid (e.g. single-hotel CRFs, or early exports). Each hotel tab still has
+    # its full proposal data — Proposal Status, rates, contact info, address.
+    if not hotels:
+        for sheet_name in wb.sheetnames:
+            if sheet_name.lower() in ('summary', 'rfp'):
+                continue
+            try:
+                h_ws = wb[sheet_name]
+                h_rows = list(h_ws.rows)
+                if len(h_rows) < 5:
+                    continue
+                kv = {}
+                kv_all = []
+                for h_row in h_rows:
+                    h_vals = [c.value for c in h_row]
+                    if len(h_vals) < 2:
+                        continue
+                    lbl = _sv(h_vals[0]).lower().strip().rstrip(':')
+                    all_vals = [_sv(v) for v in h_vals[1:6] if v is not None and _sv(v)]
+                    val = all_vals[0] if all_vals else ''
+                    if lbl and val:
+                        kv[lbl] = val
+                    if lbl:
+                        kv_all.append((lbl, all_vals))
+
+                status_raw = kv.get('proposal status') or kv.get('status') or ''
+                if not status_raw:
+                    continue
+                status = _map_status(status_raw)
+
+                hotel_name = sheet_name.strip()
+
+                raw_addr = kv.get('address') or kv.get('hotel address') or ''
+                city, state = _parse_address(raw_addr)
+                if city and (len(city) > 40 or any(c.isdigit() for c in city)):
+                    import re as _re_addr
+                    m = _re_addr.search(
+                        r'([A-Za-z][A-Za-z\s\-\.]{1,30}),\s*([A-Za-z][A-Za-z\s]{2,20})',
+                        raw_addr)
+                    if m:
+                        city  = m.group(1).strip().split()[-1] if ' ' in m.group(1) else m.group(1).strip()
+                        state = m.group(2).strip().split(',')[0].strip()
+
+                proposed_rate = _parse_currency(
+                    kv.get('room rate') or kv.get('single room rate') or kv.get('rate') or
+                    kv.get('rates') or '')
+                if not proposed_rate:
+                    _RATE_LBLS = ('rate', 'price', 'preferred', 'alternate', 'dates')
+                    _SKIP_LBLS = ('information', 'introduction', 'note', 'description',
+                                  'total', 'tax', 'address', 'phone', 'email', 'name')
+                    for _lbl, _vals in kv_all:
+                        if any(s in _lbl for s in _SKIP_LBLS):
+                            continue
+                        for _v in _vals:
+                            if _v and ('usd' in _v.lower() or _v.strip().startswith('$')):
+                                r = _parse_currency(_v)
+                                if r and 50 < r < 5000:
+                                    proposed_rate = r
+                                    break
+                        if proposed_rate:
+                            break
+
+                commission_pct = _parse_commission(
+                    kv.get('commission rate') or kv.get('commission') or
+                    kv.get('commissionable') or '')
+                f_and_b_minimum = _parse_currency(kv.get('f&b minimum') or kv.get('food & beverage minimum') or '')
+                contact_name  = kv.get('contact name') or kv.get('contact') or None
+                contact_email = (kv.get('email address') or kv.get('email') or
+                                 kv.get('contact email') or kv.get('e-mail') or None)
+                contact_phone = (kv.get('phone') or kv.get('telephone') or
+                                 kv.get('contact phone') or kv.get('mobile') or None)
+                contact_title = kv.get('title') or None
+                notes         = kv.get('notes') or kv.get('recommendations') or None
+
+                if commission_pct is None:
+                    _SEVEN_PCT_BRANDS = [
+                        'marriott','westin','sheraton','hilton','doubletree','embassy',
+                        'hampton','homewood','curio','tapestry','waldorf','renaissance',
+                        'autograph','courtyard','residence','fairfield','home2',
+                    ]
+                    if any(b in hotel_name.lower() for b in _SEVEN_PCT_BRANDS):
+                        commission_pct = 0.07
+
+                _CC_KEYWORDS = ['convention center','convention ctr','exhibition hall',
+                                'exhibit hall','event center','civic center',
+                                'conference center','arena','coliseum']
+                venue_type = 'convention_center' if any(
+                    kw in hotel_name.lower() for kw in _CC_KEYWORDS) else 'hotel'
+
+                hotels.append({
+                    'hotel_name':      hotel_name,
+                    'city':            city,
+                    'state':           state,
+                    'status':          status,
+                    'proposed_rate':   proposed_rate,
+                    'f_and_b_minimum': f_and_b_minimum,
+                    'commission_pct':  commission_pct,
+                    'attrition_pct':   None,
+                    'cutoff_days':     None,
+                    'concessions':     None,
+                    'notes':           notes,
+                    'contact_name':    contact_name,
+                    'contact_email':   contact_email,
+                    'contact_phone':   contact_phone,
+                    'contact_title':   contact_title,
+                    'crf_row_data':    json.dumps(kv),
+                    'venue_type':      venue_type,
+                    'rental_fee':      None,
+                })
+            except Exception:
+                continue
 
     return {'rfp_meta': rfp_meta, 'hotels': hotels}
 
