@@ -4367,6 +4367,8 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
         import re as _r2
         from datetime import datetime as _DT
         s = s.strip().rstrip(',').strip()
+        # Strip ordinal suffixes: "1st" → "1", "2nd" → "2", "3rd" → "3", "28th" → "28"
+        s = _r2.sub(r'(\d+)(?:st|nd|rd|th)\b', r'\1', s)
         def _check(dt_obj):
             if dt_obj and dt_obj.year >= min_year:
                 return dt_obj.strftime('%Y-%m-%d')
@@ -4382,7 +4384,7 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
             if yr < 100: yr += 2000
             try: return _check(_DT(yr, mo, dy))
             except Exception: pass
-        # Month DD, YYYY  or  Month DD YYYY
+        # Month DD, YYYY  or  Month DD YYYY (ordinals already stripped above)
         MONTHS = {'january':1,'february':2,'march':3,'april':4,'may':5,'june':6,
                   'july':7,'august':8,'september':9,'october':10,'november':11,'december':12}
         m2 = _r2.match(r'^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$', s)
@@ -4404,14 +4406,16 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
     _direct_critical = []
     _seen_dates = set()  # deduplicate by (date, label[:20])
 
-    # Date token — matches most written and numeric date forms
+    # Date token — matches most written and numeric date forms, including ordinals
+    # e.g. "August 1st, 2026", "March 28th 2027", "April 18th, 2027"
+    _MONTH_NAMES = r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
+    _ORDINAL_SFX = r'(?:st|nd|rd|th)?'
     _DT_PAT = (
         r'(?:'
-        r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
-        r'\s+\d{1,2},?\s+\d{4}'
+        + _MONTH_NAMES + r'\s+\d{1,2}' + _ORDINAL_SFX + r',?\s+\d{4}'
         r'|\d{1,2}/\d{1,2}/\d{2,4}'
         r'|\d{4}-\d{2}-\d{2}'
-        r'|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}'
+        r'|\d{1,2}\s+' + _MONTH_NAMES + r'\s+\d{4}'
         r')'
     )
     _DOLLAR_PAT = r'\$\s*([\d,]+(?:\.\d{2})?)'
@@ -4483,25 +4487,34 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
             _direct_critical.append({'date': _iso, 'label': _label, 'amount': _amt})
 
     # ── 2. Cancellation deadlines ─────────────────────────────────────────────
-    _cancel_re = _rer.compile(
-        r'cancel[^.]{0,200}?' + _DT_PAT,
-        _rer.IGNORECASE | _rer.DOTALL
-    )
-    for _m in _cancel_re.finditer(raw_text):
-        _clause = _m.group(0)
-        _dates_found = _rer.findall(_DT_PAT, _clause)
-        for _ds in _dates_found:
-            _iso = _parse_any_date(_ds.strip())
-            if not _iso: continue
-            _amts = _rer.findall(_DOLLAR_PAT, _clause)
-            _amt = None
-            if _amts:
-                try: _amt = float(_amts[0].replace(',', ''))
-                except Exception: pass
-            _key = (_iso, 'Cancellation dead')
-            if _key not in _seen_dates:
-                _seen_dates.add(_key)
-                _direct_critical.append({'date': _iso, 'label': 'Cancellation deadline', 'amount': _amt})
+    # Strategy A: "cancellation between X and $AMOUNT\nY" (Hilton style)
+    # For each "cancellation between" occurrence, find the date that appears
+    # AFTER the dollar amount — that's the end-of-range deadline.
+    for _cm in _rer.finditer(r'cancellation\s+between', raw_text, _rer.IGNORECASE):
+        _win = raw_text[_cm.start():_cm.start()+400]
+        _all_dates = _rer.findall(_DT_PAT, _win)
+        _all_amts  = _rer.findall(_DOLLAR_PAT, _win)
+        if not _all_dates: continue
+        _deadline_iso = None
+        _amt = None
+        _amt_m = _rer.search(_DOLLAR_PAT, _win)
+        if _amt_m:
+            try: _amt = float(_amt_m.group(1).replace(',', ''))
+            except Exception: pass
+            if _amt and _amt < 100: _amt = None
+            _after_amt = _win[_amt_m.end():]
+            _end_dates = _rer.findall(_DT_PAT, _after_amt)
+            if _end_dates:
+                _deadline_iso = _parse_any_date(_end_dates[0].strip())
+        if not _deadline_iso:
+            for _ds in reversed(_all_dates):
+                _deadline_iso = _parse_any_date(_ds.strip())
+                if _deadline_iso: break
+        if not _deadline_iso: continue
+        _key = (_deadline_iso, 'cancel')
+        if _key not in _seen_dates:
+            _seen_dates.add(_key)
+            _direct_critical.append({'date': _deadline_iso, 'label': 'Cancellation deadline', 'amount': _amt})
 
     # ── 3. Rooming list due date ──────────────────────────────────────────────
     _rl_re = _rer.compile(
@@ -4601,7 +4614,7 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
         try: _amt = float(_raw_amt.replace(',', ''))
         except Exception: pass
         if _amt and _amt < 100: continue   # skip rates like $129.00 — penalty totals are much larger
-        _key = (_iso, 'Cancellation penalt')
+        _key = (_iso, 'cancel')
         if _key not in _seen_dates:
             _seen_dates.add(_key)
             _direct_critical.append({'date': _iso, 'label': 'Cancellation penalty deadline', 'amount': _amt})
