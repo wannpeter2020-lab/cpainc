@@ -4625,6 +4625,10 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
         _blk0 = _direct_years[0].get('contracted_block', {})
         if _blk0:
             _event_start_iso = sorted(_blk0.keys())[0]
+    if not _event_start_iso and base_years:
+        _blk0 = base_years[0].get('contracted_block', {})
+        if isinstance(_blk0, dict) and _blk0:
+            _event_start_iso = sorted(_blk0.keys())[0]
     if not _event_start_iso and ai_data.get('contracted_block'):
         _blk0 = ai_data.get('contracted_block', {})
         if isinstance(_blk0, dict) and _blk0:
@@ -4654,7 +4658,7 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                 _calc_iso  = _calc_date.strftime('%Y-%m-%d')
                 _look_back = raw_text[max(0, _rm.start()-400):_rm.start()]
                 _label = None
-                _quoted = _rer.findall(r'"([^"]{3,60})"', _look_back)
+                _quoted = _rer.findall(r'[""]([^""]{3,60})[""]', _look_back)
                 if _quoted:
                     _label = _quoted[-1].strip()
                 _TITLE_STOPS = _rer.compile(
