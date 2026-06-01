@@ -4883,9 +4883,29 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
                 _calc_iso  = _calc_date.strftime('%Y-%m-%d')
                 _look_back = raw_text[max(0, _rm.start()-400):_rm.start()]
                 _label = None
+                # Pass 1: quoted label
                 _quoted = _rer.findall(r'[""]([^""]{3,60})[""]', _look_back)
                 if _quoted:
                     _label = _quoted[-1].strip()
+                # Pass 2: walk backward through sentence boundaries for the best label
+                _SENT_STOPS = _rer.compile(
+                    r'\s+(?:are\s+due|is\s+due|must\s+be|shall\s+be|will\s+be|'
+                    r'at\s+that\s+time|hotel\s+will|group\s+must|no\s+later)',
+                    _rer.IGNORECASE
+                )
+                if not _label:
+                    _sent_bounds = [m.end() for m in
+                                    _rer.finditer(r'(?:[.!?]\s+|\n\n|\n(?=[A-Z]))', _look_back)]
+                    _sent_bounds.append(0)
+                    for _sb in reversed(_sent_bounds):
+                        _sent_text = _look_back[_sb:].strip()
+                        _sent_text = _rer.sub(r'\s*\n\s*', ' ', _sent_text).strip()
+                        _stop = _SENT_STOPS.search(_sent_text)
+                        _candidate = _sent_text[:_stop.start()].strip() if _stop else _sent_text[:100]
+                        if (8 < len(_candidate) < 100 and not _candidate.endswith(',') and _candidate[0].isupper()):
+                            _label = _candidate
+                            break
+                # Pass 3: last title-like line
                 _TITLE_STOPS = _rer.compile(
                     r'\s+(?:at\s+that\s+time|hotel\s+will|hotel\s+shall|group\s+must|'
                     r'group\s+shall|no\s+later|the\s+hotel|all\s+room|prior\s+to)',
