@@ -4067,25 +4067,78 @@ def parse_contract_document(file_bytes, filename=''):
                 'Extract ONLY the fields listed below from this hotel contract. '
                 'Return a JSON object with ONLY these keys — do NOT invent or guess room block data.\n'
             )}]
-            for page_num in range(min(len(doc), 8)):
-                page    = doc[page_num]
-                mat     = fitz.Matrix(100/72, 100/72)
-                pix     = page.get_pixmap(matrix=mat)
-                img_b64 = base64.standard_b64encode(pix.tobytes('png')).decode()
-                content.append({'type': 'image',
-                                 'source': {'type': 'base64', 'media_type': 'image/png',
-                                            'data': img_b64}})
+            images_added = 0
+            for page_num in range(min(len(doc), 10)):
+                page = doc[page_num]
+                # Prefer large embedded images (actual scanned pages) over re-rendering.
+                # Skip tiny images < 50KB (DocuSign badges, logos, etc.)
+                embedded = sorted(page.get_images(full=True),
+                                  key=lambda x: x[2] * x[3], reverse=True)  # sort by w×h
+                added_from_page = False
+                for img_info in embedded[:1]:   # only the largest image per page
+                    xref = img_info[0]
+                    w, h = img_info[2], img_info[3]
+                    if w * h < 100_000:
+                        continue
+                    img_data = doc.extract_image(xref)
+                    raw = img_data['image']
+                    if len(raw) < 30_000:
+                        continue
+                    # Downscale large images to ≤1600px wide for the API
+                    if w > 1600:
+                        import io as _io
+                        try:
+                            from PIL import Image as _PILImage
+                            pil = _PILImage.open(_io.BytesIO(raw))
+                            scale = 1600 / w
+                            pil = pil.resize((1600, int(h * scale)), _PILImage.LANCZOS)
+                            buf = _io.BytesIO()
+                            pil.save(buf, format='JPEG', quality=85)
+                            raw = buf.getvalue()
+                        except ImportError:
+                            pass
+                    ext_img = img_data.get('ext', 'jpeg')
+                    mime = 'image/jpeg' if ext_img in ('jpg', 'jpeg') else 'image/png'
+                    img_b64 = base64.standard_b64encode(raw).decode()
+                    content.append({'type': 'image',
+                                     'source': {'type': 'base64', 'media_type': mime,
+                                                'data': img_b64}})
+                    images_added += 1
+                    added_from_page = True
+                    break
+                # Fallback: render page at 150 DPI if no usable embedded image
+                if not added_from_page:
+                    mat = fitz.Matrix(150/72, 150/72)
+                    pix = page.get_pixmap(matrix=mat)
+                    img_b64 = base64.standard_b64encode(pix.tobytes('jpeg')).decode()
+                    content.append({'type': 'image',
+                                     'source': {'type': 'base64', 'media_type': 'image/jpeg',
+                                                'data': img_b64}})
+                    images_added += 1
+                if images_added >= 8:
+                    break
             doc.close()
             content.append({'type': 'text', 'text': (
-                'Return ONLY this JSON (no markdown):\n'
-                '{"hotel":null,"organization":null,"hotel_contact":null,'
-                '"hotel_contact_email":null,"group_contact":null,'
-                '"group_contact_email":null,"attrition_pct":null,'
-                '"rebate_per_room":null,"block_review_date":null,'
-                '"critical_dates":[]}'
+                'Extract ALL of the following from this hotel group contract. '
+                'Return ONLY valid JSON — no markdown, no explanation.\n'
+                '\nRequired keys:\n'
+                '  "hotel"               — full hotel name, or null\n'
+                '  "organization"        — group/client org name, or null\n'
+                '  "hotel_contact"       — hotel contact full name, or null\n'
+                '  "hotel_contact_email" — hotel contact email, or null\n'
+                '  "group_contact"       — client contact full name, or null\n'
+                '  "group_contact_email" — client contact email, or null\n'
+                '  "contracted_rate"     — room rate as a number (e.g. 189.00), or null\n'
+                '  "contracted_block"    — night-by-night room block as {"YYYY-MM-DD": rooms, ...}, or {}\n'
+                '  "cutoff_date"         — cut-off date as "YYYY-MM-DD", or null\n'
+                '  "attrition_pct"       — attrition as decimal (80%→0.80), or null\n'
+                '  "rebate_per_room"     — $/room/night rebate if any, or null\n'
+                '  "block_review_date"   — block review date "YYYY-MM-DD", or null\n'
+                + _critical_dates_instructions +
+                '\nReturn ONLY the JSON object, no other text.'
             )})
             response = client.messages.create(
-                model='claude-opus-4-5', max_tokens=1024,
+                model='claude-opus-4-5', max_tokens=2048,
                 messages=[{'role': 'user', 'content': content}])
         else:
             extraction_prompt = (
@@ -4119,6 +4172,58 @@ def parse_contract_document(file_bytes, filename=''):
     # ── Build final result: direct parse is authoritative for block/rate/cutoff ──
     years = []
     base_years = _direct_years if _direct_years else []
+
+    # For scanned PDFs the vision response includes block/rate in ai_data — normalise and use it.
+    if not base_years and is_scanned_pdf and ai_data:
+        from datetime import datetime as _dt_scan
+
+        # Normalise contracted_block — Claude may return nested room-type dicts
+        blk_scan = {}
+        for k, v in (ai_data.get('contracted_block') or {}).items():
+            try:
+                _dt_scan.strptime(k, '%Y-%m-%d')
+                if isinstance(v, dict):
+                    total = sum(int(n) for n in v.values() if isinstance(n, (int, float)) and n > 0)
+                else:
+                    total = int(float(v))
+                if total > 0:
+                    blk_scan[k] = total
+            except Exception:
+                pass
+
+        # Normalise contracted_rate — Claude may return a dict of room types
+        _raw_rate = ai_data.get('contracted_rate')
+        if isinstance(_raw_rate, dict):
+            _rate_vals = sorted(v for v in [_safe_float(x) for x in _raw_rate.values() if x is not None] if v > 0)
+            _contracted_rate = _rate_vals[0] if _rate_vals else None
+        else:
+            _contracted_rate = _safe_float(_raw_rate) or None
+
+        _atr_raw = _safe_float(ai_data.get('attrition_pct'))
+        _atr = (_atr_raw / 100.0) if _atr_raw and _atr_raw > 1 else (_atr_raw or None)
+
+        # Normalise critical_dates from vision — Claude may return dict instead of list
+        _vis_cd = ai_data.get('critical_dates') or []
+        if isinstance(_vis_cd, dict):
+            _vis_cd_list = []
+            for _lbl, _val in _vis_cd.items():
+                if not _val or not isinstance(_val, str): continue
+                _iso = _parse_any_date(_val)
+                if _iso:
+                    _vis_cd_list.append({'date': _iso, 'label': _lbl.replace('_', ' ').title(), 'amount': None})
+            ai_data['critical_dates'] = _vis_cd_list
+
+        if blk_scan or _contracted_rate:
+            base_years = [{
+                'year':              int(list(blk_scan.keys())[0][:4]) if blk_scan else None,
+                'event_name':        None,
+                'contracted_block':  blk_scan,
+                'contracted_rate':   _contracted_rate,
+                'rebate_per_room':   _safe_float(ai_data.get('rebate_per_room')),
+                'cutoff_date':       ai_data.get('cutoff_date') or None,
+                'block_review_date': ai_data.get('block_review_date') or None,
+                'attrition_pct':     _atr,
+            }]
 
     # If no direct years, ask Claude for block too (short single-year contract)
     if not base_years and not is_scanned_pdf and raw_text.strip():
