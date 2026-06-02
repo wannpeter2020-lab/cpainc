@@ -779,7 +779,17 @@ def import_bookings():
                             header_row = i
                             break
                     if header_row is None:
-                        flash('Could not find header row with "Booking Id" in the file.', 'error')
+                        full_text = ' '.join(str(v) for v in df.values.flatten() if str(v) != 'nan')
+                        if any(kw in full_text.upper() for kw in
+                               ('POST EVENT HISTORY', 'FINAL TOTAL PICKUP', 'AUDIT DETAIL',
+                                'HOUSING HISTORY', 'TOTAL ESTIMATED ROOMS COMMISSION')):
+                            flash(
+                                'This looks like a Housing History Report (HHR), not a bookings export. '
+                                'Please use "Import Housing History" from the nav menu instead.',
+                                'error'
+                            )
+                        else:
+                            flash('Could not find header row with "Booking Id" in the file.', 'error')
                         return redirect(url_for('import_bookings'))
                     df.columns = df.iloc[header_row]
                     df = df.iloc[header_row + 1:].reset_index(drop=True)
@@ -791,7 +801,17 @@ def import_bookings():
                         header_row = i
                         break
                 if header_row is None:
-                    flash('Could not find header row with "Booking Id" in the file.', 'error')
+                    full_text = ' '.join(str(v) for v in df.values.flatten() if str(v) != 'nan')
+                    if any(kw in full_text.upper() for kw in
+                           ('POST EVENT HISTORY', 'FINAL TOTAL PICKUP', 'AUDIT DETAIL',
+                            'HOUSING HISTORY', 'TOTAL ESTIMATED ROOMS COMMISSION')):
+                        flash(
+                            'This looks like a Housing History Report (HHR), not a bookings export. '
+                            'Please use "Import Housing History" from the nav menu instead.',
+                            'error'
+                        )
+                    else:
+                        flash('Could not find header row with "Booking Id" in the file.', 'error')
                     return redirect(url_for('import_bookings'))
                 df.columns = df.iloc[header_row]
                 df = df.iloc[header_row + 1:].reset_index(drop=True)
@@ -11897,7 +11917,11 @@ def pickup_email_post_report_outlook(cid):
                 + '    open theMsg\n'
                 + '    activate\n'
                 + 'end tell\n'
-                + 'delay 2\n'
+                + 'delay 4\n'
+                + 'tell application "Microsoft Outlook"\n'
+                + '    activate\n'
+                + 'end tell\n'
+                + 'delay 1\n'
                 + 'tell application "System Events"\n'
                 + '    keystroke "v" using {command down}\n'
                 + 'end tell\n'
@@ -12782,7 +12806,11 @@ def rfp_dates_email_launch(rid):
                 + '    open theMsg\n'
                 + '    activate\n'
                 + 'end tell\n'
-                + 'delay 2\n'
+                + 'delay 4\n'
+                + 'tell application "Microsoft Outlook"\n'
+                + '    activate\n'
+                + 'end tell\n'
+                + 'delay 1\n'
                 + 'tell application "System Events"\n'
                 + '    keystroke "v" using {command down}\n'
                 + 'end tell\n'

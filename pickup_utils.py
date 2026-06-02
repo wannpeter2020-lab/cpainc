@@ -3433,6 +3433,22 @@ def parse_hhr_excel(file_bytes):
         elif 'name' in lbl and 'date' in lbl and not stats.get('event_name'):
             stats['event_name'] = _sv(col2)
 
+        # Booking # can be anywhere in the row — scan all cells
+        if not stats.get('booking_id'):
+            for ci, cell in enumerate(row):
+                cv = _sv(cell.value).lower().rstrip(':')
+                if 'booking #' in cv or 'booking id' in cv or 'booking number' in cv:
+                    for offset in range(1, 4):
+                        if ci + offset >= len(row):
+                            break
+                        bv = _sv(row[ci + offset].value)
+                        if bv:
+                            try:
+                                stats['booking_id'] = str(int(float(bv)))
+                            except Exception:
+                                stats['booking_id'] = bv
+                            break
+
         # Date header row — find which columns have dates
         elif 'date' == lbl and not date_cols:
             for i, cell in enumerate(row):
