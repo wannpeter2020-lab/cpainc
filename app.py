@@ -8303,17 +8303,8 @@ def pickup_new_event():
 
 @app.route('/pickup/<int:cid>')
 def pickup_event(cid):
-    import traceback as _tb
     from datetime import datetime as _dt, date as _date
     db = get_db()
-    try:
-        return _pickup_event_inner(cid, db, _dt, _date)
-    except Exception as _exc:
-        _tb.print_exc()
-        flash(f'DEBUG ERROR: {type(_exc).__name__}: {_exc}', 'error')
-        return redirect(url_for('pickup_dashboard'))
-
-def _pickup_event_inner(cid, db, _dt, _date):
     config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
     if not config:
         flash('Event not found.', 'error')
@@ -8562,7 +8553,7 @@ def _pickup_event_inner(cid, db, _dt, _date):
 
     # RFP critical dates lookup (for Email Dates button)
     rfp_for_dates = None
-    if config.get('booking_id'):
+    if config['booking_id']:
         rfp_for_dates = db.execute(
             "SELECT id, critical_dates_json, critical_dates_sent_at "
             "FROM rfp WHERE booking_id=? LIMIT 1",
