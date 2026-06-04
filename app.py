@@ -4707,12 +4707,13 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
-    # Add per-week OTA URL to pickup_weekly
-    try:
-        db.execute('ALTER TABLE pickup_weekly ADD COLUMN ota_url TEXT')
-        db.commit()
-    except Exception:
-        pass
+    # Add per-week OTA rate + URL to pickup_weekly
+    for _col, _typ in [('ota_rate', 'REAL'), ('ota_url', 'TEXT')]:
+        try:
+            db.execute(f'ALTER TABLE pickup_weekly ADD COLUMN {_col} {_typ}')
+            db.commit()
+        except Exception:
+            pass
     # Add CRF columns and alt date columns to rfp/rfp_hotel if not present
     for _tbl, _col, _typ in [
         ('rfp',       'crf_filename',    'TEXT'),
@@ -8522,8 +8523,8 @@ def pickup_event(cid):
         (cid,)
     ).fetchall()
 
-    last_ota_rate = last_real['ota_rate'] if last_real else None
-    last_ota_url  = last_real['ota_url']  if last_real else None
+    last_ota_rate = last_real['ota_rate'] if last_real and 'ota_rate' in last_real.keys() else None
+    last_ota_url  = last_real['ota_url']  if last_real and 'ota_url'  in last_real.keys() else None
     show_rate_issue = bool(
         last_ota_rate and config['contracted_rate'] and
         float(last_ota_rate) < float(config['contracted_rate'])
