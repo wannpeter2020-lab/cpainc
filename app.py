@@ -10615,7 +10615,7 @@ def pickup_final_history(cid):
 
     block = json.loads(config['contracted_block'] or '{}')
     prefill_entry = existing_fh or last
-    last_pickup = json.loads(prefill_entry['pickup_by_night']) if prefill_entry else {}
+    last_pickup = json.loads(prefill_entry['pickup_by_night'] or '{}') if prefill_entry else {}
     return render_template('pickup_final_history_form.html',
                            config=config, block=block,
                            last_pickup=last_pickup, existing_fh=existing_fh,
