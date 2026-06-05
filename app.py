@@ -14276,7 +14276,8 @@ def points_request_edit(rid):
                 'incentive_type', 'award_timing',
                 'second_recipient_name', 'second_recipient_email',
                 'second_recipient_phone', 'second_recipient_number',
-                'rewards_form_link', 'notes'):
+                'rewards_form_link', 'notes',
+                'booking_id'):
         v = request.form.get(key, '').strip()
         fields[key] = v or None
     if fields['points_awarded']:
@@ -14289,12 +14290,39 @@ def points_request_edit(rid):
     elif fields['form_sent_date'] and fields['status'] in ('pending', None):
         fields['status'] = 'submitted'
 
+    # If booking_id changed: re-link pickup_config and re-detect chain
+    extra_msg = ''
+    old_bid = db.execute('SELECT booking_id FROM hotel_points_request WHERE id=?',
+                         (rid,)).fetchone()
+    if old_bid and fields.get('booking_id') and str(old_bid['booking_id']) != str(fields['booking_id']):
+        new_bid = fields['booking_id']
+        pc = db.execute('SELECT id, hotel FROM pickup_config WHERE booking_id=? '
+                        'ORDER BY id DESC LIMIT 1', (new_bid,)).fetchone()
+        hotel = None
+        if pc:
+            fields['pickup_config_id'] = pc['id']
+            hotel = pc['hotel']
+        else:
+            fields['pickup_config_id'] = None
+            pip = db.execute('SELECT Customer FROM ReportPipeline WHERE '
+                             'CAST(BookingId AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',
+                             (new_bid,)).fetchone()
+            if pip: hotel = pip['Customer']
+        if hotel:
+            new_chain = _detect_chain_edit(hotel)
+            if new_chain:
+                new_prog = db.execute('SELECT id FROM hotel_points_program '
+                                      'WHERE chain_name=?', (new_chain,)).fetchone()
+                if new_prog:
+                    fields['program_id'] = new_prog['id']
+                    extra_msg = f' Re-classified as {new_chain} based on hotel "{hotel}".'
+
     sets = ', '.join(f'{k}=?' for k in fields.keys())
     params = list(fields.values()) + [rid]
     db.execute(f'UPDATE hotel_points_request SET {sets}, updated_at=datetime("now") WHERE id=?',
                params)
     db.commit()
-    flash('Points request updated.', 'success')
+    flash('Points request updated.' + extra_msg, 'success')
     return redirect(url_for('points_request_detail', rid=rid))
 
 
