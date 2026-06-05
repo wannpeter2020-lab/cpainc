@@ -14267,6 +14267,7 @@ def points_request_detail(rid):
 
 @app.route('/points/<int:rid>/edit', methods=['POST'])
 def points_request_edit(rid):
+    from points_utils import detect_chain as _detect_chain_edit
     db = get_db()
     fields = {}
     for key in ('form_sent_date', 'sent_to_name', 'sent_to_email',

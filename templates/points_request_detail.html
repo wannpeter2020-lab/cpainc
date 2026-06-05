@@ -95,6 +95,17 @@
       <div class="card-header">Submission</div>
       <div class="card-body">
         <div class="mb-3">
+          <label class="form-label">Booking ID
+            <small class="text-muted">— change to re-link this request to a different booking</small>
+          </label>
+          <input type="text" name="booking_id" class="form-control font-monospace"
+                 value="{{ req.booking_id or '' }}"
+                 placeholder="e.g. 156062">
+          <small class="text-muted">
+            If you change this, the hotel + chain will be auto-detected from the new booking's record.
+          </small>
+        </div>
+        <div class="mb-3">
           <label class="form-label">Hotel Salesperson Name</label>
           <input type="text" name="sent_to_name" class="form-control"
                  value="{{ req.sent_to_name or '' }}">
