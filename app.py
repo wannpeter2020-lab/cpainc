@@ -14083,10 +14083,53 @@ def points_dashboard():
             )).lower()
         filtered = [r for r in filtered if q_lower in _hay(r)]
 
+    # Optional sort: ?sort=<key>  or  ?sort=-<key>  (desc)
+    # Supported keys: booking_id, event_start, form_sent_date, points_received_date
+    sort_param = (request.args.get('sort', '') or '').strip()
+    sort_dir   = 'desc' if sort_param.startswith('-') else 'asc'
+    sort_key   = sort_param.lstrip('-')
+    SORT_FIELD = {
+        'booking_id':           ('booking_id',           'int'),
+        'event_start':          ('pickup_event_start',   'date'),
+        'form_sent_date':       ('form_sent_date',       'date'),
+        'points_received_date': ('points_received_date', 'date'),
+    }
+    if sort_key in SORT_FIELD:
+        col, kind = SORT_FIELD[sort_key]
+        def _norm_date(v):
+            """Return ISO yyyy-mm-dd from ISO, US, or other common formats."""
+            s = str(v).strip()
+            if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+                return s[:10]
+            for fmt in ('%m/%d/%Y', '%m/%d/%y', '%d/%m/%Y'):
+                try:
+                    return datetime.strptime(s[:10] if len(s) >= 10 else s, fmt).strftime('%Y-%m-%d')
+                except Exception:
+                    pass
+            try:
+                return datetime.strptime(s.split()[0], '%m/%d/%Y').strftime('%Y-%m-%d')
+            except Exception:
+                return s
+        def _value(r):
+            v = r[col] if col in r.keys() else None
+            if v is None or v == '':
+                return None
+            if kind == 'int':
+                try:
+                    return int(str(v).split('.')[0])
+                except Exception:
+                    return str(v)
+            return _norm_date(v)
+        nulls    = [r for r in filtered if _value(r) is None]
+        non_null = [r for r in filtered if _value(r) is not None]
+        non_null.sort(key=_value, reverse=(sort_dir == 'desc'))
+        filtered = non_null + nulls
+
     return render_template('points_dashboard.html',
                            requests=filtered, kpi=kpi, by_chain=by_chain,
                            chain_filter=chain_filter, status_filter=status_filter,
                            search_q=search_q,
+                           sort_key=sort_key, sort_dir=sort_dir,
                            today=today)
 
 

@@ -126,6 +126,23 @@
 </form>
 
 {# Requests table #}
+{% macro sort_th(label, key, classes='') -%}
+  {%- set is_active = sort_key == key -%}
+  {%- set next_dir = '-' if (is_active and sort_dir == 'asc') else '' -%}
+  {%- set args = {'chain': chain_filter, 'status': status_filter, 'q': search_q, 'sort': next_dir ~ key} -%}
+  <th class="{{ classes }}" style="white-space:nowrap;">
+    <a href="{{ url_for('points_dashboard', **args) }}"
+       class="text-decoration-none text-dark">
+      {{ label }}
+      {% if is_active %}
+        {% if sort_dir == 'asc' %}<i class="bi bi-caret-up-fill small"></i>
+        {% else %}<i class="bi bi-caret-down-fill small"></i>{% endif %}
+      {% else %}
+        <i class="bi bi-arrow-down-up small text-muted"></i>
+      {% endif %}
+    </a>
+  </th>
+{%- endmacro %}
 <div class="card">
   <div class="card-header">Points Requests</div>
   <div class="card-body p-0">
@@ -136,9 +153,10 @@
             <th>Chain</th>
             <th>Event</th>
             <th>Hotel</th>
-            <th>Event Dates</th>
-            <th>Sent</th>
-            <th>Received</th>
+            {{ sort_th('Booking ID', 'booking_id') }}
+            {{ sort_th('Event Dates', 'event_start') }}
+            {{ sort_th('Sent', 'form_sent_date') }}
+            {{ sort_th('Received', 'points_received_date') }}
             <th class="text-end">Points</th>
             <th>Status</th>
             <th></th>
@@ -151,6 +169,12 @@
             <td><span class="badge bg-secondary">{{ r.chain_name }}</span></td>
             <td>{{ r.pickup_event_name or r.pickup_org or '—' }}</td>
             <td><small class="text-muted">{{ r.pickup_hotel or '—' }}</small></td>
+            <td>
+              {% if r.booking_id %}
+              <a href="{{ url_for('booking_detail', booking_id=r.booking_id) }}"
+                 class="text-decoration-none font-monospace small">{{ r.booking_id }}</a>
+              {% else %}—{% endif %}
+            </td>
             <td><small>{{ r.pickup_event_start|us_date }} – {{ r.pickup_event_end|us_date }}</small></td>
             <td><small>{{ r.form_sent_date|us_date if r.form_sent_date else '—' }}</small></td>
             <td><small>{{ r.points_received_date|us_date if r.points_received_date else '—' }}</small></td>
@@ -170,7 +194,7 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="9" class="text-center text-muted py-3">No points requests match the filters.</td></tr>
+          <tr><td colspan="10" class="text-center text-muted py-3">No points requests match the filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>
