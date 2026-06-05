@@ -14552,11 +14552,14 @@ def points_rechain():
     ''').fetchall()
 
     def _hotel_of(r):
+        # Priority: user-maintained pickup_config.hotel > booking's Customer
+        # (the actual hotel on the booking record) > workbook value in notes
+        # (which may be stale or contain a typo).
         h = r['pc_hotel']
+        if not h: h = r['pip_customer']
         if not h and r['notes']:
             m = _re_rc.search(r'\bhotel:\s*([^|\]]+?)\s*\]', r['notes'])
             if m: h = m.group(1).strip()
-        if not h: h = r['pip_customer']
         return h or ''
 
     mismatches, unknown = [], []
