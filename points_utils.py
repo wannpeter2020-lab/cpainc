@@ -90,6 +90,18 @@ def detect_chain(hotel_name):
     if not hotel_name:
         return None
     h = str(hotel_name).lower()
+    # Strong-signal disambiguators first: "X by <Chain>" phrasing is canonical
+    # and outranks generic substring matches (e.g. "DoubleTree by Hilton Hotel
+    # Park City" should be Hilton, not Marriott via the Autograph "hotel park
+    # city" keyword).
+    if 'by hilton'   in h or 'doubletree' in h or 'embassy suites by' in h:
+        return 'Hilton'
+    if 'by marriott' in h or 'by sheraton' in h or 'by westin' in h:
+        return 'Marriott'
+    if 'by hyatt'    in h:
+        return 'Hyatt'
+    if 'by ihg'      in h or 'by intercontinental' in h:
+        return 'IHG'
     for chain, keywords in CHAIN_KEYWORDS:
         for kw in keywords:
             if kw in h:
