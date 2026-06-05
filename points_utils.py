@@ -26,33 +26,57 @@ from datetime import datetime, date
 
 CHAIN_KEYWORDS = [
     ('Marriott', [
+        # Core brands
         'marriott', 'renaissance', 'sheraton', 'westin', 'courtyard',
         'fairfield', 'residence inn', 'springhill', 'aloft', 'ritz-carlton',
         'ritz carlton', 'jw ', 'jw marriott', 'element', 'ac hotel',
         'autograph', 'gaylord', 'le meridien', 'tribute', 'moxy',
         'protea', 'st. regis', 'st regis', 'w hotel', 'edition',
-        'townplace', 'four points', 'delta hotel',
+        'townplace', 'four points', 'delta hotel', 'delta guelph',
+        'le westin', 'luxury collection', 'design hotels',
+        # Common typos / space variants
+        'resdence inn', 'residence in', 'spring hill', 'springhill suites',
+        'westn', 'four pts', 'four point', 'fp ',
+        # Specific Autograph Collection / Sheraton / Westin properties
+        # whose names don't contain a recognisable brand keyword
+        'hotel park city',     # Autograph Collection
+        'ambassador hotel',    # Ambassador Hotel KC — Autograph Collection
+        'the henry',           # The Henry — Autograph Collection
+        'moana surfrider',     # Westin Moana Surfrider
+        'royal hawaiian',      # Sheraton Royal Hawaiian (Luxury Collection)
+        # Delta acquired by Marriott in 2015
+        'delta ', 'delta hotels',
     ]),
     ('Hilton', [
+        # Core brands
         'hilton', 'embassy suites', 'hampton', 'doubletree', 'curio',
         'tapestry', 'conrad', 'waldorf', 'tru ', 'home2', 'homewood',
-        'lxr', 'canopy', 'motto', 'spark by hilton',
+        'lxr', 'canopy', 'motto', 'spark by hilton', 'tempo by hilton',
+        # Common typos / space variants / abbreviations
+        'double tree', 'dbl tree', 'doubetree', 'doubltree', 'dblt ',
+        'hgi ', 'hilton garden', 'embassy ste', 'homewd suites',
+        'home2 suites',
+        # Curio Collection independents
+        'st louis union station', 'st. louis union station',
+        'union station hotel',
     ]),
     ('Hyatt', [
         'hyatt', 'andaz', 'grand hyatt', 'hyatt place', 'hyatt house',
         'thompson', 'park hyatt', 'caption by hyatt', 'unbound', 'alila',
         'destination by hyatt', 'joie de vivre', 'miraval', 'hyatt centric',
+        'hyatt regency', 'hyatt ziva', 'hyatt zilara',
     ]),
     ('IHG', [
         'ihg', 'holiday inn', 'crowne plaza', 'staybridge', 'intercontinental',
         'kimpton', 'candlewood', 'avid', 'hotel indigo', 'voco', 'atwell',
         'even hotels', 'six senses', 'regent hotel', 'iberostar',
+        'holiday inn express',
     ]),
     ('Omni', ['omni']),
     ('Choice', [
         'comfort inn', 'comfort suites', 'quality inn', 'sleep inn',
         'clarion', 'ascend', 'cambria', 'mainstay', 'suburban', 'econo lodge',
-        'rodeway', 'choice hotel',
+        'rodeway', 'choice hotel', 'woodspring',
     ]),
     ('Sonesta', [
         'sonesta', 'royal sonesta', 'sonesta es', 'sonesta select',

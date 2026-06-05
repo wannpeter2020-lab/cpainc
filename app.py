@@ -14493,17 +14493,22 @@ def points_import():
                 flash('Unknown chain.', 'error')
                 return redirect(url_for('points_import'))
 
+            from points_utils import detect_chain as _detect_chain_imp
             inserted = 0
             for item in rows:
                 if item.get('duplicate'):
                     continue
                 row = item['row']
+                hotel_name = row.get('hotel', '')
+                detected   = _detect_chain_imp(hotel_name)
+                row_program_id = (program_by_chain.get(detected, program_id)
+                                  if detected else program_id)
                 db.execute('''INSERT INTO hotel_points_request
                     (pickup_config_id, program_id, booking_id,
                      form_sent_date, points_received_date, points_awarded,
                      status, rewards_form_link, notes)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (item.get('pickup_config_id'), program_id,
+                    (item.get('pickup_config_id'), row_program_id,
                      item.get('pickup_booking_id'),
                      row.get('form_sent_date'),
                      row.get('points_received_date'),
@@ -14514,11 +14519,80 @@ def points_import():
                       (row.get('notes') or ''))[:2000]))
                 inserted += 1
             db.commit()
-            flash(f'Imported {inserted} {chain_name} points records.', 'success')
+            flash(f'Imported {inserted} records from {chain_name} workbook '
+                  f'(each tagged by detected hotel brand).', 'success')
             return redirect(url_for('points_dashboard'))
 
     return render_template('points_import.html', programs=programs,
                            preview=None, chain_name=None)
+
+
+@app.route('/points/rechain', methods=['GET', 'POST'])
+def points_rechain():
+    """Re-classify points requests by detecting chain from hotel name."""
+    import re as _re_rc
+    from points_utils import detect_chain as _detect_chain_rc
+    db = get_db()
+    programs = {p['chain_name']: p['id'] for p in db.execute(
+        'SELECT id, chain_name FROM hotel_points_program').fetchall()}
+
+    rows = db.execute('''
+        SELECT r.id, r.program_id, r.booking_id, r.notes,
+               r.pickup_config_id, r.status, r.points_awarded,
+               p.chain_name AS current_chain,
+               pc.hotel     AS pc_hotel,
+               pc.event_name AS pickup_event_name,
+               pip.Customer  AS pip_customer,
+               pip.EventName AS pip_event_name
+        FROM hotel_points_request r
+        LEFT JOIN hotel_points_program p ON p.id = r.program_id
+        LEFT JOIN pickup_config pc       ON pc.id = r.pickup_config_id
+        LEFT JOIN ReportPipeline pip     ON CAST(pip.BookingId AS INTEGER)
+                                          = CAST(r.booking_id AS INTEGER)
+    ''').fetchall()
+
+    def _hotel_of(r):
+        h = r['pc_hotel']
+        if not h and r['notes']:
+            m = _re_rc.search(r'\bhotel:\s*([^|\]]+?)\s*\]', r['notes'])
+            if m: h = m.group(1).strip()
+        if not h: h = r['pip_customer']
+        return h or ''
+
+    mismatches, unknown = [], []
+    for r in rows:
+        hotel = _hotel_of(r)
+        detected = _detect_chain_rc(hotel) if hotel else None
+        if not detected:
+            unknown.append({'id': r['id'], 'current_chain': r['current_chain'],
+                            'hotel': hotel,
+                            'event': r['pickup_event_name'] or r['pip_event_name'] or '',
+                            'status': r['status']})
+        elif detected != r['current_chain']:
+            mismatches.append({'id': r['id'], 'current_chain': r['current_chain'],
+                               'detected_chain': detected,
+                               'hotel': hotel,
+                               'event': r['pickup_event_name'] or r['pip_event_name'] or '',
+                               'status': r['status'],
+                               'points_awarded': r['points_awarded']})
+
+    if request.method == 'POST' and request.form.get('action') == 'apply':
+        applied = 0
+        for m in mismatches:
+            target = programs.get(m['detected_chain'])
+            if not target:
+                continue
+            db.execute('UPDATE hotel_points_request '
+                       'SET program_id=?, updated_at=datetime("now") WHERE id=?',
+                       (target, m['id']))
+            applied += 1
+        db.commit()
+        flash(f'Re-classified {applied} request{"s" if applied != 1 else ""}.', 'success')
+        return redirect(url_for('points_rechain'))
+
+    return render_template('points_rechain.html',
+                           mismatches=mismatches, unknown=unknown,
+                           total_requests=len(rows))
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Re-classify Hotel Points by Brand{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-arrow-repeat me-2"></i>Re-classify by Hotel Brand</h4>
+  <a href="{{ url_for('points_programs') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Programs
+  </a>
+</div>
+
+<div class="alert alert-info small">
+  <i class="bi bi-info-circle me-1"></i>
+  Some bulk-imported records were tagged by the workbook they came from
+  (e.g. "Marriott tracking workbook") rather than the actual hotel's brand.
+  This page re-runs the brand-detection logic on every request and reassigns
+  the program when the chain detected from the hotel name doesn't match.
+  <br><strong>Total requests scanned:</strong> {{ total_requests }}.
+</div>
+
+<div class="row g-3">
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-triangle me-2"></i>Re-classify {{ mismatches|length }} mismatched request{{ 's' if mismatches|length != 1 else '' }}</span>
+        {% if mismatches %}
+        <form method="post" class="m-0"
+              onsubmit="return confirm('Re-classify {{ mismatches|length }} request{{ 's' if mismatches|length != 1 else '' }}?');">
+          <input type="hidden" name="action" value="apply">
+          <button type="submit" class="btn btn-success btn-sm">
+            <i class="bi bi-check-circle me-1"></i>Apply Re-classification
+          </button>
+        </form>
+        {% endif %}
+      </div>
+      <div class="card-body p-0">
+        {% if mismatches %}
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Current Chain</th>
+              <th style="width:30px;"></th>
+              <th>Detected Chain</th>
+              <th>Hotel</th>
+              <th>Event</th>
+              <th>Status</th>
+              <th class="text-end">Points</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in mismatches %}
+            <tr>
+              <td><small class="text-muted">{{ m.id }}</small></td>
+              <td><span class="badge bg-secondary">{{ m.current_chain }}</span></td>
+              <td class="text-center text-muted"><i class="bi bi-arrow-right"></i></td>
+              <td><span class="badge bg-success">{{ m.detected_chain }}</span></td>
+              <td><small>{{ m.hotel }}</small></td>
+              <td><small class="text-muted">{{ m.event }}</small></td>
+              <td>
+                {% if m.status == 'received' %}<span class="badge bg-success">Received</span>
+                {% elif m.status == 'submitted' %}<span class="badge bg-warning text-dark">Submitted</span>
+                {% else %}<span class="badge bg-light text-dark">{{ m.status|capitalize }}</span>{% endif %}
+              </td>
+              <td class="text-end">{% if m.points_awarded %}{{ '{:,}'.format(m.points_awarded) }}{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="text-center text-muted py-4">
+          <i class="bi bi-check-circle text-success me-2"></i>
+          No mismatches. Every request is tagged with the chain matching its hotel.
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if unknown %}
+  <div class="col-md-12">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-question-circle me-2"></i>Unknown brand ({{ unknown|length }})</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Current Chain</th>
+              <th>Hotel name</th>
+              <th>Event</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for u in unknown %}
+            <tr>
+              <td><small class="text-muted">{{ u.id }}</small></td>
+              <td><span class="badge bg-secondary">{{ u.current_chain }}</span></td>
+              <td><small>"{{ u.hotel }}"</small></td>
+              <td><small class="text-muted">{{ u.event }}</small></td>
+              <td><small>{{ u.status }}</small></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="p-2 small text-muted">
+          These hotel names are too generic or contain typos that prevent
+          automatic brand detection. They're left untouched. Edit the underlying
+          pickup event's hotel name to a recognisable brand keyword and re-run.
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
