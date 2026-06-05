@@ -14066,15 +14066,27 @@ def points_dashboard():
 
     chain_filter  = request.args.get('chain', '').strip()
     status_filter = request.args.get('status', '').strip()
+    search_q      = request.args.get('q', '').strip()
     filtered = requests_rows
     if chain_filter:
         filtered = [r for r in filtered if (r['chain_name'] or '') == chain_filter]
     if status_filter:
         filtered = [r for r in filtered if (r['status'] or '') == status_filter]
+    if search_q:
+        q_lower = search_q.lower()
+        def _hay(r):
+            return ' '.join(str(r[k] or '') for k in (
+                'pickup_event_name', 'pickup_hotel', 'pickup_org',
+                'booking_id', 'chain_name', 'sent_to_name',
+                'sent_to_email', 'cvent_rfp_code', 'notes',
+                'rewards_form_link',
+            )).lower()
+        filtered = [r for r in filtered if q_lower in _hay(r)]
 
     return render_template('points_dashboard.html',
                            requests=filtered, kpi=kpi, by_chain=by_chain,
                            chain_filter=chain_filter, status_filter=status_filter,
+                           search_q=search_q,
                            today=today)
 
 

@@ -108,9 +108,18 @@
       {% endfor %}
     </select>
   </div>
+  <div class="col-md-4">
+    <label class="form-label small">Search</label>
+    <div class="input-group input-group-sm">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input type="text" name="q" class="form-control"
+             value="{{ search_q or '' }}"
+             placeholder="Event, hotel, booking ID, contact, notes…">
+    </div>
+  </div>
   <div class="col-auto">
     <button class="btn btn-primary btn-sm">Filter</button>
-    {% if chain_filter or status_filter %}
+    {% if chain_filter or status_filter or search_q %}
     <a href="{{ url_for('points_dashboard') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
     {% endif %}
   </div>
