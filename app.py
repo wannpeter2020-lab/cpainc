@@ -10575,11 +10575,25 @@ def pickup_final_history(cid):
         (cid,)
     ).fetchone()
 
+    # Build full date set: contracted block + shoulder nights from any weekly entry
+    block = json.loads(config['contracted_block'] or '{}')
+    all_weekly = db.execute(
+        "SELECT pickup_by_night FROM pickup_weekly WHERE config_id=? AND label != 'Final History'",
+        (cid,)
+    ).fetchall()
+    all_date_set = set(block.keys())
+    for _w in all_weekly:
+        try:
+            _pbn = json.loads(_w['pickup_by_night'] or '{}')
+            all_date_set.update(d for d in _pbn if d != 'historical_total')
+        except Exception:
+            pass
+    all_dates = sorted(all_date_set)
+
     if request.method == 'POST':
         f = request.form
-        block = json.loads(config['contracted_block'] or '{}')
         pickup_by_night = {}
-        for d in block:
+        for d in all_dates:
             val = f.get(f'night_{d}', '').strip()
             if val != '':
                 pickup_by_night[d] = int(val)
@@ -10614,11 +10628,10 @@ def pickup_final_history(cid):
         flash('Final History saved — event moved to Past Events.', 'success')
         return redirect(url_for('pickup_event', cid=cid))
 
-    block = json.loads(config['contracted_block'] or '{}')
     prefill_entry = existing_fh or last
     last_pickup = json.loads(prefill_entry['pickup_by_night'] or '{}') if prefill_entry else {}
     return render_template('pickup_final_history_form.html',
-                           config=config, block=block,
+                           config=config, block=block, all_dates=all_dates,
                            last_pickup=last_pickup, existing_fh=existing_fh,
                            today=datetime.now().strftime('%Y-%m-%d'))
 

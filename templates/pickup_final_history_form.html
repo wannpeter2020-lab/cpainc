@@ -56,11 +56,15 @@
         </tr>
       </thead>
       <tbody>
-        {% for date in block.keys()|sort %}
-        {% set contracted = (block[date] or 0)|int %}
+        {% for date in all_dates %}
+        {% set contracted = (block[date] or 0)|int if date in block else 0 %}
+        {% set is_shoulder = date not in block %}
         {% set prefill = (last_pickup.get(date) or 0)|int %}
-        <tr>
-          <td class="fw-semibold small">{{ date | us_date }}</td>
+        <tr{% if is_shoulder %} class="table-secondary"{% endif %}>
+          <td class="fw-semibold small">
+            {{ date | us_date }}
+            {% if is_shoulder %}<span class="badge bg-secondary ms-1" style="font-size:.65rem">shoulder</span>{% endif %}
+          </td>
           <td class="text-muted small" id="day_{{ date }}"></td>
           <td class="text-end text-muted">{{ contracted if contracted else '—' }}</td>
           <td>
