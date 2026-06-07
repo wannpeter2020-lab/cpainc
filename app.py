@@ -4755,7 +4755,8 @@ def ensure_pickup_tables():
     except Exception:
         pass
     # Add critical dates columns to rfp if not present
-    for _col, _typ in [('critical_dates_json', 'TEXT'), ('critical_dates_sent_at', 'TEXT')]:
+    for _col, _typ in [('critical_dates_json', 'TEXT'), ('critical_dates_sent_at', 'TEXT'),
+                       ('checklist', "TEXT DEFAULT '{}'")]:
         try:
             db.execute(f'ALTER TABLE rfp ADD COLUMN {_col} {_typ}')
             db.commit()
@@ -12293,29 +12294,114 @@ RFP_STATUSES = [
 RFP_STATUS_MAP = {s[0]: (s[1], s[2]) for s in RFP_STATUSES}
 
 
+@app.route('/rfp/<int:rid>/checklist/cell', methods=['POST'])
+def rfp_checklist_cell(rid):
+    """AJAX — update a single checklist key (Master View inline edit)."""
+    data = request.get_json(silent=True) or {}
+    key  = data.get('key', '').strip()
+    val  = (data.get('value') or '').strip() or None
+    if not key:
+        return jsonify({'ok': False, 'error': 'missing key'}), 400
+    db = get_db()
+    row = db.execute("SELECT checklist FROM rfp WHERE id=?", (rid,)).fetchone()
+    if not row:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    try:
+        cl = json.loads(row['checklist'] or '{}')
+    except Exception:
+        cl = {}
+    cl[key] = val
+    db.execute(
+        "UPDATE rfp SET checklist=?, updated_at=datetime('now') WHERE id=?",
+        (json.dumps(cl), rid)
+    )
+    db.commit()
+    return jsonify({'ok': True, 'key': key, 'value': val})
+
+
 @app.route('/rfp')
 def rfp_dashboard():
     user = get_current_user()
     db = get_db()
-    show_archived = request.args.get('archived') == '1'
+    filter_tab = request.args.get('tab', 'master')
     acct_filter = get_pickup_account_filter(user)
-    base = (1 if show_archived else 0,)
+
+    # Fetch all non-archived RFPs in scope
     if acct_filter is None:
-        rfps = db.execute(
+        all_rfps = db.execute(
             'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
-            'FROM rfp r WHERE r.archived=? ORDER BY r.created_at DESC', base
+            'FROM rfp r WHERE r.archived=0 ORDER BY r.start_date, r.created_at DESC'
         ).fetchall()
     elif acct_filter:
         ph = ','.join('?' * len(acct_filter))
-        rfps = db.execute(
+        all_rfps = db.execute(
             f'SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count '
-            f'FROM rfp r WHERE r.archived=? AND r.client_org IN ({ph}) ORDER BY r.created_at DESC',
-            base + tuple(acct_filter)
+            f'FROM rfp r WHERE r.archived=0 AND r.client_org IN ({ph}) ORDER BY r.start_date, r.created_at DESC',
+            tuple(acct_filter)
         ).fetchall()
     else:
-        rfps = []
+        all_rfps = []
+
+    active_statuses = {'sourcing','proposals_received','negotiating','hotel_selected','contracting'}
+
+    # Filter rfps for standard tabs
+    if filter_tab == 'active':
+        rfps = [r for r in all_rfps if r['status'] in active_statuses]
+    elif filter_tab == 'contracted':
+        rfps = [r for r in all_rfps if r['status'] == 'contracted']
+    elif filter_tab == 'dead':
+        rfps = [r for r in all_rfps if r['status'] == 'dead']
+    else:
+        rfps = list(all_rfps)  # 'all' and 'master' use full list
+
+    # Build master view data
+    master_by_year = {}
+    if filter_tab == 'master':
+        for r in all_rfps:
+            sel_hotel = db.execute(
+                "SELECT * FROM rfp_hotel WHERE rfp_id=? AND status='selected' LIMIT 1", (r['id'],)
+            ).fetchone()
+            if not sel_hotel:
+                sel_hotel = db.execute(
+                    "SELECT * FROM rfp_hotel WHERE rfp_id=? LIMIT 1", (r['id'],)
+                ).fetchone()
+            booking_num = r['booking_id'] or ''
+            try:
+                cl = json.loads(r['checklist'] or '{}')
+            except Exception:
+                cl = {}
+            contracted_total = None
+            if sel_hotel and sel_hotel['proposed_rate'] and r['total_room_nights']:
+                comm = sel_hotel['commission_pct'] or 0.10
+                contracted_total = sel_hotel['proposed_rate'] * r['total_room_nights'] * comm
+            year = 'No Date'
+            if r['start_date']:
+                try:
+                    year = str(r['start_date'])[:4]
+                except Exception:
+                    year = 'No Date'
+            if year not in master_by_year:
+                master_by_year[year] = []
+            st = RFP_STATUS_MAP.get(r['status'], ('secondary', r['status']))
+            master_by_year[year].append({
+                'rfp': r,
+                'hotel': sel_hotel,
+                'booking_num': booking_num,
+                'checklist': cl,
+                'contracted_total': contracted_total,
+                'badge': st[0],
+                'badge_label': st[1],
+            })
+        master_by_year = dict(sorted(master_by_year.items(), reverse=True))
+
+    archived_rfps = db.execute(
+        'SELECT * FROM rfp WHERE archived=1 ORDER BY updated_at DESC'
+    ).fetchall() if filter_tab != 'master' else []
+
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,
-                           show_archived=show_archived, all_statuses=RFP_STATUSES)
+                           filter_tab=filter_tab, all_statuses=RFP_STATUSES,
+                           master_by_year=master_by_year,
+                           archived_rfps=archived_rfps)
 
 
 @app.route('/rfp/new', methods=['GET', 'POST'])

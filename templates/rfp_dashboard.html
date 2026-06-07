@@ -7,16 +7,136 @@
     <span class="badge bg-secondary ms-1" id="rfpCount">{{ rfps|length }}</span>
   </h4>
   <div class="d-flex gap-2">
-    {% if show_archived %}
-    <a href="/rfp" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Active RFPs</a>
-    {% else %}
-    <a href="/rfp?archived=1" class="btn btn-outline-secondary btn-sm"><i class="bi bi-archive me-1"></i>Archived</a>
     <a href="{{ url_for('rfp_new') }}" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1"></i>New RFP</a>
-    {% endif %}
   </div>
 </div>
 
-{# ── Search / filter bar ── #}
+{# ── Nav tabs ── #}
+<ul class="nav nav-tabs mb-3">
+  {% for tab, label in [('master','Master View'), ('active','Active'), ('all','All'), ('contracted','Contracted'), ('dead','Dead')] %}
+  <li class="nav-item">
+    <a class="nav-link {% if filter_tab == tab %}active{% endif %}"
+       style="color:#000 !important;"
+       href="{{ url_for('rfp_dashboard', tab=tab) }}">{{ label }}</a>
+  </li>
+  {% endfor %}
+</ul>
+
+{% if filter_tab == 'master' %}
+
+{# ── MASTER VIEW ── #}
+{% set CHECKLIST = [
+  ('site_visit',                'Site Visit'),
+  ('contract_draft_to_hotel',   'Draft → Hotel'),
+  ('contract_draft_from_hotel', 'Draft ← Hotel'),
+  ('contract_to_client',        'Contract → Client'),
+  ('contract_back_from_client', 'Contract ← Client'),
+  ('contract_to_hotel_changes', 'w/Changes → Hotel'),
+  ('final_contract_to_client',  'Final → Client'),
+  ('signed_from_client',        'Signed ← Client'),
+  ('signed_to_hotel',           'Signed → Hotel'),
+  ('countersigned_from_hotel',  'Countersigned ← Hotel'),
+  ('countersigned_to_client',   'Countersigned → Client'),
+  ('contract_saved',            'Contract Saved'),
+  ('accept_decline_cvent',      'Accept/Decline Cvent'),
+  ('bookings_concourse',        'Bookings Concourse'),
+  ('cost_savings_report',       'Cost Savings Rpt'),
+  ('pickup_updated',            'Pickup Updated'),
+  ('web_rates_updated',         'Web Rates Updated'),
+  ('add_to_access',             'Add to Access'),
+  ('point_form_submitted',      'Point Form'),
+] %}
+
+{% if master_by_year %}
+<div style="overflow-x:auto; font-size:0.78rem;">
+  {% for year, year_rows in master_by_year.items() %}
+  <div class="card mb-4">
+    <div class="card-header fw-bold py-2" style="background:#1a3a5c;color:#fff;font-size:0.9rem;">
+      {{ year }} — {{ year_rows|length }} RFP{{ 's' if year_rows|length != 1 else '' }}
+    </div>
+    <div class="card-body p-0">
+      <table class="table table-bordered table-sm mb-0" style="min-width:2400px;">
+        <thead class="table-light" style="position:sticky;top:0;z-index:2;">
+          <tr>
+            <th style="min-width:140px;">Customer</th>
+            <th style="min-width:160px;">Meeting Name</th>
+            <th style="min-width:90px;">Booking #</th>
+            <th style="min-width:150px;">Hotel</th>
+            <th style="min-width:80px;">Brand</th>
+            <th style="min-width:90px;">Start</th>
+            <th style="min-width:90px;">End</th>
+            <th class="text-end" style="min-width:55px;">Peak</th>
+            <th class="text-end" style="min-width:65px;">Total RN</th>
+            <th class="text-end" style="min-width:65px;">Rate</th>
+            <th class="text-end" style="min-width:55px;">Comm%</th>
+            <th class="text-end" style="min-width:100px;">Est. Commission</th>
+            <th>Status</th>
+            {% for key, label in CHECKLIST %}
+            <th class="text-center" style="min-width:80px;max-width:90px;white-space:normal;line-height:1.2;">{{ label }}</th>
+            {% endfor %}
+            <th style="min-width:50px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for mr in year_rows %}
+          {% set r = mr.rfp %}
+          {% set h = mr.hotel %}
+          {% set cl = mr.checklist %}
+          <tr>
+            <td class="fw-semibold">{{ r['client_org'] or '—' }}</td>
+            <td>{{ r['event_name'] or r['rfp_name'] or '—' }}</td>
+            <td class="font-monospace text-muted small">
+              {% if mr.booking_num %}
+                <a href="{{ url_for('booking_detail', booking_id=mr.booking_num) }}" class="text-decoration-none">{{ mr.booking_num }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ h['hotel_name'] if h else '—' }}</td>
+            <td class="text-muted">{{ h['brand'] if h else '—' }}</td>
+            <td class="text-nowrap">{{ r['start_date'] | us_date if r['start_date'] else '—' }}</td>
+            <td class="text-nowrap">{{ r['end_date'] | us_date if r['end_date'] else '—' }}</td>
+            <td class="text-end">{{ r['peak_rooms'] or '—' }}</td>
+            <td class="text-end">{{ r['total_room_nights'] or '—' }}</td>
+            <td class="text-end">
+              {% if h and h['proposed_rate'] %}${{ '{:,.0f}'.format(h['proposed_rate']) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end">
+              {% if h and h['commission_pct'] %}{{ '{:.0f}'.format(h['commission_pct']*100) }}%{% else %}—{% endif %}
+            </td>
+            <td class="text-end">
+              {% if mr.contracted_total %}
+                <span class="text-success fw-semibold">${{ '{:,.0f}'.format(mr.contracted_total) }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
+            {% for key, label in CHECKLIST %}
+            <td class="text-center" style="padding:2px 4px;">
+              <input type="date"
+                     class="master-cl-input"
+                     data-rfp="{{ r['id'] }}"
+                     data-key="{{ key }}"
+                     value="{{ cl.get(key) or '' }}"
+                     title="{{ label }}"
+                     style="width:100%;border:none;background:transparent;font-size:0.7rem;text-align:center;cursor:pointer;padding:1px;color:{% if cl.get(key) %}#198754{% else %}#aaa{% endif %};">
+            </td>
+            {% endfor %}
+            <td>
+              <a href="{{ url_for('rfp_detail', rid=r['id']) }}" class="btn btn-outline-primary" style="font-size:0.7rem;padding:2px 6px;">View</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-muted py-4 text-center">No active RFPs found.</div>
+{% endif %}
+
+{% else %}
+
+{# ── STANDARD TABLE VIEW ── #}
 <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
   <div class="input-group" style="max-width:380px">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -82,55 +202,114 @@
     </table>
   </div>
 </div>
+
+{# Archived section #}
+{% if archived_rfps %}
+<div class="card mt-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-archive me-2"></i>Archived
+      <span class="badge bg-secondary ms-1">{{ archived_rfps|length }}</span>
+    </span>
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#collapseArchived">
+      <i class="bi bi-chevron-down"></i>
+    </button>
+  </div>
+  <div id="collapseArchived" class="collapse">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr><th>Client</th><th>Event</th><th>Dates</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for r in archived_rfps %}
+          <tr>
+            <td>{{ r['client_org'] }}</td>
+            <td>{{ r['event_name'] or '—' }}</td>
+            <td class="small">{{ r['start_date'] | us_date if r['start_date'] else '—' }}</td>
+            <td><a href="{{ url_for('rfp_detail', rid=r['id']) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% else %}
 <div class="card">
   <div class="card-body text-center text-muted py-5">
     <i class="bi bi-file-earmark-text display-4 d-block mb-3 opacity-25"></i>
-    <p>{% if show_archived %}No archived RFPs.{% else %}No active RFPs. Create your first one!{% endif %}</p>
-    {% if not show_archived %}
+    <p>No RFPs in this category.</p>
     <a href="{{ url_for('rfp_new') }}" class="btn btn-primary">
       <i class="bi bi-plus me-1"></i>New RFP
     </a>
-    {% endif %}
   </div>
 </div>
 {% endif %}
+
+{% endif %}{# end master/standard #}
 
 {% endblock %}
 
 {% block scripts %}
 <script>
+// ── Master View inline checklist cell save ──
+document.addEventListener('change', function(e) {
+  var inp = e.target;
+  if (!inp.classList.contains('master-cl-input')) return;
+  var rid = inp.dataset.rfp;
+  var key = inp.dataset.key;
+  var val = inp.value || null;
+  inp.style.color = '#6c757d';
+  fetch('/rfp/' + rid + '/checklist/cell', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({key: key, value: val})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data){
+    inp.style.color = (data.ok && val) ? '#198754' : (data.ok ? '#aaa' : '#dc3545');
+    if (!data.ok) alert('Save failed: ' + (data.error || 'unknown'));
+  })
+  .catch(function(){ inp.style.color = '#dc3545'; alert('Network error.'); });
+});
+
+// ── Standard view search/filter ──
 function doRfpFilter() {
-  const q      = (document.getElementById('rfpSearch').value || '').trim().toLowerCase();
-  const status = (document.getElementById('rfpStatusFilter').value || '').toLowerCase();
-  const info   = document.getElementById('rfpSearchInfo');
-  const noRes  = document.getElementById('rfpNoResults');
-  let visible  = 0;
+  var q      = (document.getElementById('rfpSearch') && document.getElementById('rfpSearch').value || '').trim().toLowerCase();
+  var status = (document.getElementById('rfpStatusFilter') && document.getElementById('rfpStatusFilter').value || '').toLowerCase();
+  var info   = document.getElementById('rfpSearchInfo');
+  var noRes  = document.getElementById('rfpNoResults');
+  var visible = 0;
 
   document.querySelectorAll('#rfpTable tbody tr[data-search]').forEach(function(tr) {
-    const textMatch   = !q || tr.dataset.search.includes(q);
-    const statusMatch = !status || (tr.dataset.status || '').toLowerCase() === status;
-    const show = textMatch && statusMatch;
+    var textMatch   = !q || tr.dataset.search.includes(q);
+    var statusMatch = !status || (tr.dataset.status || '').toLowerCase() === status;
+    var show = textMatch && statusMatch;
     tr.style.display = show ? '' : 'none';
     if (show) visible++;
   });
 
-  const total = document.querySelectorAll('#rfpTable tbody tr[data-search]').length;
-  document.getElementById('rfpCount').textContent = visible;
-
+  var total = document.querySelectorAll('#rfpTable tbody tr[data-search]').length;
+  var countEl = document.getElementById('rfpCount');
+  if (countEl) countEl.textContent = visible;
   if (noRes) noRes.style.display = visible === 0 ? '' : 'none';
-
-  if (q || status) {
-    info.style.display = '';
-    info.textContent = visible + ' of ' + total + ' RFP' + (total === 1 ? '' : 's');
-  } else {
-    info.style.display = 'none';
+  if (info) {
+    if (q || status) {
+      info.style.display = '';
+      info.textContent = visible + ' of ' + total + ' RFP' + (total === 1 ? '' : 's');
+    } else {
+      info.style.display = 'none';
+    }
   }
 }
 
 function clearRfpFilter() {
-  document.getElementById('rfpSearch').value = '';
-  document.getElementById('rfpStatusFilter').value = '';
+  var s = document.getElementById('rfpSearch');
+  var f = document.getElementById('rfpStatusFilter');
+  if (s) s.value = '';
+  if (f) f.value = '';
   doRfpFilter();
 }
 </script>
