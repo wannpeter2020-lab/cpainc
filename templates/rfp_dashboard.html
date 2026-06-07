@@ -109,14 +109,22 @@
             </td>
             <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
             {% for key, label in CHECKLIST %}
-            <td class="text-center" style="padding:2px 4px;">
+            {% set cv = cl.get(key) or '' %}
+            <td class="text-center" style="padding:2px 4px;vertical-align:middle;">
               <input type="date"
                      class="master-cl-input"
-                     data-rfp="{{ r['id'] }}"
-                     data-key="{{ key }}"
-                     value="{{ cl.get(key) or '' }}"
+                     data-rfp="{{ r['id'] }}" data-key="{{ key }}"
+                     value="{{ '' if cv == 'N/A' else cv }}"
                      title="{{ label }}"
-                     style="width:100%;border:none;background:transparent;font-size:0.7rem;text-align:center;cursor:pointer;padding:1px;color:{% if cl.get(key) %}#198754{% else %}#aaa{% endif %};">
+                     style="width:100%;border:none;background:transparent;font-size:0.7rem;text-align:center;cursor:pointer;padding:1px;{% if cv == 'N/A' %}display:none;{% endif %}color:{% if cv and cv != 'N/A' %}#198754{% else %}#aaa{% endif %};">
+              <span class="na-badge" style="font-size:0.7rem;color:#6c757d;{% if cv != 'N/A' %}display:none;{% endif %}">
+                N/A <a href="#" class="na-clear-btn" style="color:#999;text-decoration:none;" title="Clear">×</a>
+              </span>
+              <div>
+                <button class="na-set-btn" data-rfp="{{ r['id'] }}" data-key="{{ key }}"
+                        style="font-size:0.62rem;color:#bbb;background:none;border:none;padding:0;cursor:pointer;line-height:1.4;{% if cv == 'N/A' %}display:none;{% endif %}"
+                        title="Mark as N/A">N/A</button>
+              </div>
             </td>
             {% endfor %}
             <td>
@@ -255,13 +263,7 @@
 {% block scripts %}
 <script>
 // ── Master View inline checklist cell save ──
-document.addEventListener('change', function(e) {
-  var inp = e.target;
-  if (!inp.classList.contains('master-cl-input')) return;
-  var rid = inp.dataset.rfp;
-  var key = inp.dataset.key;
-  var val = inp.value || null;
-  inp.style.color = '#6c757d';
+function saveClCell(rid, key, val, onSuccess) {
   fetch('/rfp/' + rid + '/checklist/cell', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -269,10 +271,48 @@ document.addEventListener('change', function(e) {
   })
   .then(function(r){ return r.json(); })
   .then(function(data){
-    inp.style.color = (data.ok && val) ? '#198754' : (data.ok ? '#aaa' : '#dc3545');
-    if (!data.ok) alert('Save failed: ' + (data.error || 'unknown'));
+    if (data.ok) { if (onSuccess) onSuccess(); }
+    else { alert('Save failed: ' + (data.error || 'unknown')); }
   })
-  .catch(function(){ inp.style.color = '#dc3545'; alert('Network error.'); });
+  .catch(function(){ alert('Network error saving checklist.'); });
+}
+
+// Date input change
+document.addEventListener('change', function(e) {
+  var inp = e.target;
+  if (!inp.classList.contains('master-cl-input')) return;
+  var rid = inp.dataset.rfp, key = inp.dataset.key, val = inp.value || null;
+  inp.style.color = '#6c757d';
+  saveClCell(rid, key, val, function(){ inp.style.color = val ? '#198754' : '#aaa'; });
+});
+
+// N/A set button
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.na-set-btn');
+  if (!btn) return;
+  e.preventDefault();
+  var cell = btn.closest('td');
+  var rid = btn.dataset.rfp, key = btn.dataset.key;
+  saveClCell(rid, key, 'N/A', function(){
+    cell.querySelector('.master-cl-input').style.display = 'none';
+    cell.querySelector('.na-badge').style.display = '';
+    btn.style.display = 'none';
+  });
+});
+
+// N/A clear button
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('.na-clear-btn');
+  if (!btn) return;
+  e.preventDefault();
+  var cell = btn.closest('td');
+  var inp = cell.querySelector('.master-cl-input');
+  var rid = inp.dataset.rfp, key = inp.dataset.key;
+  saveClCell(rid, key, null, function(){
+    inp.value = ''; inp.style.color = '#aaa'; inp.style.display = '';
+    cell.querySelector('.na-badge').style.display = 'none';
+    cell.querySelector('.na-set-btn').style.display = '';
+  });
 });
 
 // ── Standard view search/filter ──
