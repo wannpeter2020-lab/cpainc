@@ -11,16 +11,19 @@
   </div>
 </div>
 
-{# ── Nav tabs ── #}
-<ul class="nav nav-tabs mb-3">
-  {% for tab, label in [('master','Master View'), ('active','Active'), ('contracted','Contracted'), ('dead','Dead')] %}
-  <li class="nav-item">
-    <a class="nav-link {% if filter_tab == tab %}active{% endif %}"
-       style="color:#000 !important;"
-       href="{{ url_for('rfp_dashboard', tab=tab) }}">{{ label }}</a>
-  </li>
-  {% endfor %}
-</ul>
+{# ── Sticky nav tabs ── #}
+<div style="position:sticky;top:54px;z-index:60;background:#f4f6f9;padding-bottom:4px;margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px;">
+  <ul class="nav nav-tabs mb-0" style="border-bottom:none;">
+    {% for tab, label in [('master','Master View'), ('active','Active'), ('contracted','Contracted'), ('dead','Dead')] %}
+    <li class="nav-item">
+      <a class="nav-link {% if filter_tab == tab %}active{% endif %}"
+         style="color:#000 !important;"
+         href="{{ url_for('rfp_dashboard', tab=tab) }}">{{ label }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+  <div style="border-bottom:1px solid #dee2e6;margin-bottom:8px;"></div>
+</div>
 
 {% if filter_tab == 'master' %}
 
@@ -48,15 +51,15 @@
 ] %}
 
 {% if master_by_year %}
-<div style="overflow-x:auto; font-size:0.78rem;">
+<div style="font-size:0.78rem;">
   {% for year, year_rows in master_by_year.items() %}
   <div class="card mb-4">
-    <div class="card-header fw-bold py-2" style="background:#1a3a5c;color:#fff;font-size:0.9rem;">
+    <div class="card-header fw-bold py-2" style="background:#1a3a5c;color:#fff;font-size:0.9rem;position:sticky;top:54px;z-index:5;">
       {{ year }} — {{ year_rows|length }} RFP{{ 's' if year_rows|length != 1 else '' }}
     </div>
-    <div class="card-body p-0">
+    <div class="card-body p-0" style="overflow-x:auto;overflow-y:auto;max-height:calc(100vh - 260px);">
       <table class="table table-bordered table-sm mb-0" style="min-width:2400px;">
-        <thead class="table-light" style="position:sticky;top:0;z-index:2;">
+        <thead class="table-light" style="position:sticky;top:0;z-index:4;">
           <tr>
             <th style="min-width:140px;">Customer</th>
             <th style="min-width:160px;">Meeting Name</th>
