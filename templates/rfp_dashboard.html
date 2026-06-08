@@ -168,13 +168,13 @@
     <table class="table table-hover table-sm align-middle mb-0" id="rfpTable">
       <thead>
         <tr>
-          <th>Client / Organization</th>
-          <th>Event Name</th>
-          <th>Dates</th>
+          <th class="rfp-sortable" data-col="0" style="cursor:pointer;white-space:nowrap;">Client / Organization <span class="sort-icon text-muted small"></span></th>
+          <th class="rfp-sortable" data-col="1" style="cursor:pointer;white-space:nowrap;">Event Name <span class="sort-icon text-muted small"></span></th>
+          <th class="rfp-sortable" data-col="2" style="cursor:pointer;white-space:nowrap;">Dates <span class="sort-icon text-muted small"></span></th>
           <th class="text-center">Hotels</th>
           <th>Status</th>
-          <th>Response Due</th>
-          <th>Created</th>
+          <th class="rfp-sortable" data-col="5" style="cursor:pointer;white-space:nowrap;">Response Due <span class="sort-icon text-muted small"></span></th>
+          <th class="rfp-sortable" data-col="6" style="cursor:pointer;white-space:nowrap;">Created <span class="sort-icon text-muted small"></span></th>
           <th></th>
         </tr>
       </thead>
@@ -186,7 +186,7 @@
             data-status="{{ st[1] }}">
           <td class="fw-semibold">{{ r['client_org'] }}</td>
           <td class="small">{{ r['event_name'] or '—' }}</td>
-          <td class="small text-nowrap">
+          <td class="small text-nowrap" data-sort="{{ r['start_date'] or '9999' }}">
             {{ r['start_date'] | us_date if r['start_date'] else '—' }}
             {% if r['end_date'] %} – {{ r['end_date'] | us_date }}{% endif %}
           </td>
@@ -280,6 +280,30 @@ document.addEventListener('click', function(e) {
     inp.value = ''; inp.style.color = '#aaa'; inp.style.display = '';
     cell.querySelector('.na-badge').style.display = 'none';
     cell.querySelector('.na-set-btn').style.display = '';
+  });
+});
+
+// ── Column sorting ──
+var _sortCol = -1, _sortAsc = true;
+document.querySelectorAll('.rfp-sortable').forEach(function(th) {
+  th.addEventListener('click', function() {
+    var col = parseInt(th.dataset.col);
+    if (_sortCol === col) { _sortAsc = !_sortAsc; }
+    else { _sortCol = col; _sortAsc = true; }
+    document.querySelectorAll('.rfp-sortable .sort-icon').forEach(function(el){ el.textContent = ''; });
+    th.querySelector('.sort-icon').textContent = _sortAsc ? ' ▲' : ' ▼';
+    var tbody = document.querySelector('#rfpTable tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr[data-search]'));
+    rows.sort(function(a, b) {
+      var aTd = a.querySelectorAll('td')[col];
+      var bTd = b.querySelectorAll('td')[col];
+      var aVal = (aTd.dataset.sort !== undefined ? aTd.dataset.sort : aTd.textContent).trim().toLowerCase();
+      var bVal = (bTd.dataset.sort !== undefined ? bTd.dataset.sort : bTd.textContent).trim().toLowerCase();
+      var aNum = parseFloat(aVal), bNum = parseFloat(bVal);
+      if (!isNaN(aNum) && !isNaN(bNum)) { return _sortAsc ? aNum - bNum : bNum - aNum; }
+      return _sortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+    rows.forEach(function(r){ tbody.appendChild(r); });
   });
 });
 
