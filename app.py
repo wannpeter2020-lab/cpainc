@@ -12348,11 +12348,26 @@ def rfp_dashboard():
     if filter_tab == 'active':
         rfps = [r for r in all_rfps if r['status'] in active_statuses]
     elif filter_tab == 'contracted':
-        rfps = [r for r in all_rfps if r['status'] == 'contracted']
+        # Contracted tab shows archived contracted RFPs (completed deals)
+        if acct_filter is None:
+            contracted_archived = db.execute(
+                "SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count "
+                "FROM rfp r WHERE r.archived=1 AND r.status='contracted' ORDER BY r.start_date DESC"
+            ).fetchall()
+        elif acct_filter:
+            ph = ','.join('?' * len(acct_filter))
+            contracted_archived = db.execute(
+                f"SELECT r.*, (SELECT COUNT(*) FROM rfp_hotel h WHERE h.rfp_id=r.id) AS hotel_count "
+                f"FROM rfp r WHERE r.archived=1 AND r.status='contracted' AND r.client_org IN ({ph}) ORDER BY r.start_date DESC",
+                tuple(acct_filter)
+            ).fetchall()
+        else:
+            contracted_archived = []
+        rfps = contracted_archived
     elif filter_tab == 'dead':
         rfps = [r for r in all_rfps if r['status'] == 'dead']
     else:
-        rfps = list(all_rfps)  # 'all' and 'master' use full list
+        rfps = list(all_rfps)  # 'master' uses full list
 
     # Build master view data
     master_by_year = {}
@@ -12394,14 +12409,9 @@ def rfp_dashboard():
             })
         master_by_year = dict(sorted(master_by_year.items(), reverse=True))
 
-    archived_rfps = db.execute(
-        'SELECT * FROM rfp WHERE archived=1 ORDER BY updated_at DESC'
-    ).fetchall() if filter_tab != 'master' else []
-
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,
                            filter_tab=filter_tab, all_statuses=RFP_STATUSES,
-                           master_by_year=master_by_year,
-                           archived_rfps=archived_rfps)
+                           master_by_year=master_by_year)
 
 
 @app.route('/rfp/new', methods=['GET', 'POST'])

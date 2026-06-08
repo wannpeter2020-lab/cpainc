@@ -211,38 +211,6 @@
   </div>
 </div>
 
-{# Archived section #}
-{% if archived_rfps %}
-<div class="card mt-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span><i class="bi bi-archive me-2"></i>Archived
-      <span class="badge bg-secondary ms-1">{{ archived_rfps|length }}</span>
-    </span>
-    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#collapseArchived">
-      <i class="bi bi-chevron-down"></i>
-    </button>
-  </div>
-  <div id="collapseArchived" class="collapse">
-    <div class="table-responsive">
-      <table class="table table-sm table-hover mb-0 align-middle">
-        <thead class="table-light">
-          <tr><th>Client</th><th>Event</th><th>Dates</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for r in archived_rfps %}
-          <tr>
-            <td>{{ r['client_org'] }}</td>
-            <td>{{ r['event_name'] or '—' }}</td>
-            <td class="small">{{ r['start_date'] | us_date if r['start_date'] else '—' }}</td>
-            <td><a href="{{ url_for('rfp_detail', rid=r['id']) }}" class="btn btn-sm btn-outline-primary">View</a></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-{% endif %}
 
 {% else %}
 <div class="card">
