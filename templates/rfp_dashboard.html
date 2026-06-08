@@ -13,7 +13,7 @@
 
 {# ── Nav tabs ── #}
 <ul class="nav nav-tabs mb-3">
-  {% for tab, label in [('master','Master View'), ('active','Active'), ('all','All'), ('contracted','Contracted'), ('dead','Dead')] %}
+  {% for tab, label in [('master','Master View'), ('active','Active'), ('contracted','Contracted'), ('dead','Dead')] %}
   <li class="nav-item">
     <a class="nav-link {% if filter_tab == tab %}active{% endif %}"
        style="color:#000 !important;"
