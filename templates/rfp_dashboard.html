@@ -11,7 +11,7 @@
   </div>
 </div>
 
-{# ── Sticky nav tabs ── #}
+{# ── Sticky tabs + search bar ── #}
 <div style="position:sticky;top:54px;z-index:60;background:#f4f6f9;padding-bottom:4px;margin-left:-12px;margin-right:-12px;padding-left:12px;padding-right:12px;">
   <ul class="nav nav-tabs mb-0" style="border-bottom:none;">
     {% for tab, label in [('master','Master View'), ('active','Active'), ('contracted','Contracted'), ('dead','Dead')] %}
@@ -23,7 +23,23 @@
     {% endfor %}
   </ul>
   <div style="border-bottom:1px solid #dee2e6;margin-bottom:8px;"></div>
+  <div class="card mb-0">
+    <div class="card-body py-2">
+      <div class="input-group">
+        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+        <input type="text" id="rfpSearch" class="form-control border-start-0 ps-0"
+               placeholder="Search by client, event name, or booking ID…"
+               oninput="doRfpFilter()">
+        <button class="btn btn-outline-secondary" type="button"
+                onclick="document.getElementById('rfpSearch').value='';doRfpFilter();" title="Clear">
+          <i class="bi bi-x"></i>
+        </button>
+      </div>
+      <div id="rfpSearchCount" class="form-text text-muted mt-1" style="display:none;"></div>
+    </div>
+  </div>
 </div>
+<div style="height:8px;"></div>
 
 {% if filter_tab == 'master' %}
 
@@ -86,7 +102,7 @@
           {% set r = mr.rfp %}
           {% set h = mr.hotel %}
           {% set cl = mr.checklist %}
-          <tr>
+          <tr data-search="{{ ((r['client_org'] or '') ~ ' ' ~ (r['event_name'] or '') ~ ' ' ~ (r['rfp_name'] or '') ~ ' ' ~ (r['booking_id'] or ''))|lower }}">
             <td class="fw-semibold">{{ r['client_org'] or '—' }}</td>
             <td>{{ r['event_name'] or r['rfp_name'] or '—' }}</td>
             <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
@@ -160,12 +176,6 @@
 
 {# ── STANDARD TABLE VIEW ── #}
 <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
-  <div class="input-group" style="max-width:380px">
-    <span class="input-group-text"><i class="bi bi-search"></i></span>
-    <input type="text" id="rfpSearch" class="form-control"
-           placeholder="Search client, event, booking ID…"
-           oninput="doRfpFilter()">
-  </div>
   <select id="rfpStatusFilter" class="form-select" style="max-width:200px" onchange="doRfpFilter()">
     <option value="">All Statuses</option>
     {% for key, val in statuses.items() %}
@@ -446,7 +456,7 @@ document.querySelectorAll('.rfp-sortable').forEach(function(th) {
   });
 });
 
-// ── Standard view search/filter ──
+// ── Search/filter (works for both master view rows and standard table) ──
 function doRfpFilter() {
   var q      = (document.getElementById('rfpSearch') && document.getElementById('rfpSearch').value || '').trim().toLowerCase();
   var status = (document.getElementById('rfpStatusFilter') && document.getElementById('rfpStatusFilter').value || '').toLowerCase();
@@ -454,7 +464,8 @@ function doRfpFilter() {
   var noRes  = document.getElementById('rfpNoResults');
   var visible = 0;
 
-  document.querySelectorAll('#rfpTable tbody tr[data-search]').forEach(function(tr) {
+  // Filter all rows across master view + standard table
+  document.querySelectorAll('tr[data-search]').forEach(function(tr) {
     var textMatch   = !q || tr.dataset.search.includes(q);
     var statusMatch = !status || (tr.dataset.status || '').toLowerCase() === status;
     var show = textMatch && statusMatch;
@@ -462,10 +473,21 @@ function doRfpFilter() {
     if (show) visible++;
   });
 
-  var total = document.querySelectorAll('#rfpTable tbody tr[data-search]').length;
+  var total = document.querySelectorAll('tr[data-search]').length;
   var countEl = document.getElementById('rfpCount');
   if (countEl) countEl.textContent = visible;
   if (noRes) noRes.style.display = visible === 0 ? '' : 'none';
+
+  // Search count below the search bar
+  var searchCount = document.getElementById('rfpSearchCount');
+  if (searchCount) {
+    if (q || status) {
+      searchCount.textContent = visible + ' result' + (visible !== 1 ? 's' : '') + (q ? ' for "' + q + '"' : '');
+      searchCount.style.display = '';
+    } else {
+      searchCount.style.display = 'none';
+    }
+  }
   if (info) {
     if (q || status) {
       info.style.display = '';
