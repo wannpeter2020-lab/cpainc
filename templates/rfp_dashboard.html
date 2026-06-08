@@ -316,6 +316,15 @@ document.addEventListener('click', function(e) {
   });
 });
 
+// ── Date helper: ISO → US format (M/D/YYYY) ──
+function isoToUS(d) {
+  if (!d) return '';
+  var s = (d + '').substring(0, 10);
+  var parts = s.split('-');
+  if (parts.length !== 3) return s;
+  return (parseInt(parts[1], 10)) + '/' + (parseInt(parts[2], 10)) + '/' + parts[0];
+}
+
 // ── Notes hover dialog ──
 var _notesRid = null, _notesHideTimer = null;
 var _dialog = document.getElementById('notesDialog');
@@ -331,7 +340,7 @@ function openNotesDialog(cell) {
     list.innerHTML = '<div class="text-muted" style="font-size:0.78rem;">No notes yet.</div>';
   } else {
     list.innerHTML = notes.map(function(n) {
-      var dt = n.note_date ? n.note_date.substring(0,10) : '';
+      var dt = isoToUS(n.note_date);
       var badge = n.note_type === 'client' ? 'bg-info' : n.note_type === 'hotel' ? 'bg-warning text-dark' : 'bg-light text-dark border';
       return '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #f0f0f0;">'
         + '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">'
@@ -375,7 +384,7 @@ function saveQuickNote() {
     list.innerHTML = '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #f0f0f0;">'
       + '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">'
       + '<span class="badge bg-light text-dark border" style="font-size:0.68rem;">internal</span>'
-      + '<span class="text-muted" style="font-size:0.72rem;">' + n.note_date + '</span></div>'
+      + '<span class="text-muted" style="font-size:0.72rem;">' + isoToUS(n.note_date) + '</span></div>'
       + '<div style="white-space:pre-wrap;">' + n.note_text + '</div></div>' + existing;
     document.getElementById('notesDialogInput').value = '';
     var cell = document.querySelector('.master-notes-cell[data-rfp="' + _notesRid + '"]');
