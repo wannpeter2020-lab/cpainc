@@ -88,6 +88,16 @@
       </tfoot>
     </table>
 
+    {# Add shoulder night row #}
+    <div class="d-flex align-items-center gap-2 mt-3 pt-2 border-top">
+      <span class="text-muted small fw-semibold">Add shoulder night:</span>
+      <input type="date" id="shoulderDateInput" class="form-control form-control-sm" style="width:160px">
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addShoulderDate()">
+        <i class="bi bi-plus-circle me-1"></i>Add Date
+      </button>
+      <span id="shoulderAddMsg" class="text-muted small"></span>
+    </div>
+
     <div class="row g-3 mt-1">
       <div class="col-auto">
         <span class="text-muted small">% of Block:</span>
@@ -147,5 +157,67 @@ function updateTotals() {
 }
 
 updateTotals();
+
+function formatUsDate(isoDate) {
+  // "2026-05-26" → "05/26/2026"
+  const [y, m, d] = isoDate.split('-');
+  return m + '/' + d + '/' + y;
+}
+
+function addShoulderDate() {
+  const inp = document.getElementById('shoulderDateInput');
+  const msg = document.getElementById('shoulderAddMsg');
+  const date = inp.value;  // "YYYY-MM-DD"
+  if (!date) { msg.textContent = 'Pick a date first.'; return; }
+
+  // Duplicate check
+  if (document.getElementById('night_' + date)) {
+    msg.textContent = 'That date is already in the table.';
+    inp.value = '';
+    return;
+  }
+
+  const tbody = document.querySelector('#pickupTable tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+
+  // Build new row HTML
+  const dt = new Date(date + 'T12:00:00');
+  const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()];
+  const tr = document.createElement('tr');
+  tr.className = 'table-secondary';
+  tr.innerHTML = `
+    <td class="fw-semibold small">
+      ${formatUsDate(date)}
+      <span class="badge bg-secondary ms-1" style="font-size:.65rem">shoulder</span>
+    </td>
+    <td class="text-muted small">${dayName}</td>
+    <td class="text-end text-muted">—</td>
+    <td>
+      <input type="number" name="night_${date}" id="night_${date}"
+             class="form-control form-control-sm text-end night-input"
+             style="width:90px" value="0" min="0"
+             data-contracted="0"
+             oninput="updateTotals()">
+    </td>`;
+
+  // Insert in sorted order
+  let inserted = false;
+  for (const row of rows) {
+    const existingInput = row.querySelector('.night-input');
+    if (existingInput) {
+      const existingDate = existingInput.name.replace('night_', '');
+      if (date < existingDate) {
+        tbody.insertBefore(tr, row);
+        inserted = true;
+        break;
+      }
+    }
+  }
+  if (!inserted) tbody.appendChild(tr);
+
+  inp.value = '';
+  msg.textContent = '';
+  updateTotals();
+}
 </script>
 {% endblock %}

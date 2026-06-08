@@ -10594,10 +10594,21 @@ def pickup_final_history(cid):
     if request.method == 'POST':
         f = request.form
         pickup_by_night = {}
+        # Collect known dates (contracted block + prior weekly shoulder nights)
         for d in all_dates:
             val = f.get(f'night_{d}', '').strip()
             if val != '':
                 pickup_by_night[d] = int(val)
+        # Also collect any dynamically-added shoulder dates submitted via JS
+        import re as _re
+        for key in f:
+            m = _re.match(r'^night_(\d{4}-\d{2}-\d{2})$', key)
+            if m:
+                d = m.group(1)
+                if d not in pickup_by_night:
+                    val = f.get(key, '').strip()
+                    if val != '':
+                        pickup_by_night[d] = int(val)
         total_rooms      = sum(pickup_by_night.values())
         contracted_total = sum(block.values())
         pct_of_block     = round(total_rooms / contracted_total * 100, 1) if contracted_total else None
