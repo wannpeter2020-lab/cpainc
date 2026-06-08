@@ -60,6 +60,8 @@
           <tr>
             <th style="min-width:140px;">Customer</th>
             <th style="min-width:160px;">Meeting Name</th>
+            <th style="min-width:90px;">Status</th>
+            <th style="min-width:120px;">Notes</th>
             <th style="min-width:90px;">Booking #</th>
             <th style="min-width:150px;">Hotel</th>
             <th style="min-width:80px;">Brand</th>
@@ -70,7 +72,6 @@
             <th class="text-end" style="min-width:65px;">Rate</th>
             <th class="text-end" style="min-width:55px;">Comm%</th>
             <th class="text-end" style="min-width:100px;">Est. Commission</th>
-            <th>Status</th>
             {% for key, label in CHECKLIST %}
             <th class="text-center" style="min-width:80px;max-width:90px;white-space:normal;line-height:1.2;">{{ label }}</th>
             {% endfor %}
@@ -85,6 +86,17 @@
           <tr>
             <td class="fw-semibold">{{ r['client_org'] or '—' }}</td>
             <td>{{ r['event_name'] or r['rfp_name'] or '—' }}</td>
+            <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
+            <td class="master-notes-cell" data-rfp="{{ r['id'] }}" style="cursor:pointer;max-width:120px;">
+              {% if mr.notes %}
+                <span class="text-muted small" style="overflow:hidden;display:block;white-space:nowrap;text-overflow:ellipsis;max-width:115px;">
+                  <i class="bi bi-chat-left-text me-1 text-primary"></i>{{ mr.notes[0].note_text[:40] }}{% if mr.notes[0].note_text|length > 40 %}…{% endif %}
+                </span>
+              {% else %}
+                <span class="text-muted small"><i class="bi bi-chat-left-text me-1"></i>—</span>
+              {% endif %}
+              <script type="application/json" class="notes-data">{{ mr.notes | tojson }}</script>
+            </td>
             <td class="font-monospace text-muted small">
               {% if mr.booking_num %}
                 <a href="{{ url_for('booking_detail', booking_id=mr.booking_num) }}" class="text-decoration-none">{{ mr.booking_num }}</a>
@@ -107,7 +119,6 @@
                 <span class="text-success fw-semibold">${{ '{:,.0f}'.format(mr.contracted_total) }}</span>
               {% else %}—{% endif %}
             </td>
-            <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
             {% for key, label in CHECKLIST %}
             {% set cv = cl.get(key) or '' %}
             <td class="text-center" style="padding:2px 4px;vertical-align:middle;">
@@ -226,6 +237,28 @@
 
 {% endif %}{# end master/standard #}
 
+{# ── Notes hover dialog ── #}
+<div id="notesDialog" style="
+  display:none;position:fixed;z-index:9999;
+  background:#fff;border:1px solid #dee2e6;border-radius:6px;
+  box-shadow:0 4px 16px rgba(0,0,0,0.15);
+  width:340px;max-height:420px;
+  font-size:0.82rem;overflow:hidden;
+  flex-direction:column;">
+  <div style="background:#1a3a5c;color:#fff;padding:7px 12px;font-weight:600;font-size:0.83rem;display:flex;justify-content:space-between;align-items:center;">
+    <span id="notesDialogTitle">Notes</span>
+    <button onclick="closeNotesDialog()" style="background:none;border:none;color:#fff;font-size:1rem;cursor:pointer;line-height:1;">×</button>
+  </div>
+  <div id="notesDialogList" style="overflow-y:auto;max-height:240px;padding:8px 10px;border-bottom:1px solid #eee;"></div>
+  <div style="padding:8px 10px;">
+    <textarea id="notesDialogInput" rows="2" class="form-control form-control-sm"
+              placeholder="Add a note…" style="font-size:0.8rem;resize:none;"></textarea>
+    <div class="d-flex justify-content-end mt-1">
+      <button class="btn btn-sm btn-primary" style="font-size:0.75rem;" onclick="saveQuickNote()">Save Note</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -281,6 +314,100 @@ document.addEventListener('click', function(e) {
     cell.querySelector('.na-badge').style.display = 'none';
     cell.querySelector('.na-set-btn').style.display = '';
   });
+});
+
+// ── Notes hover dialog ──
+var _notesRid = null, _notesHideTimer = null;
+var _dialog = document.getElementById('notesDialog');
+
+function openNotesDialog(cell) {
+  clearTimeout(_notesHideTimer);
+  _notesRid = cell.dataset.rfp;
+  var notes = [];
+  try { notes = JSON.parse(cell.querySelector('.notes-data').textContent); } catch(e){}
+  document.getElementById('notesDialogTitle').textContent = 'Notes';
+  var list = document.getElementById('notesDialogList');
+  if (notes.length === 0) {
+    list.innerHTML = '<div class="text-muted" style="font-size:0.78rem;">No notes yet.</div>';
+  } else {
+    list.innerHTML = notes.map(function(n) {
+      var dt = n.note_date ? n.note_date.substring(0,10) : '';
+      var badge = n.note_type === 'client' ? 'bg-info' : n.note_type === 'hotel' ? 'bg-warning text-dark' : 'bg-light text-dark border';
+      return '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #f0f0f0;">'
+        + '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">'
+        + '<span class="badge ' + badge + '" style="font-size:0.68rem;">' + (n.note_type || 'internal') + '</span>'
+        + '<span class="text-muted" style="font-size:0.72rem;">' + dt + '</span></div>'
+        + '<div style="white-space:pre-wrap;word-break:break-word;">' + (n.note_text || '') + '</div></div>';
+    }).join('');
+  }
+  document.getElementById('notesDialogInput').value = '';
+  var rect = cell.getBoundingClientRect();
+  var dlgW = 340, dlgH = 420;
+  var left = Math.min(rect.right + 4, window.innerWidth - dlgW - 8);
+  var top  = Math.min(rect.top, window.innerHeight - dlgH - 8);
+  _dialog.style.left = left + 'px';
+  _dialog.style.top  = top + 'px';
+  _dialog.style.display = 'flex';
+}
+
+function closeNotesDialog() {
+  _dialog.style.display = 'none';
+  _notesRid = null;
+}
+
+function saveQuickNote() {
+  var text = document.getElementById('notesDialogInput').value.trim();
+  if (!text || !_notesRid) return;
+  var btn = document.querySelector('#notesDialog .btn-primary');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  fetch('/rfp/' + _notesRid + '/note/quick', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({note_text: text})
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(data) {
+    btn.disabled = false; btn.textContent = 'Save Note';
+    if (!data.ok) { alert('Save failed: ' + (data.error||'unknown')); return; }
+    var n = data.note;
+    var list = document.getElementById('notesDialogList');
+    var existing = list.innerHTML.includes('No notes yet') ? '' : list.innerHTML;
+    list.innerHTML = '<div style="margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid #f0f0f0;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:2px;">'
+      + '<span class="badge bg-light text-dark border" style="font-size:0.68rem;">internal</span>'
+      + '<span class="text-muted" style="font-size:0.72rem;">' + n.note_date + '</span></div>'
+      + '<div style="white-space:pre-wrap;">' + n.note_text + '</div></div>' + existing;
+    document.getElementById('notesDialogInput').value = '';
+    var cell = document.querySelector('.master-notes-cell[data-rfp="' + _notesRid + '"]');
+    if (cell) {
+      var span = cell.querySelector('span.text-muted');
+      if (span) span.innerHTML = '<i class="bi bi-chat-left-text me-1 text-primary"></i>'
+        + n.note_text.substring(0,40) + (n.note_text.length > 40 ? '…' : '');
+    }
+  })
+  .catch(function(){ btn.disabled=false; btn.textContent='Save Note'; alert('Network error.'); });
+}
+
+document.addEventListener('mouseover', function(e) {
+  var cell = e.target.closest('.master-notes-cell');
+  if (cell) { openNotesDialog(cell); return; }
+  if (e.target.closest('#notesDialog')) { clearTimeout(_notesHideTimer); return; }
+});
+document.addEventListener('mouseout', function(e) {
+  var cell = e.target.closest('.master-notes-cell');
+  var dlg  = e.target.closest('#notesDialog');
+  if (cell || dlg) {
+    _notesHideTimer = setTimeout(function() {
+      if (!_dialog.matches(':hover') && !document.querySelector('.master-notes-cell:hover')) {
+        closeNotesDialog();
+      }
+    }, 300);
+  }
+});
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#notesDialog') && !e.target.closest('.master-notes-cell')) {
+    closeNotesDialog();
+  }
 });
 
 // ── Column sorting ──

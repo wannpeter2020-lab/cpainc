@@ -12395,6 +12395,13 @@ def rfp_dashboard():
                     year = str(r['start_date'])[:4]
                 except Exception:
                     year = 'No Date'
+            # Notes (most recent 10)
+            notes = db.execute(
+                "SELECT id, note_date, note_type, note_text FROM rfp_note "
+                "WHERE rfp_id=? ORDER BY note_date DESC, id DESC LIMIT 10",
+                (r['id'],)
+            ).fetchall()
+
             if year not in master_by_year:
                 master_by_year[year] = []
             st = RFP_STATUS_MAP.get(r['status'], ('secondary', r['status']))
@@ -12406,12 +12413,32 @@ def rfp_dashboard():
                 'contracted_total': contracted_total,
                 'badge': st[0],
                 'badge_label': st[1],
+                'notes': [dict(n) for n in notes],
             })
         master_by_year = dict(sorted(master_by_year.items(), reverse=True))
 
     return render_template('rfp_dashboard.html', rfps=rfps, statuses=RFP_STATUS_MAP,
                            filter_tab=filter_tab, all_statuses=RFP_STATUSES,
                            master_by_year=master_by_year)
+
+
+@app.route('/rfp/<int:rid>/note/quick', methods=['POST'])
+def rfp_note_quick(rid):
+    """AJAX — add a quick note from the Master View dialog."""
+    data = request.get_json(silent=True) or {}
+    text = (data.get('note_text') or '').strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'empty note'}), 400
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO rfp_note (rfp_id, note_date, note_type, note_text) VALUES (?,?,?,?)",
+        (rid, today, 'internal', text)
+    )
+    db.commit()
+    nid = cur.lastrowid
+    return jsonify({'ok': True, 'note': {'id': nid, 'note_date': today, 'note_type': 'internal', 'note_text': text}})
 
 
 @app.route('/rfp/new', methods=['GET', 'POST'])
