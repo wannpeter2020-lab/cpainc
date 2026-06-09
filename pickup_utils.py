@@ -2049,7 +2049,6 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
     """
     try:
         block      = json.loads(config_row['contracted_block'] or '{}')
-        dates      = sorted(block.keys())
         org        = config_row['organization'] or ''
         event_name = config_row['event_name'] or ''
         hotel      = config_row['hotel'] or ''
@@ -2079,6 +2078,8 @@ def build_client_email(config_row, weekly_row, rl_status=None, weekly_list=None)
 
         pickup    = json.loads(weekly_row['pickup_by_night'] or '{}')
         report_dt = weekly_row['report_date'] or ''
+        # Include shoulder nights (in pickup but not in contracted block)
+        dates     = sorted(set(block.keys()) | set(pickup.keys()))
         total_blk = sum(block.get(d, 0) for d in dates)
         ota       = weekly_row['ota_rate']
         c_rate    = config_row['contracted_rate']
