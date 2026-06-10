@@ -14849,18 +14849,15 @@ def points_report():
             cell.alignment = Alignment(horizontal='center', vertical='center')
             cell.border = bord
         for r in rows:
-            ev_dates = ''
-            if r['event_start'] and r['event_end']:
-                ev_dates = f'{r["event_start"]} – {r["event_end"]}'
-            elif r['event_start']:
-                ev_dates = str(r['event_start'])
+            s, e = _us_date(r['event_start']), _us_date(r['event_end'])
+            ev_dates = f'{s} – {e}' if s and e else (s or e)
             ws.append([
                 r['hotel'] or '',
                 r['event'] or '',
                 str(r['booking_id'] or ''),
                 ev_dates,
-                r['form_sent_date'] or '',
-                r['points_received_date'] or '',
+                _us_date(r['form_sent_date']),
+                _us_date(r['points_received_date']),
                 int(r['points_awarded']) if r['points_awarded'] else '',
             ])
         if rows:
