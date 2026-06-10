@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Hotel Points — {{ chain }} Report{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mt-1"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Hotel Points Report</h4>
+  <a href="{{ url_for('points_dashboard') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+  </a>
+</div>
+
+{# Filter form #}
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small">Brand</label>
+        <select name="chain" class="form-select form-select-sm">
+          {% for p in programs %}
+          <option value="{{ p.chain_name }}" {% if p.chain_name == chain %}selected{% endif %}>{{ p.chain_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Meeting Start (from)</label>
+        <input type="date" name="start" class="form-control form-control-sm" value="{{ start or '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label small">Meeting End (to)</label>
+        <input type="date" name="end" class="form-control form-control-sm" value="{{ end or '' }}">
+      </div>
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-funnel me-1"></i>Apply Filter
+        </button>
+        {% if rows %}
+        <a href="{{ url_for('points_report', chain=chain, start=start, end=end, format='xlsx') }}"
+           class="btn btn-success btn-sm ms-2">
+          <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
+        </a>
+        {% endif %}
+      </div>
+    </form>
+    <div class="form-text mt-2 small">
+      Filters meetings whose event dates overlap the selected range. Leave the
+      dates blank for all-time.
+    </div>
+  </div>
+</div>
+
+{# Summary #}
+<div class="row g-3 mb-3">
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="section-label">Records</div>
+        <div class="h4 mb-0">{{ rows|length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="section-label">Total Points</div>
+        <div class="h4 mb-0">{{ '{:,}'.format(total_points) }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="section-label">Received</div>
+        <div class="h4 mb-0">{{ rows|selectattr('status','equalto','received')|list|length }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-center">
+      <div class="card-body py-2">
+        <div class="section-label">Pending/Submitted</div>
+        <div class="h4 mb-0">{{ rows|selectattr('status','in',['pending','submitted'])|list|length }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Preview table #}
+<div class="card">
+  <div class="card-header">{{ chain }} Points — Preview</div>
+  <div class="card-body p-0">
+    <div style="max-height:65vh; overflow:auto;">
+      <table class="table table-sm table-hover mb-0">
+        <thead style="position:sticky; top:0; z-index:1; background:#eaf0fb;">
+          <tr>
+            <th>Hotel</th>
+            <th>Event</th>
+            <th>Booking ID</th>
+            <th>Event Dates</th>
+            <th>Sent</th>
+            <th>Received</th>
+            <th class="text-end">Points</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td><small>{{ r.hotel or '—' }}</small></td>
+            <td><small>{{ r.event or '—' }}</small></td>
+            <td>
+              {% if r.booking_id %}
+              <a href="{{ url_for('booking_detail', booking_id=r.booking_id) }}"
+                 class="text-decoration-none font-monospace small">{{ r.booking_id }}</a>
+              {% else %}—{% endif %}
+            </td>
+            <td><small>{{ r.event_start|us_date }} – {{ r.event_end|us_date }}</small></td>
+            <td><small>{{ r.form_sent_date|us_date if r.form_sent_date else '—' }}</small></td>
+            <td><small>{{ r.points_received_date|us_date if r.points_received_date else '—' }}</small></td>
+            <td class="text-end">{% if r.points_awarded %}{{ '{:,}'.format(r.points_awarded) }}{% else %}—{% endif %}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted py-4">No records match this filter.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

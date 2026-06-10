@@ -14774,6 +14774,112 @@ def points_rechain():
                            total_requests=len(rows))
 
 
+def _points_report_rows(db, chain, start_iso, end_iso):
+    """Per-chain report rows whose meeting dates overlap [start, end]."""
+    sql = '''
+        SELECT
+            r.id, r.booking_id, r.form_sent_date, r.points_received_date,
+            r.points_awarded, r.status, r.notes,
+            COALESCE(pc.hotel,      pip.Customer)                  AS hotel,
+            COALESCE(pc.event_name, pip.EventName)                 AS event,
+            COALESCE(pc.event_start, substr(pip.StartDate,1,10))   AS event_start,
+            COALESCE(pc.event_end,   substr(pip.EndDate,  1,10))   AS event_end
+        FROM hotel_points_request r
+        LEFT JOIN hotel_points_program p ON p.id = r.program_id
+        LEFT JOIN pickup_config pc       ON pc.id = r.pickup_config_id
+        LEFT JOIN ReportPipeline pip
+            ON CAST(pip.BookingId AS INTEGER) = CAST(r.booking_id AS INTEGER)
+        WHERE p.chain_name = ?
+    '''
+    params = [chain]
+    if start_iso:
+        sql += ' AND (COALESCE(pc.event_end, substr(pip.EndDate,1,10)) >= ? OR ' \
+               '     COALESCE(pc.event_start, substr(pip.StartDate,1,10)) >= ?)'
+        params += [start_iso, start_iso]
+    if end_iso:
+        sql += ' AND (COALESCE(pc.event_start, substr(pip.StartDate,1,10)) <= ? OR ' \
+               '     COALESCE(pc.event_end, substr(pip.EndDate,1,10)) <= ?)'
+        params += [end_iso, end_iso]
+    sql += ' ORDER BY event_start ASC, event ASC'
+    return db.execute(sql, params).fetchall()
+
+
+@app.route('/points/report', methods=['GET'])
+def points_report():
+    db = get_db()
+    chain = (request.args.get('chain') or 'Marriott').strip()
+    start = (request.args.get('start') or '').strip()
+    end   = (request.args.get('end')   or '').strip()
+    fmt   = (request.args.get('format') or '').strip().lower()
+
+    programs = db.execute(
+        'SELECT chain_name FROM hotel_points_program WHERE active=1 ORDER BY chain_name'
+    ).fetchall()
+
+    rows = _points_report_rows(db, chain, start, end) if chain else []
+    total_points = sum(int(r['points_awarded'] or 0) for r in rows)
+
+    if fmt == 'xlsx':
+        import io
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        wb = Workbook()
+        ws = wb.active
+        ws.title = f'{chain} Points'
+        headers = ['Hotel', 'Event', 'Booking ID', 'Event Dates', 'Sent', 'Received', 'Points']
+        ws.append(headers)
+        hdr_font = Font(bold=True, color='FFFFFF')
+        hdr_fill = PatternFill('solid', fgColor='1A3A5C')
+        thin = Side(border_style='thin', color='888888')
+        bord = Border(left=thin, right=thin, top=thin, bottom=thin)
+        for col_idx, _ in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = hdr_font; cell.fill = hdr_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = bord
+        for r in rows:
+            ev_dates = ''
+            if r['event_start'] and r['event_end']:
+                ev_dates = f'{r["event_start"]} – {r["event_end"]}'
+            elif r['event_start']:
+                ev_dates = str(r['event_start'])
+            ws.append([
+                r['hotel'] or '',
+                r['event'] or '',
+                str(r['booking_id'] or ''),
+                ev_dates,
+                r['form_sent_date'] or '',
+                r['points_received_date'] or '',
+                int(r['points_awarded']) if r['points_awarded'] else '',
+            ])
+        if rows:
+            last_row = ws.max_row + 1
+            ws.cell(row=last_row, column=6, value='TOTAL').font = Font(bold=True)
+            tcell = ws.cell(row=last_row, column=7, value=total_points)
+            tcell.font = Font(bold=True)
+            tcell.number_format = '#,##0'
+        for r_idx in range(2, ws.max_row + 1):
+            cell = ws.cell(row=r_idx, column=7)
+            if isinstance(cell.value, int):
+                cell.number_format = '#,##0'
+        widths = [36, 50, 12, 24, 12, 12, 12]
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[ws.cell(1, i).column_letter].width = w
+        ws.freeze_panes = 'A2'
+
+        buf = io.BytesIO()
+        wb.save(buf); buf.seek(0)
+        rng = f'{start or "all"}_to_{end or "all"}'
+        fname = f'{chain}_Points_{rng}.xlsx'.replace(' ', '_')
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    return render_template('points_report.html',
+                           programs=programs,
+                           chain=chain, start=start, end=end,
+                           rows=rows, total_points=total_points)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # COST SAVINGS ANALYSIS
 # ═════════════════════════════════════════════════════════════════════════════
