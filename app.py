@@ -14823,6 +14823,17 @@ def points_report():
         import io
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+        def _us_date(s):
+            if not s: return ''
+            s = str(s)[:10]
+            try:
+                d = datetime.strptime(s, '%Y-%m-%d')
+                try:    return d.strftime('%-m/%-d/%Y')
+                except ValueError: return d.strftime('%m/%d/%Y')
+            except Exception:
+                return s
+
         wb = Workbook()
         ws = wb.active
         ws.title = f'{chain} Points'
