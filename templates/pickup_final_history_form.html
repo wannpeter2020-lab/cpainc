@@ -18,6 +18,12 @@
   <span>Enter the <strong>actual final room night pickup</strong> from the hotel's Housing History Report.
   Once saved, this event will move to <strong>Past Events</strong> on the dashboard.</span>
 </div>
+{% if hhr_imported %}
+<div class="alert alert-success d-flex align-items-center gap-2 mb-3" style="max-width:640px">
+  <i class="bi bi-file-earmark-check fs-5"></i>
+  <span><strong>HHR imported.</strong> Pickup numbers have been pre-filled from the uploaded file. Review, adjust if needed, then save.</span>
+</div>
+{% endif %}
 
 <form method="post" action="{{ url_for('pickup_final_history', cid=config['id']) }}">
 <div class="card mb-3" style="max-width:640px">

@@ -16,7 +16,8 @@
       <a href="{{ url_for('pickup_hhr_download', cid=config['id']) }}" class="btn btn-sm btn-outline-secondary">
         <i class="bi bi-download me-1"></i>Download HHR
       </a>
-      <a href="{{ url_for('pickup_email_post_report_outlook', cid=config['id']) }}"
+      <a id="outlookBtn"
+         href="{{ url_for('pickup_email_post_report_outlook', cid=config['id']) }}"
          class="btn btn-sm btn-primary">
         <i class="bi bi-box-arrow-up-right me-1"></i>Open in Outlook
       </a>
@@ -27,7 +28,22 @@
       <strong>To:</strong> {{ email.to or '(no client email on file)' }}<br>
       <strong>Subject:</strong> {{ email.subject }}<br>
       <strong>Attachment:</strong> {{ config['hhr_filename'] }}
+      {% if config['_rl_concurrent'] %}
+      <span id="rlAttachLabel" class="text-muted" style="display:none">
+        + {{ config['_rl_concurrent']['filename'] or 'rooming_list.pdf' }}
+      </span>
+      {% endif %}
     </div>
+    {% if config['_rl_concurrent'] %}
+    <div class="form-check mb-2">
+      <input class="form-check-input" type="checkbox" id="includeRlCheck">
+      <label class="form-check-label small" for="includeRlCheck">
+        Include rooming list:
+        <span class="text-muted">{{ config['_rl_concurrent']['filename'] or 'rooming_list.pdf' }}</span>
+        <span class="text-muted">(uploaded {{ config['_rl_concurrent']['upload_date'][:10] }})</span>
+      </label>
+    </div>
+    {% endif %}
     <div class="alert alert-info small py-2 mb-3">
       <i class="bi bi-info-circle me-1"></i>
       Click <strong>Open in Outlook</strong> — it will launch a new message with the subject, recipient, and HHR file attached.
@@ -68,4 +84,23 @@
   </div>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+{% if config['_rl_concurrent'] %}
+<script>
+const baseUrl = {{ url_for('pickup_email_post_report_outlook', cid=config['id']) | tojson }};
+const btn     = document.getElementById('outlookBtn');
+const chk     = document.getElementById('includeRlCheck');
+const lbl     = document.getElementById('rlAttachLabel');
+
+function updateBtn() {
+  btn.href = chk.checked ? baseUrl + '?include_rl=1' : baseUrl;
+  if (lbl) lbl.style.display = chk.checked ? '' : 'none';
+}
+
+chk.addEventListener('change', updateBtn);
+updateBtn();
+</script>
+{% endif %}
 {% endblock %}

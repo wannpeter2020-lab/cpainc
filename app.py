@@ -1196,18 +1196,63 @@ def import_payments():
                 df = df[pd.to_numeric(df['Booking Number'], errors='coerce').notna()]
                 df['Booking Number'] = df['Booking Number'].astype(str).str.strip().str.split('.').str[0]
             else:
+                # Excel — locate the header row. Two layouts are supported:
+                #   • Legacy: a "Booking Number" column
+                #   • Associate Payment (1099) Report: header at row B10 with
+                #     "Document Number" / "Booking: Booking ID" columns
                 df = pd.read_excel(tmp_path, engine='xlrd' if ext == 'xls' else 'openpyxl', header=None)
-                header_row = None
+                header_row, fmt = None, None
                 for i, row in df.iterrows():
-                    if any(str(v).strip() == 'Booking Number' for v in row.values):
-                        header_row = i
+                    vals = [str(v).strip() for v in row.values]
+                    if 'Booking Number' in vals:
+                        header_row, fmt = i, 'legacy'
+                        break
+                    if 'Document Number' in vals or 'Booking: Booking ID' in vals:
+                        header_row, fmt = i, '1099'
                         break
                 if header_row is None:
-                    flash('Could not find header row with "Booking Number" in the file.', 'error')
+                    flash('Could not find a recognised header row '
+                          '("Booking Number" or "Document Number") in the file.', 'error')
                     return redirect(url_for('import_payments'))
 
                 df.columns = df.iloc[header_row]
                 df = df.iloc[header_row + 1:].reset_index(drop=True)
+
+                if fmt == '1099':
+                    # Map the verbose 1099 column names onto the internal names
+                    col_map = {
+                        'Booking: Booking ID':                                'Booking Number',
+                        'Booking: Booking Associate: Associate Name':         'Booking Associate',
+                        'Booking: Subtype':                                   'Booking Type',
+                        'Booking: Account Name: Entity to Invoice Name':      'Account Name',
+                        'Booking: Event: Event  Name':                        'Event Name',
+                        'Booking: Event: Event Name':                         'Event Name',
+                        'Booking: Start Date':                                'Start Date',
+                        'Booking: End Date':                                  'End Date',
+                        'Booking: Entity to Invoice: Entity to Invoice Name': 'Hotel',
+                        'AP Invoice Number':                                  'Invoice Number',
+                        'Check #':                                            'Reference',
+                        'Date':                                               'Date',
+                        'Currency':                                           'Currency',
+                        'Payment':                                            'Payment',
+                        'Converted Currency':                                 'Converted Currency',
+                        'Payment (converted)':                                'Amount (USD)',
+                    }
+                    df.columns = [col_map.get(str(c).strip(), str(c).strip()) for c in df.columns]
+
+                    if 'Document Number' in df.columns:
+                        # Drop the trailing "Total" summary row (+ record-count row)
+                        is_total = df['Document Number'].astype(str).str.strip().str.lower().eq('total')
+                        if is_total.any():
+                            df = df.iloc[:is_total.idxmax()].reset_index(drop=True)
+                        # Housing & Registration lines leave "Booking: Booking ID"
+                        # blank but carry the booking in the Document Number, e.g.
+                        # "169500-DEC 2025" → 169500. Backfill from there.
+                        doc_bid = df['Document Number'].astype(str).str.extract(r'^(\d{4,7})', expand=False)
+                        bn = (df['Booking Number'].astype(str).str.strip()
+                              .replace({'': None, 'nan': None, 'None': None}))
+                        df['Booking Number'] = bn.fillna(doc_bid)
+
                 df = df[pd.to_numeric(df['Booking Number'], errors='coerce').notna()]
                 df['Booking Number'] = df['Booking Number'].astype(str).str.strip().str.split('.').str[0]
 
@@ -1230,9 +1275,38 @@ def import_payments():
                         payment_date = str(raw_date)[:10]
 
                 check_num = str(row.get('Reference', '') or '').strip() or None
-                amount = row.get('Amount')
-                if pd.isna(amount) if hasattr(pd, 'isna') else amount != amount:
-                    amount = None
+
+                def _amt(val):
+                    if val is None: return None
+                    try:
+                        if pd.isna(val): return None
+                    except Exception: pass
+                    try:
+                        return float(str(val).replace(',', '').replace('$', '').strip())
+                    except Exception:
+                        return None
+
+                # USD amount to record. Legacy uses 'Amount'; the 1099 report uses
+                # 'Amount (USD)' = Payment (converted), always USD. Per the currency
+                # rule a non-USD payment is booked at the converted USD figure,
+                # never the foreign amount.
+                amount = _amt(row.get('Amount'))
+                if amount is None:
+                    amount = _amt(row.get('Amount (USD)'))
+                if amount is None:
+                    amount = _amt(row.get('Payment'))
+                if amount is not None:
+                    amount = round(amount, 2)
+
+                # For non-USD payments, note the original currency + amount.
+                currency = str(row.get('Currency', '') or '').strip()
+                special_notes = None
+                if currency and currency.upper() != 'USD':
+                    orig_pay = _amt(row.get('Payment'))
+                    parts = [f'Currency: {currency}']
+                    if orig_pay is not None:
+                        parts.append(f'Original: {orig_pay:,.2f}')
+                    special_notes = ' | '.join(parts)
 
                 if payment_date:
                     dup = db.execute(
@@ -1275,9 +1349,9 @@ def import_payments():
                     })
 
                 db.execute('''INSERT INTO ChkRegNote
-                    (BookingID,FinalPayment,Check_,DateOnCheck,EntryDate,Cancelled,AuditFlag,Advance)
-                    VALUES (?,?,?,?,?,0,0,?)''',
-                    (booking_id, amount, check_num, payment_date, today, is_advance))
+                    (BookingID,FinalPayment,Check_,DateOnCheck,EntryDate,SpecialNotes,Cancelled,AuditFlag,Advance)
+                    VALUES (?,?,?,?,?,?,0,0,?)''',
+                    (booking_id, amount, check_num, payment_date, today, special_notes, is_advance))
                 added += 1
 
             db.commit()
@@ -10461,17 +10535,31 @@ def pickup_amendment_download(cid, amid):
                      download_name=row['filename'] or f'amendment_{amid}.pdf')
 
 
-def _build_housing_form_wb(config, pipeline):
-    """Return a filled openpyxl Workbook for the Housing History Form."""
+def _build_housing_form_wb(config, pipeline, pickup_dates=None):
+    """Return a filled openpyxl Workbook for the Housing History Form.
+
+    pickup_dates: optional list/set of ISO date strings from the latest pickup
+    report. Shoulder nights present in the pickup but not in the contracted block
+    are added as padding columns (0 contracted block) so the hotel can fill them in.
+    """
     from openpyxl import load_workbook
     from openpyxl.styles import Alignment
     from datetime import datetime as _dt
 
     block        = json.loads(config['contracted_block'] or '{}')
     sorted_dates = sorted(block.keys())
-    n_dates      = len(sorted_dates)
+
+    # Build the full date range: contracted dates + any shoulder nights from pickup
+    if pickup_dates:
+        all_dates = sorted(set(sorted_dates) | set(pickup_dates))
+    elif sorted_dates:
+        all_dates = sorted_dates
+    else:
+        all_dates = sorted_dates
+    n_dates = len(all_dates)
 
     comm_pct   = float(pipeline['CommissionPercent']) if pipeline and pipeline['CommissionPercent'] else 0.0
+    currency   = (pipeline.get('Currency') or 'USD') if pipeline else 'USD'
     booking_id = config['booking_id'] or ''
     org_name   = (pipeline['AccountName'] or '') if pipeline else (config['organization'] or '')
     hotel_name = config['hotel'] or ''
@@ -10497,7 +10585,7 @@ def _build_housing_form_wb(config, pipeline):
 
     ws['J1'] = comm_pct
     ws.cell(row=1, column=13 + n_extra).value = booking_id
-    ws.cell(row=1, column=16 + n_extra).value = 'USD'
+    ws.cell(row=1, column=16 + n_extra).value = currency
 
     ws['C2'] = org_name
     ws['C3'] = hotel_name
@@ -10512,7 +10600,7 @@ def _build_housing_form_wb(config, pipeline):
         for row in (5, 6, 7):
             ws.cell(row=row, column=col).value = None
 
-    for i, d in enumerate(sorted_dates):
+    for i, d in enumerate(all_dates):
         col      = col_start + i
         date_obj = _dt.strptime(d, '%Y-%m-%d')
         c5 = ws.cell(row=5, column=col)
@@ -10520,7 +10608,7 @@ def _build_housing_form_wb(config, pipeline):
         c7 = ws.cell(row=7, column=col)
         c5.value = date_obj;  c5.alignment = center
         c6.value = days_abbr[date_obj.weekday()]; c6.alignment = center
-        c7.value = block.get(d, 0); c7.alignment = center
+        c7.value = block.get(d, 0); c7.alignment = center   # 0 for shoulder nights
 
     ws.cell(row=7, column=total_col).value = sum(block.get(d, 0) for d in sorted_dates)
     ws.cell(row=7, column=rate_col).value  = config['contracted_rate'] or 0
@@ -10542,8 +10630,12 @@ def pickup_housing_form(cid):
         pipeline = db.execute(
             'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
         ).fetchone()
-
-    wb, event_name = _build_housing_form_wb(config, pipeline)
+    latest_weekly = db.execute(
+        "SELECT pickup_by_night FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC LIMIT 1",
+        (cid,)
+    ).fetchone()
+    pickup_dates = list(json.loads(latest_weekly['pickup_by_night'] or '{}').keys()) if latest_weekly else None
+    wb, event_name = _build_housing_form_wb(config, pipeline, pickup_dates=pickup_dates)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -10642,10 +10734,83 @@ def pickup_final_history(cid):
 
     prefill_entry = existing_fh or last
     last_pickup = json.loads(prefill_entry['pickup_by_night'] or '{}') if prefill_entry else {}
+
+    # If an HHR import just happened, use its richer pickup data (includes shoulder nights)
+    import flask as _flask
+    hhr_import_pickup = None
+    if _flask.session.get('hhr_import_cid') == cid and _flask.session.get('hhr_import_pickup'):
+        try:
+            hhr_import_pickup = json.loads(_flask.session.pop('hhr_import_pickup'))
+            _flask.session.pop('hhr_import_cid', None)
+            last_pickup = hhr_import_pickup
+        except Exception:
+            pass
+
     return render_template('pickup_final_history_form.html',
                            config=config, block=block, all_dates=all_dates,
                            last_pickup=last_pickup, existing_fh=existing_fh,
-                           today=datetime.now().strftime('%Y-%m-%d'))
+                           today=datetime.now().strftime('%Y-%m-%d'),
+                           hhr_imported=(hhr_import_pickup is not None))
+
+
+@app.route('/pickup/<int:cid>/import-completed-hhr', methods=['POST'])
+def pickup_import_completed_hhr(cid):
+    """Accept a completed HHR (PDF or Excel) returned by the hotel.
+    Parses the FINAL TOTAL PICKUP row and redirects to Final History form pre-filled.
+    """
+    db = get_db()
+    config = db.execute("SELECT * FROM pickup_config WHERE id=?", (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    f = request.files.get('hhr_file')
+    if not f or not f.filename:
+        flash('No file uploaded.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    file_bytes = f.read()
+    filename   = f.filename.lower()
+
+    parsed = {}
+    if filename.endswith('.pdf'):
+        from pickup_utils import parse_hhr_pdf as _parse_pdf
+        parsed = _parse_pdf(file_bytes)
+    elif filename.endswith(('.xlsx', '.xlsm', '.xls')):
+        from pickup_utils import parse_hhr_excel as _parse_xl
+        parsed = _parse_xl(file_bytes)
+    else:
+        flash('Unsupported file type. Upload a PDF or Excel file.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    if parsed.get('error'):
+        flash(f'Could not parse HHR: {parsed["error"]}', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    pickup_by_night = parsed.get('pickup_by_night') or {}
+    if not pickup_by_night:
+        flash('No per-night pickup data found in the uploaded file.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    # Keep contracted nights always; keep shoulder nights only if they have actual pickup
+    block_keys = set(json.loads(config['contracted_block'] or '{}').keys())
+    pickup_by_night = {d: n for d, n in pickup_by_night.items()
+                       if n > 0 or d in block_keys}
+
+    import flask
+    flask.session['hhr_import_pickup'] = json.dumps(pickup_by_night)
+    flask.session['hhr_import_cid']    = cid
+    if parsed.get('hotel_approver'):
+        flask.session['hhr_import_approver']       = parsed['hotel_approver']
+        flask.session['hhr_import_approver_email'] = parsed.get('hotel_approver_email', '')
+
+    total = parsed.get('final_total_pickup') or sum(pickup_by_night.values())
+    flash(
+        f'HHR parsed — {total} total rooms across {len(pickup_by_night)} nights. '
+        f'Review and save below.',
+        'info'
+    )
+    return redirect(url_for('pickup_final_history', cid=cid))
 
 
 @app.route('/pickup/<int:cid>/config/edit', methods=['GET', 'POST'])
@@ -11306,6 +11471,11 @@ def pickup_email_housing(cid):
         pipeline = db.execute(
             'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
         ).fetchone()
+    latest_weekly = db.execute(
+        "SELECT pickup_by_night FROM pickup_weekly WHERE config_id=? ORDER BY report_date DESC LIMIT 1",
+        (cid,)
+    ).fetchone()
+    pickup_dates  = list(json.loads(latest_weekly['pickup_by_night'] or '{}').keys()) if latest_weekly else None
 
     sorted_dates  = sorted(json.loads(config['contracted_block'] or '{}').keys())
     org_name      = (pipeline['AccountName'] or '') if pipeline else (config['organization'] or '')
@@ -11336,7 +11506,7 @@ def pickup_email_housing(cid):
 
     # ── Local Mac: auto-open Outlook with form attached ────────────────────
     if platform.system() == 'Darwin':
-        wb, _ = _build_housing_form_wb(config, pipeline)
+        wb, _ = _build_housing_form_wb(config, pipeline, pickup_dates=pickup_dates)
         safe_name   = event_name.replace('/', '-').replace(' ', '_')[:50]
         attach_path = f'/tmp/Housing_History_{safe_name}.xlsx'
         wb.save(attach_path)
@@ -11355,7 +11525,7 @@ def pickup_email_housing(cid):
 
     if ms_row:
         from datetime import date as _date
-        wb, _ = _build_housing_form_wb(config, pipeline)
+        wb, _ = _build_housing_form_wb(config, pipeline, pickup_dates=pickup_dates)
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         safe_name = event_name.replace('/', '-').replace(' ', '_')[:50]
         draft_id, err = _create_outlook_draft(
@@ -11665,13 +11835,20 @@ def pickup_hhr_download(cid):
         flash('No Housing History Report on file.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
     file_bytes = bytes(hhr['file_data'])
-    try:
-        from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
-        file_bytes = clean_hhr_for_client(strip_hhr_commission_rows(file_bytes))
-    except Exception:
-        pass
+    is_pdf = file_bytes[:4] == b'%PDF'
+    if not is_pdf:
+        try:
+            from pickup_utils import populate_hhr_template
+            file_bytes = populate_hhr_template(file_bytes)
+        except Exception:
+            try:
+                from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
+                file_bytes = clean_hhr_for_client(strip_hhr_commission_rows(file_bytes))
+            except Exception:
+                pass
+    stored_name = hhr['filename'] or ('housing_history.pdf' if is_pdf else 'housing_history.xlsx')
     return send_file(_io.BytesIO(file_bytes),
-                     download_name=hhr['filename'] or 'housing_history.xlsx',
+                     download_name=stored_name,
                      as_attachment=True)
 
 
@@ -11734,34 +11911,87 @@ def _get_post_report_data(cid):
     }
 
     config_dict = dict(config)
-    # Name the attachment after the event
     import re as _re
     _event = (config['event_name'] or config['organization'] or 'Housing History Report').strip()
-    _safe  = _re.sub(r'[\\/*?:"<>|]', '', _event)   # strip chars illegal in filenames
-    config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
+    _safe  = _re.sub(r'[\\/*?:"<>|]', '', _event)
 
-    # Strip commission rows before client delivery
     raw_bytes = bytes(hhr_row['file_data']) if (hhr_row and hhr_row['file_data']) else None
-    if raw_bytes:
+    _is_pdf = raw_bytes and raw_bytes[:4] == b'%PDF'
+
+    if _is_pdf:
+        # Hotel returned a PDF — generate a proper client-facing Excel using the
+        # same template. Write Final History pickup into Rate 1 date columns and
+        # rate into N8. All SUM/formula cells (M8, O8, P8, Q8, rows 15-19, etc.)
+        # are left intact — they recalculate from the values written.
+        config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
+        pipeline = None
+        if config['booking_id']:
+            try:
+                pipeline = db.execute(
+                    'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
+                ).fetchone()
+            except Exception:
+                pass
         try:
-            from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
-            raw_bytes = clean_hhr_for_client(strip_hhr_commission_rows(raw_bytes))
+            import io as _io
+            from openpyxl.styles import Alignment as _Align
+            _center = _Align(horizontal='center', vertical='center')
+
+            _pickup_dates = list(pbn.keys()) if pbn else []
+            _wb, _ = _build_housing_form_wb(config, pipeline, pickup_dates=_pickup_dates)
+            _ws = _wb.active
+
+            _blk    = json.loads(config['contracted_block'] or '{}')
+            _sdates = sorted(_blk.keys())
+            _all_d  = sorted(set(_sdates) | set(_pickup_dates)) if _pickup_dates else _sdates
+            _n_xtra = max(0, len(_all_d) - 10)
+            _rcol   = 14 + _n_xtra   # N column: rate for Rate 1
+
+            # Write per-night pickup into Rate 1 date columns only.
+            # M8 has =SUM(C8:L8), O8 has =N8*M8 — do NOT overwrite those formulas.
+            for _i, _d in enumerate(_all_d):
+                _v = pbn.get(_d, 0)
+                try:
+                    _c = _ws.cell(row=8, column=3 + _i)
+                    _c.value     = _v if _v else None
+                    _c.alignment = _center
+                except Exception:
+                    pass
+
+            # Write contracted rate into N8 so O8 (=N8*M8) calculates revenue
+            try:
+                _ws.cell(row=8, column=_rcol).value = (
+                    float(config['contracted_rate']) if config['contracted_rate'] else None
+                )
+            except Exception:
+                pass
+
+            _buf = _io.BytesIO()
+            _wb.save(_buf)
+            raw_bytes = _buf.getvalue()
         except Exception:
-            pass  # fall back to unstripped file if anything goes wrong
+            config_dict['hhr_filename'] = f"{_safe} — Housing History Report.pdf"
+    else:
+        config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
+        if raw_bytes:
+            try:
+                from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
+                raw_bytes = clean_hhr_for_client(strip_hhr_commission_rows(raw_bytes))
+            except Exception:
+                pass
     config_dict['_hhr_file_data'] = raw_bytes
 
-    # Find a rooming list uploaded within 2 days of the HHR (for email attachment)
-    hhr_date = hhr_row['upload_date'][:10] if (hhr_row and hhr_row.get('upload_date')) else None
-    if not hhr_date:
-        import datetime as _dt
-        hhr_date = _dt.date.today().strftime('%Y-%m-%d')
-    rl_concurrent = db.execute('''
-        SELECT file_data, filename FROM pickup_rooming_list
-        WHERE config_id=? AND file_data IS NOT NULL
-          AND ABS(julianday(upload_date) - julianday(?)) <= 2
-        ORDER BY upload_date DESC LIMIT 1
-    ''', (cid, hhr_date)).fetchone()
-    config_dict['_rl_concurrent'] = rl_concurrent
+    # Most recent rooming list — inclusion decided by checkbox on summary screen
+    config_dict['_rl_concurrent'] = None
+    rl_latest = db.execute(
+        """SELECT id, filename, file_data, upload_date
+           FROM pickup_rooming_list
+           WHERE config_id=?
+           ORDER BY upload_date DESC LIMIT 1""",
+        (cid,)
+    ).fetchone()
+    if rl_latest and rl_latest['file_data']:
+        config_dict['_rl_concurrent'] = dict(rl_latest)
 
     return config_dict, stats, fh
 
@@ -11805,7 +12035,8 @@ def pickup_email_post_report_outlook(cid):
             to_addr      = email.get('to', '')
             file_data    = config_dict.get('_hhr_file_data')
             hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
-            rl_row       = config_dict.get('_rl_concurrent')
+            include_rl   = request.args.get('include_rl') == '1'
+            rl_row       = config_dict.get('_rl_concurrent') if include_rl else None
             from pickup_utils import _build_cc_recipients
             cc_list = [r['email'] for r in _build_cc_recipients(config_dict) if r.get('email')]
             draft_id, err = _create_outlook_draft(
@@ -11847,7 +12078,8 @@ def pickup_email_post_report_outlook(cid):
 
     file_data    = config_dict.get('_hhr_file_data')
     hhr_filename = config_dict.get('hhr_filename') or 'Housing History Report.xlsx'
-    rl_row       = config_dict.get('_rl_concurrent')
+    include_rl   = request.args.get('include_rl') == '1'
+    rl_row       = config_dict.get('_rl_concurrent') if include_rl else None
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
         t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
@@ -11962,7 +12194,8 @@ def pickup_email_post_report_outlook(cid):
         flash(f'Could not launch Outlook: {exc}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
 
-    flash('Post Report email opened in Outlook.', 'success')
+    rl_note = ' + rooming list' if (include_rl and rl_row) else ''
+    flash(f'Post Report email opened in Outlook with HHR{rl_note} attached.', 'success')
     return redirect(url_for('pickup_event', cid=cid))
 
 
@@ -12002,6 +12235,8 @@ def _build_post_report_email(config, stats):
     for d in all_dates:
         b = block_nights.get(d, 0)
         p = pickup_nights.get(d, 0)
+        if b == 0 and p == 0:
+            continue
         diff = p - b
         diff_str   = (f'+{diff}' if diff > 0 else str(diff)) if diff != 0 else '—'
         diff_color = '#16a34a' if diff > 0 else ('#dc2626' if diff < 0 else '#6b7280')
@@ -12009,7 +12244,12 @@ def _build_post_report_email(config, stats):
             dow = _dow[_date.fromisoformat(d).weekday()]
         except Exception:
             dow = ''
-        date_label = f'{d[5:].replace("-", "/")} ({dow})' if dow else d[5:].replace('-', '/')
+        try:
+            _d_obj = _date.fromisoformat(d)
+            _d_fmt = f'{_d_obj.month}/{_d_obj.day}/{_d_obj.year}'
+        except Exception:
+            _d_fmt = d[5:].replace('-', '/')
+        date_label = f'{_d_fmt} ({dow})' if dow else _d_fmt
         night_rows += (
             f'<tr>'
             f'<td style="padding:4px 10px;border-bottom:1px solid #e5e7eb">{date_label}</td>'
@@ -12027,8 +12267,11 @@ def _build_post_report_email(config, stats):
     pct_color   = '#16a34a' if (pct or 0) >= 100 else '#d97706'
     att_color   = '#16a34a' if (pct_attrition or 0) >= 100 else '#d97706'
 
+    _contact    = (config.get('group_contact') or '').strip()
+    _first_name = _contact.split()[0] if _contact else ''
+
     html_body = f'''<div style="font-family:Arial,sans-serif;max-width:640px;color:#1f2937">
-<p>Hi {config.get("group_contact") or ""},</p>
+<p>Hi {_first_name},</p>
 <p>Please find attached the final housing history report for <strong>{event_name}</strong> at <strong>{hotel}</strong>. Below is a summary of the pickup performance.</p>
 
 <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f9fafb;border-radius:8px;overflow:hidden">

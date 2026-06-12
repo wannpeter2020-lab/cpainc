@@ -195,6 +195,9 @@
     <a href="{{ url_for('pickup_final_history', cid=config['id']) }}" class="btn btn-{% if has_final_history %}success{% else %}outline-warning{% endif %} btn-sm">
       <i class="bi bi-flag-fill me-1"></i>{% if has_final_history %}Edit Final History{% else %}Enter Final History{% endif %}
     </a>
+    <button type="button" class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#importHhrModal">
+      <i class="bi bi-file-earmark-arrow-up me-1"></i>Upload Completed HHR
+    </button>
     {% endif %}
     <a href="{{ url_for('pickup_export_row', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-clipboard me-1"></i>Export Row
@@ -365,6 +368,53 @@
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-warning" id="amendmentSubmitBtn" disabled>
             <i class="bi bi-magic me-1"></i>Extract Changes
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# Upload Completed HHR modal #}
+<div class="modal fade" id="importHhrModal" tabindex="-1" aria-labelledby="importHhrModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="importHhrModalLabel">
+          <i class="bi bi-file-earmark-arrow-up me-2 text-success"></i>Upload Completed HHR
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('pickup_import_completed_hhr', cid=config['id']) }}"
+            enctype="multipart/form-data">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Upload the completed Housing History Report returned by the hotel.
+            The per-night pickup numbers will be extracted and pre-filled into the Final History form for your review.
+            Accepts <strong>PDF</strong> or <strong>Excel (.xlsx)</strong>.
+          </p>
+          <div id="hhrDropZone"
+               onclick="document.getElementById('hhrFileInput').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleHhrDrop(event)"
+               style="border:2px dashed #198754;border-radius:8px;padding:2.5rem 1rem;
+                      text-align:center;cursor:pointer;transition:border-color .2s,background .2s">
+            <i class="bi bi-file-earmark-check fs-2 text-success d-block mb-2"></i>
+            <div class="text-muted">Drag &amp; drop your completed HHR here, or <strong>click to browse</strong></div>
+            <div class="text-muted small mt-1">PDF or Excel (.xlsx)</div>
+          </div>
+          <input type="file" id="hhrFileInput" name="hhr_file"
+                 accept=".pdf,.xlsx,.xlsm,.xls" class="d-none"
+                 onchange="showHhrFile(this)">
+          <div id="hhrFileChosen" class="mt-2 small text-success d-none">
+            <i class="bi bi-check-circle me-1"></i><span id="hhrFileName"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success" id="hhrSubmitBtn" disabled>
+            <i class="bi bi-magic me-1"></i>Import &amp; Pre-fill
           </button>
         </div>
       </form>
@@ -1101,6 +1151,31 @@ function handleAmendmentDrop(e) {
     dt.items.add(files[0]);
     input.files = dt.files;
     showAmendmentFile(input);
+  }
+}
+
+function showHhrFile(input) {
+  const chosen = document.getElementById('hhrFileChosen');
+  const name   = document.getElementById('hhrFileName');
+  const btn    = document.getElementById('hhrSubmitBtn');
+  if (input.files && input.files[0]) {
+    chosen.classList.remove('d-none');
+    name.textContent = input.files[0].name;
+    btn.disabled = false;
+  }
+}
+
+function handleHhrDrop(e) {
+  e.preventDefault();
+  const zone = document.getElementById('hhrDropZone');
+  if (zone) zone.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files.length) {
+    const input = document.getElementById('hhrFileInput');
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    showHhrFile(input);
   }
 }
 

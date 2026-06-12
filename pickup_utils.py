@@ -5957,3 +5957,237 @@ def parse_columnar_pickup_xlsx(file_bytes, filename=''):
 
     pairs = [{'date': d, 'count': c} for d, c in sorted(pickup_vals.items())]
     return {'pairs': pairs, 'text': '', 'source': source, 'error': None}
+
+
+def _hhr_pdf_date_to_iso(date_str, year):
+    """Convert '5-Jun' → '2026-06-05' given year int."""
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime(f"{date_str.strip()}-{year}", '%d-%b-%Y').strftime('%Y-%m-%d')
+    except ValueError:
+        return None
+
+
+def _hhr_pdf_parse_pct(val):
+    """'10%' → 0.10"""
+    import re as _re
+    if not val:
+        return None
+    m = _re.search(r'(\d+(?:\.\d+)?)\s*%', str(val))
+    return float(m.group(1)) / 100.0 if m else None
+
+
+def _hhr_pdf_parse_currency(val):
+    """'($ 269.00)' or '$269' → 269.0"""
+    import re as _re
+    if not val:
+        return None
+    cleaned = str(val).replace('(', '').replace(')', '').replace(',', '').replace('$', '').strip()
+    m = _re.search(r'[\d]+\.?\d*', cleaned)
+    return float(m.group()) if m else None
+
+
+def parse_hhr_pdf(file_bytes, fallback_year=None):
+    """Parse a completed Housing History Report PDF returned by the hotel.
+
+    Returns a dict with:
+      organization, hotel, event_name, booking_id, commission_pct,
+      contracted_total, contracted_block (dict), contracted_rate,
+      final_total_pickup, pickup_by_night (dict iso→int),
+      room_revenue, audit_pickup, no_shows, cancellations,
+      hotel_approver, hotel_approver_email, error
+    """
+    import io, re
+
+    result = {
+        'organization':         '',
+        'hotel':                '',
+        'event_name':           '',
+        'booking_id':           '',
+        'commission_pct':       None,
+        'contracted_total':     0,
+        'contracted_block':     {},
+        'contracted_rate':      None,
+        'final_total_pickup':   0,
+        'pickup_by_night':      {},
+        'room_revenue':         None,
+        'audit_pickup':         0,
+        'no_shows':             0,
+        'cancellations':        0,
+        'hotel_approver':       '',
+        'hotel_approver_email': '',
+        'error':                None,
+    }
+
+    try:
+        import pdfplumber
+    except ImportError:
+        result['error'] = 'pdfplumber not installed'
+        return result
+
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            if not pdf.pages:
+                result['error'] = 'No pages in PDF'
+                return result
+
+            page = pdf.pages[0]
+            tables = page.extract_tables()
+            if not tables:
+                result['error'] = 'No tables found on page 1'
+                return result
+
+            table = tables[0]
+            year = fallback_year
+            date_cols = []
+
+            for row in table:
+                if not row:
+                    continue
+                label = (row[0] or '').strip()
+                if label == 'NAME & DATE OF EVENT' and len(row) > 1:
+                    val = (row[1] or '').strip()
+                    result['event_name'] = val
+                    m = re.search(r'(20\d{2})', val)
+                    if m:
+                        year = int(m.group(1))
+                    break
+
+            for row in table:
+                if not row:
+                    continue
+                label = (row[0] or '').strip()
+
+                if label == '' and len(row) > 8:
+                    for ci, cell in enumerate(row):
+                        if (cell or '').strip() == 'Comm %' and ci + 2 < len(row):
+                            result['commission_pct'] = _hhr_pdf_parse_pct(row[ci + 2])
+                        if (cell or '').strip() == 'Booking #:' and ci + 2 < len(row):
+                            result['booking_id'] = (row[ci + 2] or '').strip()
+
+                elif label == 'ORGANIZATION' and len(row) > 1:
+                    result['organization'] = (row[1] or '').strip()
+
+                elif label == 'HOTEL' and len(row) > 1:
+                    result['hotel'] = (row[1] or '').strip()
+
+                elif label == 'DATE':
+                    date_pat = re.compile(
+                        r'^\d{1,2}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$', re.I
+                    )
+                    for ci, cell in enumerate(row[1:], start=1):
+                        if cell and date_pat.match(cell.strip()):
+                            date_cols.append((ci, cell.strip()))
+
+                elif label == 'Contracted Block' and date_cols and year:
+                    for ci, date_str in date_cols:
+                        val_str = (row[ci] if ci < len(row) else None) or ''
+                        try:
+                            n = int(val_str.strip()) if val_str.strip() else 0
+                        except ValueError:
+                            n = 0
+                        iso = _hhr_pdf_date_to_iso(date_str, year)
+                        if iso and n > 0:
+                            result['contracted_block'][iso] = n
+                    for cell in reversed(row):
+                        rate = _hhr_pdf_parse_currency(cell)
+                        if rate:
+                            result['contracted_rate'] = rate
+                            break
+                    result['contracted_total'] = sum(result['contracted_block'].values())
+
+                elif 'FINAL TOTAL PICKUP' in label.upper() and date_cols and year:
+                    for ci, date_str in date_cols:
+                        val_str = (row[ci] if ci < len(row) else None) or ''
+                        try:
+                            n = int(val_str.strip()) if val_str.strip() else 0
+                        except ValueError:
+                            n = 0
+                        iso = _hhr_pdf_date_to_iso(date_str, year)
+                        if iso:
+                            result['pickup_by_night'][iso] = n
+                    total_ci = date_cols[-1][0] + 1
+                    if total_ci < len(row):
+                        try:
+                            result['final_total_pickup'] = int((row[total_ci] or '').strip() or '0')
+                        except ValueError:
+                            result['final_total_pickup'] = sum(result['pickup_by_night'].values())
+                    else:
+                        result['final_total_pickup'] = sum(result['pickup_by_night'].values())
+
+                elif 'Non-Commissionable Audit' in label or 'Audit Pickup' in label.lower():
+                    total_ci = date_cols[-1][0] + 1 if date_cols else None
+                    if total_ci and total_ci < len(row):
+                        try:
+                            result['audit_pickup'] = int((row[total_ci] or '').strip() or '0')
+                        except ValueError:
+                            pass
+
+                elif 'Commissionable No Shows' in label:
+                    total_ci = date_cols[-1][0] + 1 if date_cols else None
+                    if total_ci and total_ci < len(row):
+                        try:
+                            result['no_shows'] = int((row[total_ci] or '').strip() or '0')
+                        except ValueError:
+                            pass
+
+                elif 'Commissionable Cancellations' in label:
+                    total_ci = date_cols[-1][0] + 1 if date_cols else None
+                    if total_ci and total_ci < len(row):
+                        try:
+                            result['cancellations'] = int((row[total_ci] or '').strip() or '0')
+                        except ValueError:
+                            pass
+
+                elif 'History Report Approved By' in label:
+                    name_next = False
+                    email_next = False
+                    for cell in row[1:]:
+                        if cell is None:
+                            continue
+                        cell_s = cell.strip()
+                        if name_next and cell_s:
+                            result['hotel_approver'] = cell_s
+                            name_next = False
+                        elif email_next and cell_s:
+                            result['hotel_approver_email'] = cell_s
+                            email_next = False
+                        elif cell_s == 'Name':
+                            name_next = True
+                        elif cell_s == 'Email':
+                            email_next = True
+
+            if not result['hotel_approver'] and len(pdf.pages) > 1:
+                for pg in pdf.pages[1:]:
+                    pg_tables = pg.extract_tables()
+                    for pg_table in pg_tables:
+                        for row in pg_table:
+                            if not row:
+                                continue
+                            label = (row[0] or '').strip()
+                            if 'History Report Approved By' in label:
+                                name_next = False
+                                email_next = False
+                                for cell in row[1:]:
+                                    if cell is None:
+                                        continue
+                                    cell_s = cell.strip()
+                                    if name_next and cell_s:
+                                        result['hotel_approver'] = cell_s
+                                        name_next = False
+                                    elif email_next and cell_s:
+                                        result['hotel_approver_email'] = cell_s
+                                        email_next = False
+                                    elif cell_s == 'Name':
+                                        name_next = True
+                                    elif cell_s == 'Email':
+                                        email_next = True
+                                if result['hotel_approver']:
+                                    break
+                        if result['hotel_approver']:
+                            break
+
+    except Exception as e:
+        result['error'] = str(e)
+
+    return result
