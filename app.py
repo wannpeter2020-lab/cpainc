@@ -12224,6 +12224,31 @@ def _build_post_report_email(config, stats):
         if pct_attrition_val:
             pct_attrition = pct_attrition_val
 
+    # ── Attrition performance statement (Style B — warm, client-friendly) ─────
+    # Only built when we know the attrition floor (contracted block × commitment)
+    # and the final pickup; otherwise omitted, same as the table's attrition row.
+    attrition_statement = ''
+    if attrition_rooms and fp:
+        _commit_pct = round(float(config['attrition_pct'] or 0) * 100)
+        _floor      = int(round(attrition_rooms))
+        _pickup     = int(round(fp))
+        if _pickup >= _floor:
+            _verb  = 'exceeded' if _pickup > _floor else 'met'
+            _clear = 'comfortably clearing' if _pickup >= _floor * 1.03 else 'clearing'
+            attrition_statement = (
+                f'<p>Great news — your group <strong>{_verb} its attrition commitment</strong>. '
+                f'You needed {_floor:,} room nights ({_commit_pct}% of the contracted block) and '
+                f'picked up {_pickup:,}, {_clear} the threshold with no attrition charges.</p>'
+            )
+        else:
+            _short = _floor - _pickup
+            attrition_statement = (
+                f'<p>Your group came in <strong>just below its attrition commitment</strong>. '
+                f'The contract required {_floor:,} room nights ({_commit_pct}% of the block) and '
+                f'final pickup was {_pickup:,} — a shortfall of {_short:,} room night'
+                f'{"s" if _short != 1 else ""} we can review with the hotel on your behalf.</p>'
+            )
+
     subject = f'{org} — {event_name} | Final Housing History Report'
 
     _dow = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -12294,6 +12319,7 @@ def _build_post_report_email(config, stats):
   {'<tr><td style="padding:6px 10px">No Shows / Cancellations</td><td style="padding:6px 10px">' + f'{int(no_shows):,} / {int(cancels):,}' + '</td></tr>' if (no_shows or cancels) else ''}
 </table>
 {'<table style="width:100%;border-collapse:collapse;margin:16px 0"><thead><tr style="background:#e5e7eb"><th style="padding:6px 10px;text-align:left">Night</th><th style="padding:6px 10px;text-align:center">Block</th><th style="padding:6px 10px;text-align:center">Pickup</th><th style="padding:6px 10px;text-align:center">+/−</th></tr></thead><tbody>' + night_rows + '</tbody></table>' if night_rows else ''}
+{attrition_statement}
 <p>The full Housing History Report is attached. Please don't hesitate to reach out with any questions.</p>
 <p>Best regards,</p>
 </div>'''
