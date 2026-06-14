@@ -12225,8 +12225,9 @@ def _build_post_report_email(config, stats):
             pct_attrition = pct_attrition_val
 
     # ── Attrition performance statement (Style B — warm, client-friendly) ─────
-    # Only built when we know the attrition floor (contracted block × commitment)
-    # and the final pickup; otherwise omitted, same as the table's attrition row.
+    # Inline text appended to the intro paragraph. Only built when we know the
+    # attrition floor (contracted block × commitment) and the final pickup;
+    # otherwise omitted, same as the table's attrition row.
     attrition_statement = ''
     if attrition_rooms and fp:
         _commit_pct = round(float(config['attrition_pct'] or 0) * 100)
@@ -12236,17 +12237,17 @@ def _build_post_report_email(config, stats):
             _verb  = 'exceeded' if _pickup > _floor else 'met'
             _clear = 'comfortably clearing' if _pickup >= _floor * 1.03 else 'clearing'
             attrition_statement = (
-                f'<p>Great news — your group <strong>{_verb} its attrition commitment</strong>. '
+                f'Great news — your group <strong>{_verb} its attrition commitment</strong>. '
                 f'You needed {_floor:,} room nights ({_commit_pct}% of the contracted block) and '
-                f'picked up {_pickup:,}, {_clear} the threshold with no attrition charges.</p>'
+                f'picked up {_pickup:,}, {_clear} the threshold with no attrition charges.'
             )
         else:
             _short = _floor - _pickup
             attrition_statement = (
-                f'<p>Your group came in <strong>just below its attrition commitment</strong>. '
+                f'Your group came in <strong>just below its attrition commitment</strong>. '
                 f'The contract required {_floor:,} room nights ({_commit_pct}% of the block) and '
                 f'final pickup was {_pickup:,} — a shortfall of {_short:,} room night'
-                f'{"s" if _short != 1 else ""} we can review with the hotel on your behalf.</p>'
+                f'{"s" if _short != 1 else ""} we can review with the hotel on your behalf.'
             )
 
     subject = f'{org} — {event_name} | Final Housing History Report'
@@ -12297,7 +12298,7 @@ def _build_post_report_email(config, stats):
 
     html_body = f'''<div style="font-family:Arial,sans-serif;max-width:640px;color:#1f2937">
 <p>Hi {_first_name},</p>
-<p>Please find attached the final housing history report for <strong>{event_name}</strong> at <strong>{hotel}</strong>. Below is a summary of the pickup performance.</p>
+<p>Please find attached the final housing history report for <strong>{event_name}</strong> at <strong>{hotel}</strong>. Below is a summary of the pickup performance.{('&nbsp;&nbsp; ' + attrition_statement) if attrition_statement else ''}</p>
 
 <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f9fafb;border-radius:8px;overflow:hidden">
   <tr style="background:#1a3a5c;color:#fff">
@@ -12319,7 +12320,6 @@ def _build_post_report_email(config, stats):
   {'<tr><td style="padding:6px 10px">No Shows / Cancellations</td><td style="padding:6px 10px">' + f'{int(no_shows):,} / {int(cancels):,}' + '</td></tr>' if (no_shows or cancels) else ''}
 </table>
 {'<table style="width:100%;border-collapse:collapse;margin:16px 0"><thead><tr style="background:#e5e7eb"><th style="padding:6px 10px;text-align:left">Night</th><th style="padding:6px 10px;text-align:center">Block</th><th style="padding:6px 10px;text-align:center">Pickup</th><th style="padding:6px 10px;text-align:center">+/−</th></tr></thead><tbody>' + night_rows + '</tbody></table>' if night_rows else ''}
-{attrition_statement}
 <p>The full Housing History Report is attached. Please don't hesitate to reach out with any questions.</p>
 <p>Best regards,</p>
 </div>'''
