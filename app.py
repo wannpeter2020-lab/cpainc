@@ -2633,43 +2633,69 @@ def report_bookings_export():
         except Exception:
             return str(iso or '')[:10]
 
+    import re as _re
+    def _safe_sheet_name(name, used):
+        """Excel sheet names: max 31 chars, no []:*?/\\, must be unique."""
+        s = _re.sub(r'[\[\]:\*\?/\\]', ' ', str(name)).strip()[:31] or 'Unknown'
+        base, i = s, 2
+        while s.lower() in used:
+            suffix = f' ({i})'
+            s = base[:31 - len(suffix)] + suffix
+            i += 1
+        used.add(s.lower())
+        return s
+
+    def _write_detail_sheet(ws, det_rows, include_associate=True):
+        """Write a booking-detail sheet (optionally with the Associate column)."""
+        if include_associate:
+            headers    = ['Booked Date', 'Booking ID', 'Associate', 'Account', 'Event Name',
+                          'Hotel', 'Start Date', 'Booking Amount', 'Comm %', 'Commission']
+            col_widths = [13, 12, 26, 28, 35, 30, 13, 16, 9, 16]
+        else:
+            headers    = ['Booked Date', 'Booking ID', 'Account', 'Event Name',
+                          'Hotel', 'Start Date', 'Booking Amount', 'Comm %', 'Commission']
+            col_widths = [13, 12, 28, 35, 30, 13, 16, 9, 16]
+        ncols   = len(headers)
+        amt_col = ncols - 2   # Booking Amount
+        pct_col = ncols - 1   # Comm %
+        com_col = ncols       # Commission
+
+        for ci, h in enumerate(headers, 1):
+            c = ws.cell(1, ci, h)
+            c.fill = HEADER_FILL; c.font = HEADER_FONT; c.alignment = CENTER
+        for i, w in enumerate(col_widths, 1):
+            ws.column_dimensions[ws.cell(1, i).column_letter].width = w
+        ws.freeze_panes = 'A2'
+
+        rownum = 2
+        for r in det_rows:
+            vals = [_us(r['booked_iso']), r['booking_id']]
+            if include_associate:
+                vals.append(r['associate'] or '')
+            vals += [r['account'] or '', r['event_name'] or '', r['hotel'] or '',
+                     _us(_to_iso(r['start_date'])) if r['start_date'] else '']
+            for ci, v in enumerate(vals, 1):
+                ws.cell(rownum, ci, v)
+            a = ws.cell(rownum, amt_col, round(r['amount'], 2));      a.number_format = '$#,##0.00'
+            p = ws.cell(rownum, pct_col, float(r['comm_pct'] or 0));  p.number_format = '0.0%'
+            cm = ws.cell(rownum, com_col, round(r['commission'], 2)); cm.number_format = '$#,##0.00'
+            rownum += 1
+
+        from openpyxl.utils import get_column_letter as _gcl
+        amt_l, com_l = _gcl(amt_col), _gcl(com_col)
+        lbl = ws.cell(rownum, amt_col - 1, 'Grand Total:')
+        lbl.font = GRAND_FONT; lbl.fill = GRAND_FILL; lbl.alignment = RIGHT
+        ta = ws.cell(rownum, amt_col, f'=SUM({amt_l}2:{amt_l}{rownum-1})')
+        ta.number_format = '$#,##0.00'; ta.font = GRAND_FONT; ta.fill = GRAND_FILL
+        ws.cell(rownum, pct_col).fill = GRAND_FILL
+        tc = ws.cell(rownum, com_col, f'=SUM({com_l}2:{com_l}{rownum-1})')
+        tc.number_format = '$#,##0.00'; tc.font = GRAND_FONT; tc.fill = GRAND_FILL
+
     wb = Workbook()
 
-    # ── Tab 1: All Bookings ───────────────────────────────────────────────────
-    ws = wb.active
-    ws.title = 'Bookings'
-    headers    = ['Booked Date', 'Booking ID', 'Associate', 'Account', 'Event Name',
-                  'Hotel', 'Start Date', 'Booking Amount', 'Comm %', 'Commission']
-    col_widths = [13, 12, 26, 28, 35, 30, 13, 16, 9, 16]
-    for ci, h in enumerate(headers, 1):
-        c = ws.cell(1, ci, h)
-        c.fill = HEADER_FILL; c.font = HEADER_FONT; c.alignment = CENTER
-    for i, w in enumerate(col_widths, 1):
-        ws.column_dimensions[ws.cell(1, i).column_letter].width = w
-    ws.freeze_panes = 'A2'
-
-    rownum = 2
-    for r in rows:
-        ws.cell(rownum, 1, _us(r['booked_iso']))
-        ws.cell(rownum, 2, r['booking_id'])
-        ws.cell(rownum, 3, r['associate'] or '')
-        ws.cell(rownum, 4, r['account'] or '')
-        ws.cell(rownum, 5, r['event_name'] or '')
-        ws.cell(rownum, 6, r['hotel'] or '')
-        ws.cell(rownum, 7, _us(_to_iso(r['start_date'])) if r['start_date'] else '')
-        a = ws.cell(rownum, 8, round(r['amount'], 2));      a.number_format = '$#,##0.00'
-        p = ws.cell(rownum, 9, float(r['comm_pct'] or 0));  p.number_format = '0.0%'
-        cm = ws.cell(rownum, 10, round(r['commission'], 2)); cm.number_format = '$#,##0.00'
-        rownum += 1
-
-    lbl = ws.cell(rownum, 7, 'Grand Total:')
-    lbl.font = GRAND_FONT; lbl.fill = GRAND_FILL; lbl.alignment = RIGHT
-    ta = ws.cell(rownum, 8, f'=SUM(H2:H{rownum-1})');  ta.number_format = '$#,##0.00'; ta.font = GRAND_FONT; ta.fill = GRAND_FILL
-    ws.cell(rownum, 9).fill = GRAND_FILL
-    tc = ws.cell(rownum, 10, f'=SUM(J2:J{rownum-1})'); tc.number_format = '$#,##0.00'; tc.font = GRAND_FONT; tc.fill = GRAND_FILL
-
-    # ── Tab 2: Summary by Associate ───────────────────────────────────────────
-    ws2 = wb.create_sheet('Summary by Associate')
+    # ── Tab 1: Summary by Associate ───────────────────────────────────────────
+    ws2 = wb.active
+    ws2.title = 'Summary by Associate'
     by_assoc = {}
     for r in rows:
         a = (r['associate'] or 'Unknown').strip() or 'Unknown'
@@ -2678,11 +2704,11 @@ def report_bookings_export():
         d['amount'] += r['amount']
         d['commission'] += r['commission']
 
-    sheaders = ['Associate', 'Bookings', 'Booking Amount', 'Commission']
+    sheaders = ['Associate', 'Bookings', 'Booking Amount', 'Commission', "Kristin's Team Cut"]
     for ci, h in enumerate(sheaders, 1):
         c = ws2.cell(1, ci, h)
         c.fill = HEADER_FILL; c.font = HEADER_FONT; c.alignment = CENTER
-    for i, w in enumerate([28, 12, 18, 18], 1):
+    for i, w in enumerate([28, 12, 18, 18, 20], 1):
         ws2.column_dimensions[ws2.cell(1, i).column_letter].width = w
     ws2.freeze_panes = 'A2'
 
@@ -2693,11 +2719,23 @@ def report_bookings_export():
         ws2.cell(rn, 2, d['count'])
         am = ws2.cell(rn, 3, round(d['amount'], 2));     am.number_format = '$#,##0.00'
         cc = ws2.cell(rn, 4, round(d['commission'], 2)); cc.number_format = '$#,##0.00'
+        kc = ws2.cell(rn, 5, f'=D{rn}*0.1');             kc.number_format = '$#,##0.00'
         rn += 1
     glbl = ws2.cell(rn, 1, 'Grand Total:'); glbl.font = GRAND_FONT; glbl.fill = GRAND_FILL
     gcnt = ws2.cell(rn, 2, sum(d['count'] for d in by_assoc.values())); gcnt.font = GRAND_FONT; gcnt.fill = GRAND_FILL
     ga = ws2.cell(rn, 3, f'=SUM(C2:C{rn-1})'); ga.number_format = '$#,##0.00'; ga.font = GRAND_FONT; ga.fill = GRAND_FILL
     gc = ws2.cell(rn, 4, f'=SUM(D2:D{rn-1})'); gc.number_format = '$#,##0.00'; gc.font = GRAND_FONT; gc.fill = GRAND_FILL
+    gk = ws2.cell(rn, 5, f'=SUM(E2:E{rn-1})'); gk.number_format = '$#,##0.00'; gk.font = GRAND_FONT; gk.fill = GRAND_FILL
+
+    # ── Tab 2: All Bookings ───────────────────────────────────────────────────
+    _write_detail_sheet(wb.create_sheet('All Bookings'), rows, include_associate=True)
+
+    # ── Per-person detail tabs (one per associate) ────────────────────────────
+    used_names = {'summary by associate', 'all bookings'}
+    for a in sorted(by_assoc):
+        person_rows = [r for r in rows if ((r['associate'] or 'Unknown').strip() or 'Unknown') == a]
+        ws_p = wb.create_sheet(_safe_sheet_name(a, used_names))
+        _write_detail_sheet(ws_p, person_rows, include_associate=False)
 
     output = _io.BytesIO()
     wb.save(output)
