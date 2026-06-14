@@ -2526,6 +2526,186 @@ def report_payments_export():
     return send_file(output, download_name=filename, as_attachment=True,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+# ── Booking Report (admin only) ───────────────────────────────────────────────
+# Modeled on the Payment Report, but reports on the booking date range with
+# booking amounts and commission amounts (instead of check dates and payments).
+
+def _booking_report_rows(date_from, date_to):
+    """Fetch non-cancelled bookings whose BookedDate (M/D/YYYY or ISO text) falls
+    within [date_from, date_to]. Returns dict rows with normalized USD amounts.
+    Filtering is done in Python because BookedDate is stored as free-form text."""
+    db = get_db()
+    raw = db.execute('''
+        SELECT BookingId         AS booking_id,
+               BookedDate        AS booked_date,
+               StartDate         AS start_date,
+               AccountName       AS account,
+               EventName         AS event_name,
+               Customer          AS hotel,
+               BookingAssociate  AS associate,
+               BookingType       AS booking_type,
+               BookingStatus     AS status,
+               Currency          AS currency,
+               CommissionPercent AS comm_pct,
+               Revenue           AS revenue,
+               USDRevenue        AS usd_revenue,
+               USDCommissionableAmount AS comm_amount
+        FROM ReportPipeline
+        WHERE LOWER(COALESCE(BookingStatus,'')) != 'cancelled'
+          AND BookedDate IS NOT NULL AND TRIM(BookedDate) NOT IN ('', 'nan')
+    ''').fetchall()
+
+    rows = []
+    for r in raw:
+        r = dict(r)
+        iso = _to_iso(r['booked_date'])
+        if not iso or iso < date_from or iso > date_to:
+            continue
+        r['booked_iso'] = iso
+        amount = float(r['usd_revenue'] or 0) or float(r['revenue'] or 0)
+        commission = float(r['comm_amount'] or 0)
+        if not commission and amount and r['comm_pct']:
+            commission = amount * float(r['comm_pct'] or 0)
+        r['amount']     = amount
+        r['commission'] = commission
+        rows.append(r)
+
+    rows.sort(key=lambda x: x['booked_iso'], reverse=True)
+    return rows
+
+
+@app.route('/reports/bookings')
+def report_bookings():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('This report is restricted to administrators.', 'error')
+        return redirect(url_for('pipeline'))
+
+    date_from = request.args.get('date_from', '').strip()
+    date_to   = request.args.get('date_to', '').strip()
+    today     = datetime.now().strftime('%Y-%m-%d')
+    rows, totals = [], {}
+
+    if date_from and date_to:
+        rows = _booking_report_rows(date_from, date_to)
+        totals = {
+            'count':      len(rows),
+            'amount':     sum(r['amount'] for r in rows),
+            'commission': sum(r['commission'] for r in rows),
+        }
+
+    return render_template('report_bookings.html',
+                           rows=rows, totals=totals,
+                           date_from=date_from, date_to=date_to, today=today)
+
+
+@app.route('/reports/bookings/export')
+def report_bookings_export():
+    user = get_current_user()
+    if not user or user['role'] != 'admin':
+        flash('This report is restricted to administrators.', 'error')
+        return redirect(url_for('pipeline'))
+
+    date_from = request.args.get('date_from', '').strip()
+    date_to   = request.args.get('date_to', '').strip()
+    if not date_from or not date_to:
+        flash('Please run the report with a date range before exporting.', 'error')
+        return redirect(url_for('report_bookings'))
+
+    rows = _booking_report_rows(date_from, date_to)
+
+    import io as _io
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment
+
+    HEADER_FILL = PatternFill('solid', start_color='1A3A5C')
+    HEADER_FONT = Font(bold=True, color='FFFFFF')
+    SUBTOT_FILL = PatternFill('solid', start_color='D9E1F2')
+    GRAND_FILL  = PatternFill('solid', start_color='1A3A5C')
+    GRAND_FONT  = Font(bold=True, color='FFFFFF')
+    BOLD        = Font(bold=True)
+    CENTER      = Alignment(horizontal='center', wrap_text=True)
+    RIGHT       = Alignment(horizontal='right')
+
+    def _us(iso):
+        try:
+            return datetime.strptime(str(iso)[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
+        except Exception:
+            return str(iso or '')[:10]
+
+    wb = Workbook()
+
+    # ── Tab 1: All Bookings ───────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = 'Bookings'
+    headers    = ['Booked Date', 'Booking ID', 'Associate', 'Account', 'Event Name',
+                  'Hotel', 'Start Date', 'Booking Amount', 'Comm %', 'Commission']
+    col_widths = [13, 12, 26, 28, 35, 30, 13, 16, 9, 16]
+    for ci, h in enumerate(headers, 1):
+        c = ws.cell(1, ci, h)
+        c.fill = HEADER_FILL; c.font = HEADER_FONT; c.alignment = CENTER
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[ws.cell(1, i).column_letter].width = w
+    ws.freeze_panes = 'A2'
+
+    rownum = 2
+    for r in rows:
+        ws.cell(rownum, 1, _us(r['booked_iso']))
+        ws.cell(rownum, 2, r['booking_id'])
+        ws.cell(rownum, 3, r['associate'] or '')
+        ws.cell(rownum, 4, r['account'] or '')
+        ws.cell(rownum, 5, r['event_name'] or '')
+        ws.cell(rownum, 6, r['hotel'] or '')
+        ws.cell(rownum, 7, _us(_to_iso(r['start_date'])) if r['start_date'] else '')
+        a = ws.cell(rownum, 8, round(r['amount'], 2));      a.number_format = '$#,##0.00'
+        p = ws.cell(rownum, 9, float(r['comm_pct'] or 0));  p.number_format = '0.0%'
+        cm = ws.cell(rownum, 10, round(r['commission'], 2)); cm.number_format = '$#,##0.00'
+        rownum += 1
+
+    lbl = ws.cell(rownum, 7, 'Grand Total:')
+    lbl.font = GRAND_FONT; lbl.fill = GRAND_FILL; lbl.alignment = RIGHT
+    ta = ws.cell(rownum, 8, f'=SUM(H2:H{rownum-1})');  ta.number_format = '$#,##0.00'; ta.font = GRAND_FONT; ta.fill = GRAND_FILL
+    ws.cell(rownum, 9).fill = GRAND_FILL
+    tc = ws.cell(rownum, 10, f'=SUM(J2:J{rownum-1})'); tc.number_format = '$#,##0.00'; tc.font = GRAND_FONT; tc.fill = GRAND_FILL
+
+    # ── Tab 2: Summary by Associate ───────────────────────────────────────────
+    ws2 = wb.create_sheet('Summary by Associate')
+    by_assoc = {}
+    for r in rows:
+        a = (r['associate'] or 'Unknown').strip() or 'Unknown'
+        d = by_assoc.setdefault(a, {'count': 0, 'amount': 0.0, 'commission': 0.0})
+        d['count'] += 1
+        d['amount'] += r['amount']
+        d['commission'] += r['commission']
+
+    sheaders = ['Associate', 'Bookings', 'Booking Amount', 'Commission']
+    for ci, h in enumerate(sheaders, 1):
+        c = ws2.cell(1, ci, h)
+        c.fill = HEADER_FILL; c.font = HEADER_FONT; c.alignment = CENTER
+    for i, w in enumerate([28, 12, 18, 18], 1):
+        ws2.column_dimensions[ws2.cell(1, i).column_letter].width = w
+    ws2.freeze_panes = 'A2'
+
+    rn = 2
+    for a in sorted(by_assoc):
+        d = by_assoc[a]
+        ws2.cell(rn, 1, a)
+        ws2.cell(rn, 2, d['count'])
+        am = ws2.cell(rn, 3, round(d['amount'], 2));     am.number_format = '$#,##0.00'
+        cc = ws2.cell(rn, 4, round(d['commission'], 2)); cc.number_format = '$#,##0.00'
+        rn += 1
+    glbl = ws2.cell(rn, 1, 'Grand Total:'); glbl.font = GRAND_FONT; glbl.fill = GRAND_FILL
+    gcnt = ws2.cell(rn, 2, sum(d['count'] for d in by_assoc.values())); gcnt.font = GRAND_FONT; gcnt.fill = GRAND_FILL
+    ga = ws2.cell(rn, 3, f'=SUM(C2:C{rn-1})'); ga.number_format = '$#,##0.00'; ga.font = GRAND_FONT; ga.fill = GRAND_FILL
+    gc = ws2.cell(rn, 4, f'=SUM(D2:D{rn-1})'); gc.number_format = '$#,##0.00'; gc.font = GRAND_FONT; gc.fill = GRAND_FILL
+
+    output = _io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f'Booking_Report_{date_from}_to_{date_to}.xlsx'
+    return send_file(output, download_name=filename, as_attachment=True,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
 # ── Commission Report Export ──────────────────────────────────────────────────
 
 @app.route('/reports/commission/export')
