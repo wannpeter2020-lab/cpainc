@@ -3934,6 +3934,74 @@ def clean_hhr_for_client(file_bytes):
 
 
 
+def _synth_raw_hhr_from_pickup(config, pbn):
+    """Build an in-memory 'raw HHR'-shaped workbook from parsed-PDF pickup data
+    (config's contracted block + pbn pickup-by-night) so it can be fed straight
+    into populate_hhr_template(). This gives PDF-sourced reports the exact same
+    client layout as Excel-sourced ones, from a single rendering path.
+
+    A PDF only yields total pickup per night (one rate tier), so the synthetic
+    sheet has Contracted Block, a single 'Rate 1' row, and the total rows.
+    """
+    import io as _io, json as _json
+    from datetime import datetime as _dtt
+    import openpyxl
+
+    if not isinstance(config, dict):
+        config = dict(config)
+    blk       = _json.loads(config.get('contracted_block') or '{}')
+    pbn       = pbn or {}
+    all_dates = sorted(set(blk.keys()) | set(pbn.keys()))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws['A2'] = 'ORGANIZATION';        ws['C2'] = config.get('organization') or ''
+    ws['A3'] = 'HOTEL';               ws['C3'] = config.get('hotel') or ''
+    ws['A4'] = 'NAME & DATE OF EVENT'; ws['C4'] = config.get('event_name') or ''
+    ws['A5'] = 'DATE'
+    ws['A6'] = 'DAY'
+    for i, d in enumerate(all_dates):
+        col = 3 + i
+        try:
+            dt = _dtt.fromisoformat(d)
+            ws.cell(5, col).value = dt                  # real datetime → _to_iso handles it
+            ws.cell(6, col).value = dt.strftime('%a')
+        except Exception:
+            ws.cell(5, col).value = d
+
+    rate    = float(config.get('contracted_rate') or 0) or None
+    tot_blk = sum(int(blk.get(d, 0) or 0) for d in all_dates)
+    # Pickup on contracted nights = "inside block"; pickup on any other night
+    # (pre/post shoulder) is rolled into Audit, since the client grid only shows
+    # the contracted date range. This keeps the inside-block rows summing exactly.
+    inside_total = sum(int(pbn.get(d, 0) or 0) for d in all_dates if d in blk)
+    final_total  = sum(int(pbn.get(d, 0) or 0) for d in all_dates)
+    audit_total  = max(0, final_total - inside_total)
+
+    def _row(r, label, getter, total, rate_val=None, rev=None):
+        ws.cell(r, 1).value = label
+        for i, d in enumerate(all_dates):
+            ws.cell(r, 3 + i).value = getter(d)
+        ws.cell(r, 13).value = total                    # M = Total Room Nights
+        if rate_val is not None:
+            ws.cell(r, 14).value = rate_val             # N = Rate
+        if rev is not None:
+            ws.cell(r, 15).value = rev                  # O = Revenue
+
+    _inside = lambda d: (int(pbn.get(d, 0) or 0) if d in blk else 0)
+    _row(7,  'Contracted Block ',          lambda d: int(blk.get(d, 0) or 0), tot_blk, rate_val=rate)
+    _row(8,  'Rate 1',                      _inside, inside_total, rate_val=rate,
+         rev=(round(inside_total * rate, 2) if (rate and inside_total) else None))
+    _row(9,  'Total Pickup Inside Block ',  _inside, inside_total)
+    _row(10, 'Total Audit Pickup',          lambda d: 0, audit_total)
+    _row(11, 'FINAL TOTAL PICKUP (ALL)',    lambda d: int(pbn.get(d, 0) or 0), final_total)
+
+    out = _io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out.read()
+
+
 def populate_hhr_template(raw_hhr_bytes, template_path=None):
     """
     Fill the client-facing HHR Excel template (hhr_template.xlsx) with data

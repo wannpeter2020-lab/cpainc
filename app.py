@@ -12137,56 +12137,12 @@ def _get_post_report_data(cid):
     _is_pdf = raw_bytes and raw_bytes[:4] == b'%PDF'
 
     if _is_pdf:
-        # Hotel returned a PDF — generate a proper client-facing Excel using the
-        # same template. Write Final History pickup into Rate 1 date columns and
-        # rate into N8. All SUM/formula cells (M8, O8, P8, Q8, rows 15-19, etc.)
-        # are left intact — they recalculate from the values written.
+        # PDF HHR → synthesize a raw-shaped sheet from the parsed pickup and run
+        # it through the same template builder, so PDF and Excel reports match.
         config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
-        pipeline = None
-        if config['booking_id']:
-            try:
-                pipeline = db.execute(
-                    'SELECT * FROM ReportPipeline WHERE BookingId = ?', (config['booking_id'],)
-                ).fetchone()
-            except Exception:
-                pass
         try:
-            import io as _io
-            from openpyxl.styles import Alignment as _Align
-            _center = _Align(horizontal='center', vertical='center')
-
-            _pickup_dates = list(pbn.keys()) if pbn else []
-            _wb, _ = _build_housing_form_wb(config, pipeline, pickup_dates=_pickup_dates)
-            _ws = _wb.active
-
-            _blk    = json.loads(config['contracted_block'] or '{}')
-            _sdates = sorted(_blk.keys())
-            _all_d  = sorted(set(_sdates) | set(_pickup_dates)) if _pickup_dates else _sdates
-            _n_xtra = max(0, len(_all_d) - 10)
-            _rcol   = 14 + _n_xtra   # N column: rate for Rate 1
-
-            # Write per-night pickup into Rate 1 date columns only.
-            # M8 has =SUM(C8:L8), O8 has =N8*M8 — do NOT overwrite those formulas.
-            for _i, _d in enumerate(_all_d):
-                _v = pbn.get(_d, 0)
-                try:
-                    _c = _ws.cell(row=8, column=3 + _i)
-                    _c.value     = _v if _v else None
-                    _c.alignment = _center
-                except Exception:
-                    pass
-
-            # Write contracted rate into N8 so O8 (=N8*M8) calculates revenue
-            try:
-                _ws.cell(row=8, column=_rcol).value = (
-                    float(config['contracted_rate']) if config['contracted_rate'] else None
-                )
-            except Exception:
-                pass
-
-            _buf = _io.BytesIO()
-            _wb.save(_buf)
-            raw_bytes = _buf.getvalue()
+            from pickup_utils import populate_hhr_template, _synth_raw_hhr_from_pickup
+            raw_bytes = populate_hhr_template(_synth_raw_hhr_from_pickup(config_dict, pbn))
         except Exception:
             config_dict['hhr_filename'] = f"{_safe} — Housing History Report.pdf"
     else:
