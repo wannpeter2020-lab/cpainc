@@ -12193,10 +12193,14 @@ def _get_post_report_data(cid):
         config_dict['hhr_filename'] = f"{_safe} — Housing History Report.xlsx"
         if raw_bytes:
             try:
-                from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
-                raw_bytes = clean_hhr_for_client(strip_hhr_commission_rows(raw_bytes))
+                from pickup_utils import populate_hhr_template
+                raw_bytes = populate_hhr_template(raw_bytes)
             except Exception:
-                pass
+                try:
+                    from pickup_utils import strip_hhr_commission_rows, clean_hhr_for_client
+                    raw_bytes = clean_hhr_for_client(strip_hhr_commission_rows(raw_bytes))
+                except Exception:
+                    pass
     config_dict['_hhr_file_data'] = raw_bytes
 
     # Most recent rooming list — inclusion decided by checkbox on summary screen

@@ -3933,6 +3933,330 @@ def clean_hhr_for_client(file_bytes):
     return out.read()
 
 
+
+def populate_hhr_template(raw_hhr_bytes, template_path=None):
+    """
+    Fill the client-facing HHR Excel template (hhr_template.xlsx) with data
+    extracted from the raw hotel Housing History Report.
+
+    Template layout (fixed):
+      Row 1: title  Row 2: ORGANIZATION  Row 3: HOTEL  Row 4: NAME & DATE
+      Row 5: DATE   Row 6: DAY
+      Row 7: Contracted Block  Rows 8–14: Rate 1–7
+      Row 15: Total Pickup Inside Block  Row 16: Total Audit Pickup
+      Row 17: FINAL TOTAL PICKUP  Rows 18+: Notes section
+
+    Date columns C–J (cols 3–10, max 8 nights); Total=M(13), Rate=N(14), Revenue=O(15).
+
+    Falls back to clean_hhr_for_client() if the template file is not found.
+    """
+    import io as _io, os as _os
+    import openpyxl
+
+    if template_path is None:
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        template_path = _os.path.join(_here, 'static', 'hhr_template.xlsx')
+    if not _os.path.exists(template_path):
+        return clean_hhr_for_client(strip_hhr_commission_rows(raw_hhr_bytes))
+
+    def _sv(v):  return str(v).strip() if v is not None else ''
+    def _num(v):
+        try:    return float(v) if v not in (None, '') else None
+        except: return None
+    def _to_iso(v):
+        if v is None: return None
+        if hasattr(v, 'strftime'): return v.strftime('%Y-%m-%d')
+        s = _sv(v)
+        for fmt in ('%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d'):
+            try:
+                from datetime import datetime as _dt
+                return _dt.strptime(s, fmt).strftime('%Y-%m-%d')
+            except Exception:
+                pass
+        return None
+
+    SKIP_COL_A = {
+        'commissionable no show', 'commissionable cancellation',
+        'non-commissionable audit pickup', 'commissionable audit pickup',
+    }
+
+    PICKUP_TO_TMPL_ROW = {
+        'contracted block':          7,
+        'rate 1':                    8,
+        'rate 2':                    9,
+        'rate 3':                   10,
+        'rate 4':                   11,
+        'rate 5':                   12,
+        'rate 6':                   13,
+        'rate 7':                   14,
+        'total pickup inside block': 15,
+        'total audit pickup':        16,
+        'final total pickup':        17,
+    }
+
+    raw_wb  = openpyxl.load_workbook(_io.BytesIO(raw_hhr_bytes), data_only=True)
+    raw_ws  = raw_wb.active
+    tmpl_wb = openpyxl.load_workbook(template_path)
+    tmpl_ws = tmpl_wb.active
+
+    # ── Pass 1: locate date columns and notes-section start ───────────────────
+    date_col_map = {}   # raw col (1-indexed) → date YYYY-MM-DD
+    day_col_map  = {}   # raw col (1-indexed) → day name string
+
+    for rnum in range(1, raw_ws.max_row + 1):
+        lbl = _sv(raw_ws.cell(rnum, 1).value).lower().rstrip(':').strip()
+        if lbl == 'date' and not date_col_map:
+            for cnum in range(3, raw_ws.max_column + 1):
+                d = _to_iso(raw_ws.cell(rnum, cnum).value)
+                if d:
+                    date_col_map[cnum] = d
+                elif date_col_map:
+                    break
+        elif lbl == 'day' and not day_col_map:
+            for cnum in sorted(date_col_map.keys()):
+                day_col_map[cnum] = _sv(raw_ws.cell(rnum, cnum).value)
+        elif 'notes to collections' in lbl:
+            break
+
+    # Template date columns C–J = cols 3–10 (1-indexed); max 8 nights
+    TMPL_DATE_COLS = list(range(3, 11))
+    sorted_raw_date_cols = sorted(date_col_map.keys())[:8]
+    raw_to_tmpl = {rc: TMPL_DATE_COLS[n] for n, rc in enumerate(sorted_raw_date_cols)}
+
+    # ── Identify contracted nights, add 1 pre-shoulder, fix dates to correct year ──
+    pre_shoulder_tmpl_col = None
+    _dates_written        = False
+    _n_tmpl_used          = len(sorted_raw_date_cols)
+
+    _contracted_by_col = {}
+    for _rn in range(1, raw_ws.max_row + 1):
+        if _sv(raw_ws.cell(_rn, 1).value).lower().strip().startswith('contracted block'):
+            for rc in sorted_raw_date_cols:
+                _contracted_by_col[rc] = _num(raw_ws.cell(_rn, rc).value) or 0
+            break
+
+    _contracted_raw_cols = [rc for rc in sorted_raw_date_cols
+                            if _contracted_by_col.get(rc, 0) > 0]
+    if _contracted_raw_cols:
+        _c_dates   = sorted([date_col_map[rc] for rc in _contracted_raw_cols])
+        _c_start   = datetime.strptime(_c_dates[0], '%Y-%m-%d')
+        _pre_dt    = _c_start - timedelta(days=1)
+        _new_dates = [_pre_dt.strftime('%Y-%m-%d')] + _c_dates
+
+        # Write corrected date row (5) and day row (6) to template
+        for i, _d in enumerate(_new_dates):
+            _dto = datetime.strptime(_d, '%Y-%m-%d')
+            tmpl_ws.cell(5, TMPL_DATE_COLS[i]).value = f"{_dto.month}/{_dto.day}"
+            tmpl_ws.cell(6, TMPL_DATE_COLS[i]).value = _dto.strftime('%a')
+        for tc in TMPL_DATE_COLS[len(_new_dates):]:
+            tmpl_ws.cell(5, tc).value = None
+            tmpl_ws.cell(6, tc).value = None
+
+        _dates_written        = True
+        pre_shoulder_tmpl_col = TMPL_DATE_COLS[0]
+        _n_tmpl_used          = len(_new_dates)
+
+        # Contracted cols shift right by 1 to make room for pre-shoulder in col C
+        raw_to_tmpl = {}
+        for i, _d in enumerate(_c_dates):
+            for rc, iso in date_col_map.items():
+                if iso == _d:
+                    raw_to_tmpl[rc] = TMPL_DATE_COLS[i + 1]
+                    break
+
+    # ── Spend summary lookup (raw HHR notes section) ──────────────────────────
+    # Find a labelled cell and return the first positive number within the next
+    # few cells to its right. Used for the F&B / Space Rent / Rebate totals.
+    def _find_money(*needles):
+        needles = [n.lower() for n in needles]
+        for rr in range(1, raw_ws.max_row + 1):
+            for cc in range(1, raw_ws.max_column + 1):
+                txt = _sv(raw_ws.cell(rr, cc).value).lower()
+                if txt and all(n in txt for n in needles):
+                    for off in (2, 1, 3):
+                        if cc + off <= raw_ws.max_column:
+                            val = _num(raw_ws.cell(rr, cc + off).value)
+                            if val is not None and val > 0:
+                                return val
+        return None
+
+    # ── Per-row readers (raw row → template columns) ──────────────────────────
+    def _row_cells(rnum):
+        """{tmpl_col: per-night value} for a raw pickup row (pre-shoulder = 0)."""
+        cells = {}
+        if pre_shoulder_tmpl_col is not None:
+            cells[pre_shoulder_tmpl_col] = 0
+        for rc, tc in raw_to_tmpl.items():
+            v = _num(raw_ws.cell(rnum, rc).value)
+            cells[tc] = v if v is not None else 0
+        return cells
+
+    def _row_total(rnum):
+        v = _num(raw_ws.cell(rnum, 13).value)          # M = Total Room Nights
+        if v is None:
+            return None
+        return int(v) if v == int(v) else v
+
+    def _tier_rate(rnum):
+        """Best-effort nightly rate: N column, else revenue/nights, else $-label."""
+        rate = _num(raw_ws.cell(rnum, 14).value)        # N = Rate
+        if not rate:
+            o = _num(raw_ws.cell(rnum, 15).value)       # O = Revenue
+            m = _num(raw_ws.cell(rnum, 13).value)       # M = Total nights
+            if o and m:
+                rate = round(o / m, 2)
+        if rate is None:
+            a = _num(raw_ws.cell(rnum, 1).value)        # some HHRs label the row with the $ rate
+            if a is not None:
+                rate = a
+        return rate
+
+    # ── Locate the pickup-grid anchor rows in the raw HHR ─────────────────────
+    r_contracted = r_total_inside = r_audit = r_final = None
+    for rnum in range(1, raw_ws.max_row + 1):
+        lbl = _sv(raw_ws.cell(rnum, 1).value).lower().rstrip(':').strip()
+        if 'notes to collections' in lbl:
+            break
+        if r_contracted is None and lbl.startswith('contracted block'):
+            r_contracted = rnum
+        elif lbl.startswith('total pickup inside block'):
+            r_total_inside = rnum
+        elif lbl.startswith('total audit pickup'):
+            r_audit = rnum
+        elif lbl.startswith('final total pickup'):
+            r_final = rnum
+
+    # Can't locate the grid → fall back to the legacy cleaner.
+    if not (r_contracted and r_total_inside):
+        return clean_hhr_for_client(strip_hhr_commission_rows(raw_hhr_bytes))
+
+    # Rate-tier rows = rows between Contracted Block and Total Pickup Inside Block
+    # with any pickup (handles both 'Rate N' and '$rate' label styles).
+    rate_rows = []
+    for rnum in range(r_contracted + 1, r_total_inside):
+        tot    = _num(raw_ws.cell(rnum, 13).value) or 0
+        nights = any((_num(raw_ws.cell(rnum, rc).value) or 0) > 0 for rc in raw_to_tmpl)
+        if tot > 0 or nights:
+            rate_rows.append(rnum)
+
+    # ── Header (org / hotel / event) ──────────────────────────────────────────
+    def _hdr(pred):
+        for rnum in range(1, r_contracted):
+            lbl = _sv(raw_ws.cell(rnum, 1).value).lower().rstrip(':').strip()
+            if pred(lbl):
+                return _sv(raw_ws.cell(rnum, 3).value)
+        return ''
+    _org = _hdr(lambda l: 'organization' in l)
+    if _org:   tmpl_ws.cell(2, 3).value = _org
+    _hotel = _hdr(lambda l: 'hotel' in l and 'accounting' not in l and 'location' not in l)
+    if _hotel: tmpl_ws.cell(3, 3).value = _hotel
+    _evt = _hdr(lambda l: 'name' in l and 'date' in l)
+    if _evt:   tmpl_ws.cell(4, 3).value = _evt
+
+    # ── Date / day fallback (no contracted dates triggered the Pass-1 write) ──
+    if not _dates_written:
+        for rnum in range(1, r_contracted):
+            lbl = _sv(raw_ws.cell(rnum, 1).value).lower().rstrip(':').strip()
+            if lbl == 'date' and date_col_map:
+                for rc, tc in raw_to_tmpl.items():
+                    raw_v = raw_ws.cell(rnum, rc).value
+                    disp = f"{raw_v.month}/{raw_v.day}" if hasattr(raw_v, 'month') else _sv(raw_v).split(' ')[0]
+                    tmpl_ws.cell(5, tc).value = disp
+            elif lbl == 'day' and date_col_map:
+                for rc, tc in raw_to_tmpl.items():
+                    tmpl_ws.cell(6, tc).value = _sv(raw_ws.cell(rnum, rc).value)
+
+    # ── Spend totals ──────────────────────────────────────────────────────────
+    space_rent = _find_money('total meeting room revenue') or _find_money('meeting room revenue')
+    fb_spend   = _find_money('total food', 'beverage') or _find_money('food', 'beverage', 'revenue')
+    rebate_amt = _find_money('total rebate amount') or _find_money('rebate', 'amount')
+
+    # ── Dynamic re-layout: rate rows vary per event, so rebuild rows 7 down ────
+    from copy import copy as _copy
+    from openpyxl.styles import Alignment as _Al, Border as _Bd, Side as _Sd
+
+    def _cap(coord):
+        c = tmpl_ws[coord]
+        return dict(font=_copy(c.font), fill=_copy(c.fill),
+                    border=_copy(c.border), align=_copy(c.alignment), numfmt=c.number_format)
+
+    ST = {
+        'ct_lbl': _cap('A7'),  'ct_dat': _cap('C7'),  'ct_tot': _cap('M7'),
+        'rt_lbl': _cap('A8'),  'rt_dat': _cap('C8'),  'rt_tot': _cap('M8'),
+        'ti_lbl': _cap('A15'), 'ti_dat': _cap('C15'), 'ti_tot': _cap('M15'),
+        'au_lbl': _cap('A16'), 'au_dat': _cap('C16'), 'au_tot': _cap('M16'),
+        'fn_lbl': _cap('A17'), 'fn_dat': _cap('C17'), 'fn_tot': _cap('M17'),
+        'sp_lbl': _cap('A19'), 'sp_val': _cap('C19'), 'hdr5': _cap('M5'),
+    }
+
+    def _apply(cell, st):
+        cell.font = _copy(st['font']); cell.fill = _copy(st['fill'])
+        cell.border = _copy(st['border']); cell.alignment = _copy(st['align'])
+        cell.number_format = st['numfmt']
+
+    # Rate (N=14) header at row 5; keep it aligned with the Total Room Nights col
+    n5 = tmpl_ws.cell(5, 14, 'Rate'); _apply(n5, ST['hdr5'])
+    tmpl_ws.column_dimensions['N'].width = 10
+
+    # Clear everything from row 7 down (unmerge first, then drop cells/dims)
+    for rng in list(tmpl_ws.merged_cells.ranges):
+        if rng.min_row >= 7:
+            tmpl_ws.unmerge_cells(str(rng))
+    for key in [k for k in list(tmpl_ws._cells.keys()) if k[0] >= 7]:
+        del tmpl_ws._cells[key]
+    for rd in [rd for rd in list(tmpl_ws.row_dimensions.keys()) if rd >= 7]:
+        del tmpl_ws.row_dimensions[rd]
+
+    DATA_COLS = TMPL_DATE_COLS  # C–J (3–10)
+
+    def _write_row(r, label, rnum, lbl_st, dat_st, tot_st, show_rate=False):
+        cells = _row_cells(rnum)
+        # per-night values (style + value first, merge label last)
+        for tc in DATA_COLS:
+            _apply(tmpl_ws.cell(r, tc, cells.get(tc, 0)), dat_st)
+        mt = tmpl_ws.cell(r, 13, _row_total(rnum) if _row_total(rnum) is not None else 0)
+        _apply(mt, tot_st); mt.number_format = '0'
+        nc = tmpl_ws.cell(r, 14)
+        _apply(nc, tot_st); nc.number_format = '$#,##0.00'
+        nc.alignment = _Al(horizontal='center', vertical='center')
+        if show_rate:
+            nc.value = _tier_rate(rnum)
+        _apply(tmpl_ws.cell(r, 1, label), lbl_st)
+        _apply(tmpl_ws.cell(r, 2), lbl_st)
+        tmpl_ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+
+    r = 7
+    _write_row(r, 'Contracted Block ', r_contracted, ST['ct_lbl'], ST['ct_dat'], ST['ct_tot'], show_rate=True); r += 1
+    for i, rr in enumerate(rate_rows, start=1):
+        _write_row(r, f'Rate {i}', rr, ST['rt_lbl'], ST['rt_dat'], ST['rt_tot'], show_rate=True); r += 1
+    _write_row(r, 'Total Pickup Inside Block ', r_total_inside, ST['ti_lbl'], ST['ti_dat'], ST['ti_tot']); r += 1
+    if r_audit:
+        _write_row(r, 'Total Audit Pickup', r_audit, ST['au_lbl'], ST['au_dat'], ST['au_tot']); r += 1
+    if r_final:
+        _write_row(r, 'FINAL TOTAL PICKUP (ALL)', r_final, ST['fn_lbl'], ST['fn_dat'], ST['fn_tot']); r += 1
+
+    r += 1  # blank spacer row
+
+    # ── Spend summary: AV manual ($0.00 placeholder), the rest auto-fill ───────
+    spend_specs = [('AV Spend', None), ('Space Rent Spend', space_rent),
+                   ('F&B Spend', fb_spend), ('Rebate Received', rebate_amt)]
+    for label, val in spend_specs:
+        _apply(tmpl_ws.cell(r, 1, label), ST['sp_lbl'])
+        _apply(tmpl_ws.cell(r, 2), ST['sp_lbl'])
+        vcell = tmpl_ws.cell(r, 3, round(val, 2) if (val and val > 0) else 0)
+        _apply(vcell, ST['sp_val']); vcell.number_format = '$#,##0.00'
+        _apply(tmpl_ws.cell(r, 4), ST['sp_val'])
+        _apply(tmpl_ws.cell(r, 5), ST['sp_val'])
+        tmpl_ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+        tmpl_ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=5)
+        tmpl_ws.row_dimensions[r].height = 16
+        r += 1
+
+    out = _io.BytesIO()
+    tmpl_wb.save(out)
+    out.seek(0)
+    return out.read()
+
 # ── Contract Document Parser ──────────────────────────────────────────────────
 
 def _pdf_pages_to_images(file_bytes, max_pages=10, dpi=100):
