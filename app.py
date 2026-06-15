@@ -1941,10 +1941,13 @@ def _commission_report_data(db, date_from, date_to, today, who):
                 r['actual_commission'] = 0
         else:
             r['actual_commission'] = None
-        # Invoiced shown as YOUR share (× split) to match Est/Actual and the
-        # net payments tracked — the raw invoice is 100% of CD's commission.
+        # Invoiced = Kristin's actual share of the commission: 70% on her own
+        # bookings (kristin_split), 10% on team bookings (kristin_cut, her cut).
+        # The raw invoice is 100% of CD's commission. (Est/Actual keep the
+        # team-member net split shown in the Split column.)
+        _kshare = kristin_split if (r.get('associate') or '').strip().lower() == 'kristin house' else kristin_cut
         r['invoiced_full'] = float(r['invoiced']) if r.get('invoiced') is not None else None
-        r['invoiced']      = round(r['invoiced_full'] * split, 2) if r['invoiced_full'] is not None else None
+        r['invoiced']      = round(r['invoiced_full'] * _kshare, 2) if r['invoiced_full'] is not None else None
         r['inv_currency']  = r.get('inv_currency') or 'USD'
         r['paid_total']    = float(r.get('paid_total') or 0)
         short = (r['invoiced'] and r['invoiced'] > 0 and r['paid_total'] > 0
