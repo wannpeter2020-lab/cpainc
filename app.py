@@ -1857,7 +1857,9 @@ def report_commission():
 
     if date_from and date_to:
         db = get_db()
-        query = '''
+        dismissed = {str(x[0]) for x in db.execute('SELECT booking_id FROM short_pay_dismissals').fetchall()}
+
+        base_select = '''
             SELECT
                 r.BookingId          AS booking_id,
                 r.AccountName        AS account,
@@ -1874,7 +1876,11 @@ def report_commission():
                 r.Country            AS country,
                 COALESCE(p.total_pickup, 0) AS actual_pickup,
                 CASE WHEN pay.pay_count > 0 THEN 1 ELSE 0 END AS is_paid,
-                COALESCE(pay.total_paid, 0) AS prepaid
+                COALESCE(pay.total_paid, 0) AS prepaid,
+                COALESCE(pay.total_paid, 0) AS paid_total,
+                ci.invoiced     AS invoiced,
+                ci.inv_currency AS inv_currency,
+                CASE WHEN (hhr.cnt > 0 OR fh.cnt > 0) THEN 1 ELSE 0 END AS has_hhr
             FROM ReportPipeline r
             LEFT JOIN (
                 SELECT BookingID, SUM(ActualPickup) AS total_pickup
@@ -1887,24 +1893,53 @@ def report_commission():
                 WHERE (Cancelled IS NULL OR Cancelled = 0)
                 GROUP BY BookingID
             ) pay ON pay.BookingID = r.BookingId
-            WHERE DATE(r.StartDate) BETWEEN ? AND ?
-            AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR DATE(r.StartDate) > ?)
+            LEFT JOIN (
+                SELECT booking_id, SUM(commission_amount) AS invoiced, MAX(currency) AS inv_currency
+                FROM closing_invoices WHERE confirmed = 1 GROUP BY booking_id
+            ) ci ON CAST(ci.booking_id AS INTEGER) = CAST(r.BookingId AS INTEGER)
+            LEFT JOIN (
+                SELECT booking_id, COUNT(*) AS cnt FROM housing_history_files GROUP BY booking_id
+            ) hhr ON CAST(hhr.booking_id AS INTEGER) = CAST(r.BookingId AS INTEGER)
+            LEFT JOIN (
+                SELECT pc.booking_id AS booking_id, COUNT(*) AS cnt
+                FROM pickup_weekly w JOIN pickup_config pc ON pc.id = w.config_id
+                WHERE w.label = 'Final History' GROUP BY pc.booking_id
+            ) fh ON CAST(fh.booking_id AS INTEGER) = CAST(r.BookingId AS INTEGER)
+        '''
+        assoc_filter = '''
             AND (r.BookingStatus IS NULL OR r.BookingStatus != 'Cancelled')
-            AND NOT EXISTS (
-                SELECT 1 FROM ChkRegNote c2
-                WHERE c2.BookingID = r.BookingId AND c2.Cancelled = 1
-            )
+            AND NOT EXISTS (SELECT 1 FROM ChkRegNote c2 WHERE c2.BookingID = r.BookingId AND c2.Cancelled = 1)
             AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
                  OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
-            ORDER BY r.StartDate
         '''
-        rows = [dict(r) for r in db.execute(query, (date_from, date_to, today)).fetchall()]
+        query_a = base_select + '''
+            WHERE DATE(r.StartDate) BETWEEN ? AND ?
+            AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR DATE(r.StartDate) > ?)
+        ''' + assoc_filter + ' ORDER BY r.StartDate'
+        set_a = [dict(x) for x in db.execute(query_a, (date_from, date_to, today)).fetchall()]
+
+        query_b = base_select + '''
+            WHERE ci.invoiced IS NOT NULL AND ci.invoiced > 0
+            AND COALESCE(pay.total_paid, 0) > 0
+            AND COALESCE(pay.total_paid, 0) < ci.invoiced * 0.99
+            AND (ci.inv_currency IS NULL OR ci.inv_currency = 'USD')
+        ''' + assoc_filter + ' ORDER BY r.StartDate'
+        set_b = [dict(x) for x in db.execute(query_b).fetchall()]
+
+        seen = {str(x['booking_id']) for x in set_a}
+        merged = list(set_a)
+        for x in set_b:
+            bid = str(x['booking_id'])
+            if bid in seen or bid in dismissed:
+                continue
+            seen.add(bid); merged.append(x)
 
         default_split  = get_commission_split()
         account_splits = get_account_splits()
         kristin_split  = get_kristin_split()
         kristin_cut    = get_kristin_cut()
-        for r in rows:
+        for r in merged:
+            bid = str(r['booking_id'])
             split = effective_split(r.get('associate'), r.get('account'), r.get('country'),
                                     account_splits, default_split, kristin_split, kristin_cut)
             r['split_pct'] = split_label(r.get('associate'), split, default_split, kristin_split, kristin_cut)
@@ -1913,26 +1948,56 @@ def report_commission():
                 r['est_commission'] = rev * float(r['comm_pct'] or 0) * split
             except Exception:
                 r['est_commission'] = 0
-            try:
-                r['actual_commission'] = float(r['actual_pickup'] or 0) * float(r['room_rate'] or 0) * float(r['comm_pct'] or 0) * split
-            except Exception:
-                r['actual_commission'] = 0
+            if r.get('has_hhr'):
+                try:
+                    r['actual_commission'] = (float(r['actual_pickup'] or 0) * float(r['room_rate'] or 0)
+                                              * float(r['comm_pct'] or 0) * split)
+                except Exception:
+                    r['actual_commission'] = 0
+            else:
+                r['actual_commission'] = None
+            r['invoiced']     = float(r['invoiced']) if r.get('invoiced') is not None else None
+            r['inv_currency'] = r.get('inv_currency') or 'USD'
+            r['paid_total']   = float(r.get('paid_total') or 0)
+            short = (r['invoiced'] and r['invoiced'] > 0 and r['paid_total'] > 0
+                     and r['paid_total'] < r['invoiced'] * 0.99
+                     and r['inv_currency'] == 'USD' and bid not in dismissed)
+            r['short_pay']    = bool(short)
+            r['short_amount'] = round(r['invoiced'] - r['paid_total'], 2) if short else 0
 
         if who == 'kristin':
-            rows = [r for r in rows if (r.get('associate') or '').strip().lower() == 'kristin house']
+            rows = [r for r in merged if (r.get('associate') or '').strip().lower() == 'kristin house']
         else:
-            rows = [r for r in rows if (r.get('associate') or '').strip().lower() != 'kristin house']
+            rows = [r for r in merged if (r.get('associate') or '').strip().lower() != 'kristin house']
 
         totals = {
             'est_commission':    sum(float(r['est_commission'] or 0) for r in rows),
-            'actual_commission': sum(r['actual_commission'] for r in rows),
+            'actual_commission': sum(float(r['actual_commission']) for r in rows if r['actual_commission'] is not None),
             'prepaid':           sum(float(r.get('prepaid') or 0) for r in rows),
+            'invoiced':          sum(float(r['invoiced']) for r in rows if r.get('invoiced')),
+            'short_count':       sum(1 for r in rows if r['short_pay']),
         }
 
     title = 'Kristin House — Missing Commission' if who == 'kristin' else 'Team — Missing Commission'
     return render_template('report_commission.html',
                            rows=rows, totals=totals, title=title, who=who,
                            date_from=date_from, date_to=date_to, today=today)
+
+
+@app.route('/reports/commission/accept-shortpay', methods=['POST'])
+def report_commission_accept_shortpay():
+    """Mark a short-paid invoice as acceptable — permanently removes it from the report."""
+    bid = (request.form.get('booking_id') or '').strip()
+    if bid:
+        db = get_db()
+        db.execute('INSERT OR IGNORE INTO short_pay_dismissals (booking_id, accepted_at) VALUES (?, ?)',
+                   (bid, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+        db.commit()
+        flash(f'Short payment for booking {bid} marked acceptable — removed from the report.', 'success')
+    return redirect(url_for('report_commission',
+                            who=request.form.get('who', 'team'),
+                            date_from=request.form.get('date_from', ''),
+                            date_to=request.form.get('date_to', '')))
 
 # ── Payment Report ────────────────────────────────────────────────────────────
 
@@ -4895,6 +4960,10 @@ def ensure_pickup_tables():
             filename TEXT,
             file_data BLOB,
             uploaded_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS short_pay_dismissals (
+            booking_id  TEXT PRIMARY KEY,
+            accepted_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS client_contacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

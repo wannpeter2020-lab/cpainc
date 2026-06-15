@@ -23,7 +23,7 @@
         {% if date_from %}<a href="/reports/commission?who={{ who }}" class="btn btn-outline-secondary btn-sm">Clear</a>{% endif %}
       </div>
       <div class="col-auto ms-3 text-muted small align-self-end pb-1">
-        Shows: unpaid bookings + paid bookings with future start dates
+        Shows: unpaid + future bookings in range, plus any short-paid invoices (any date)
       </div>
     </form>
   </div>
@@ -32,46 +32,24 @@
 {% if date_from and rows is defined %}
   {% if rows %}
   <div class="row g-3 mb-4">
-    <div class="col-md-2">
-      <div class="card text-center">
-        <div class="card-body py-2">
-          <div class="section-label">Bookings</div>
-          <div class="fs-4 fw-bold">{{ rows|length }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-2">
-      <div class="card text-center">
-        <div class="card-body py-2">
-          <div class="section-label">Unpaid</div>
-          <div class="fs-4 fw-bold text-danger">{{ rows|selectattr('is_paid','equalto',0)|list|length }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-2">
-      <div class="card text-center">
-        <div class="card-body py-2">
-          <div class="section-label">Paid / Future</div>
-          <div class="fs-4 fw-bold text-warning">{{ rows|selectattr('is_paid','equalto',1)|list|length }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card text-center">
-        <div class="card-body py-2">
-          <div class="section-label">Est. Commission</div>
-          <div class="fs-4 fw-bold">${{ '{:,.2f}'.format(totals.est_commission) }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3">
-      <div class="card text-center">
-        <div class="card-body py-2">
-          <div class="section-label">Actual Commission</div>
-          <div class="fs-4 fw-bold text-success">${{ '{:,.2f}'.format(totals.actual_commission) }}</div>
-        </div>
-      </div>
-    </div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Bookings</div><div class="fs-4 fw-bold">{{ rows|length }}</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Unpaid</div><div class="fs-4 fw-bold text-danger">{{ rows|selectattr('is_paid','equalto',0)|list|length }}</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Short Paid</div><div class="fs-4 fw-bold text-danger">{{ totals.short_count }}</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Est. Commission</div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.est_commission) }}</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Actual Commission</div><div class="fs-5 fw-bold text-success">${{ '{:,.2f}'.format(totals.actual_commission) }}</div>
+    </div></div></div>
+    <div class="col"><div class="card text-center"><div class="card-body py-2">
+      <div class="section-label">Invoiced</div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.invoiced) }}</div>
+    </div></div></div>
   </div>
 
   <div class="card">
@@ -98,6 +76,8 @@
             <th class="text-end">Pickup</th>
             <th class="text-end">Est. Commission</th>
             <th class="text-end">Actual Commission</th>
+            <th class="text-end">Invoiced</th>
+            <th class="text-end">Paid</th>
             {% if who == 'kristin' %}<th class="text-end">Prepaid</th>{% endif %}
             <th>Status</th>
           </tr>
@@ -105,7 +85,7 @@
         <tbody>
           {% for r in rows %}
           {% set missing_pickup = not r.actual_pickup or r.actual_pickup|float == 0 %}
-          <tr{% if missing_pickup %} style="background:#f8d7da"{% endif %}>
+          <tr{% if r.short_pay %} class="table-danger"{% elif missing_pickup %} style="background:#f8d7da"{% endif %}>
             <td><a href="/booking/{{ r.booking_id }}" class="text-decoration-none"><code>{{ r.booking_id }}</code></a></td>
             <td>{{ r.account or '—' }}</td>
             <td>{{ r.hotel or '—' }}</td>
@@ -118,12 +98,33 @@
             <td class="text-end">{{ r.total_room_nights|int if r.total_room_nights else '—' }}</td>
             <td class="text-end">{{ r.actual_pickup|int if r.actual_pickup else '—' }}</td>
             <td class="text-end">{% if r.est_commission %}${{ '{:,.2f}'.format(r.est_commission) }}{% else %}—{% endif %}</td>
-            <td class="text-end">{% if r.actual_commission %}${{ '{:,.2f}'.format(r.actual_commission) }}{% else %}—{% endif %}</td>
+            <td class="text-end">
+              {% if r.actual_commission is none %}
+                <span class="text-muted" title="No HHR on file yet">—</span>
+              {% elif r.actual_commission %}${{ '{:,.2f}'.format(r.actual_commission) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-end">{% if r.invoiced %}{{ r.inv_currency|cursym }}{{ '{:,.2f}'.format(r.invoiced) }}{% else %}—{% endif %}</td>
+            <td class="text-end">{% if r.paid_total %}${{ '{:,.2f}'.format(r.paid_total) }}{% else %}—{% endif %}</td>
             {% if who == 'kristin' %}
-            <td class="text-end">{% if r.prepaid and r.prepaid|float > 0 %}${{ '{:,.2f}'.format(r.prepaid|float) }}{% else %}{% endif %}</td>
+            <td class="text-end">{% if r.prepaid and r.prepaid|float > 0 %}${{ '{:,.2f}'.format(r.prepaid|float) }}{% endif %}</td>
             {% endif %}
-            <td>
-              {% if r.is_paid == 0 %}
+            <td style="white-space:nowrap">
+              {% if r.short_pay %}
+                <span class="badge bg-danger" title="Paid {{ '{:,.2f}'.format(r.paid_total) }} of {{ '{:,.2f}'.format(r.invoiced) }} invoiced">
+                  Short Paid −${{ '{:,.2f}'.format(r.short_amount) }}
+                </span>
+                <form method="post" action="{{ url_for('report_commission_accept_shortpay') }}" class="d-inline ms-1">
+                  <input type="hidden" name="booking_id" value="{{ r.booking_id }}">
+                  <input type="hidden" name="who" value="{{ who }}">
+                  <input type="hidden" name="date_from" value="{{ date_from }}">
+                  <input type="hidden" name="date_to" value="{{ date_to }}">
+                  <label class="small text-muted" style="cursor:pointer" title="Tick if this short payment is acceptable — removes it from the report permanently">
+                    <input type="checkbox" onchange="this.form.submit()"> OK
+                  </label>
+                </form>
+              {% elif not r.has_hhr %}
+                <span class="badge bg-secondary">No HHR yet</span>
+              {% elif r.is_paid == 0 %}
                 <span class="badge bg-danger">Unpaid</span>
               {% else %}
                 <span class="badge bg-warning text-dark">Paid / Future</span>
@@ -137,6 +138,8 @@
             <td colspan="10" class="text-end">Totals:</td>
             <td class="text-end">${{ '{:,.2f}'.format(totals.est_commission) }}</td>
             <td class="text-end text-success">${{ '{:,.2f}'.format(totals.actual_commission) }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(totals.invoiced) }}</td>
+            <td></td>
             {% if who == 'kristin' %}<td class="text-end">${{ '{:,.2f}'.format(totals.prepaid) }}</td>{% endif %}
             <td></td>
           </tr>
