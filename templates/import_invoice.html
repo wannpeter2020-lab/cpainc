@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Import Closing Invoice — CPAinc{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a href="/" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Back to Dashboard</a>
+  <h4 class="mt-1"><i class="bi bi-receipt me-2"></i>Import Closing Invoices</h4>
+</div>
+
+<div class="card" style="max-width:640px">
+  <div class="card-header">Upload Closing (Commission) Invoice Files</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      Upload one or more ConferenceDirect closing (commission) invoice <strong>PDFs</strong>.<br>
+      Each invoice is matched to its event by the <strong>Booking ID</strong> on the invoice, then
+      verified against that event's HHR — the billed commission and rate are compared to the
+      final pickup.<br>
+      Invoices for a booking that isn't in the pipeline, or has no pickup event on file, are
+      <strong>skipped</strong> (nothing is saved for them).
+    </p>
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Select File(s)</label>
+        <input type="file" name="files" class="form-control" accept=".pdf,application/pdf" multiple required>
+        <div class="form-text">PDF only — hold <kbd>Cmd</kbd> (Mac) to select more than one.</div>
+      </div>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-shield-check me-1"></i>Import &amp; Verify</button>
+      <a href="/" class="btn btn-outline-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

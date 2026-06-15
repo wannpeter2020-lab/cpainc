@@ -12287,6 +12287,70 @@ def pickup_invoice_download(cid, iid):
                      as_attachment=True)
 
 
+@app.route('/import/invoice', methods=['GET', 'POST'])
+def import_invoice():
+    """Global closing-invoice import. Upload one or more invoice PDFs; each is
+    routed to its booking's pickup event (by the Booking ID on the invoice),
+    verified against that event's HHR, and stored. Invoices whose booking is not
+    in the pipeline — or has no pickup event on file — are skipped (no record)."""
+    if request.method == 'GET':
+        return render_template('import_invoice.html')
+
+    from pickup_utils import parse_commission_invoice_pdf, verify_invoice_against_hhr
+    db = get_db()
+    files = [f for f in request.files.getlist('files') if f and f.filename]
+    if not files:
+        flash('No file uploaded.', 'error')
+        return redirect(url_for('import_invoice'))
+
+    results = []
+    for f in files:
+        out = {'filename': f.filename, 'ok': False, 'invoice_no': None, 'booking_id': None,
+               'event': None, 'status': None, 'iid': None, 'cid': None,
+               'commission_amount': None, 'currency': None, 'variance': None, 'message': ''}
+        if not f.filename.lower().endswith('.pdf'):
+            out['message'] = 'Not a PDF — skipped.'; results.append(out); continue
+        file_bytes = f.read()
+        inv = parse_commission_invoice_pdf(file_bytes)
+        if inv.get('error'):
+            out['message'] = inv['error']; results.append(out); continue
+        bk = inv.get('booking_id')
+        out['invoice_no'] = inv.get('invoice_no'); out['booking_id'] = bk
+        out['commission_amount'] = inv.get('commission_amount'); out['currency'] = inv.get('currency')
+        if not _booking_in_pipeline(db, bk):
+            out['message'] = f'Booking {bk or "?"} not in pipeline — skipped.'; results.append(out); continue
+        config = db.execute('SELECT * FROM pickup_config WHERE booking_id=? ORDER BY id DESC LIMIT 1',
+                            (bk,)).fetchone()
+        if not config:
+            out['message'] = f'No pickup event for booking {bk} — skipped.'; results.append(out); continue
+
+        facts  = _gather_hhr_commission_facts(db, config, inv)
+        result = verify_invoice_against_hhr(inv, facts)
+        confirmed = 1 if result['status'] == 'match' else 0
+        cur = db.execute(
+            '''INSERT INTO closing_invoices
+               (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
+                commission_pct, commission_amount, commissionable_revenue,
+                hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
+                hhr_expected_commission, verification_status, variance, verify_notes,
+                confirmed, filename, file_data)
+               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
+            (config['id'], bk, inv.get('invoice_no'),
+             inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
+             inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
+             facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
+             result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
+             result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
+             confirmed, f.filename, file_bytes))
+        out.update(ok=True, status=result['status'], iid=cur.lastrowid, cid=config['id'],
+                   event=config['event_name'] or config['organization'],
+                   variance=result.get('variance'), confirmed=confirmed)
+        results.append(out)
+
+    db.commit()
+    return render_template('import_invoice_result.html', results=results)
+
+
 def _get_post_report_data(cid):
     """Assemble stats and config_dict for the Post Report from correct DB sources."""
     db = get_db()

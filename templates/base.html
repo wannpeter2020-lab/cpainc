@@ -220,7 +220,8 @@
             <li><a class="dropdown-item" href="/import/payments"><i class="bi bi-cash-stack me-2"></i>Import Payments (Spreadsheet)</a></li>
             <li><a class="dropdown-item" href="/import/voucher"><i class="bi bi-file-earmark-pdf me-2"></i>Import Payment Voucher (PDF)</a></li>
             {% endif %}
-            {% if has_perm('import_hhr') %}<li><a class="dropdown-item" href="/import/hhr"><i class="bi bi-house-check me-2"></i>Import HHR</a></li>{% endif %}
+            {% if has_perm('import_hhr') %}<li><a class="dropdown-item" href="/import/hhr"><i class="bi bi-house-check me-2"></i>Import HHR</a></li>
+            <li><a class="dropdown-item" href="/import/invoice"><i class="bi bi-receipt me-2"></i>Import Closing Invoice</a></li>{% endif %}
             {% if has_perm('import_cancelled') %}<li><a class="dropdown-item" href="/import/cancelled"><i class="bi bi-x-circle me-2"></i>Import Cancelled Meetings</a></li>{% endif %}
           </ul>
         </li>
