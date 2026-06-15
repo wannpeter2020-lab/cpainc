@@ -12183,6 +12183,26 @@ def _booking_in_pipeline(db, booking_id):
         return False
 
 
+def _invoice_already_imported(db, invoice_no):
+    """True if a closing invoice with this invoice number is already stored —
+    re-imports are skipped so no duplicate record is created."""
+    if not invoice_no:
+        return False
+    return db.execute('SELECT 1 FROM closing_invoices WHERE invoice_no=? LIMIT 1',
+                      (invoice_no,)).fetchone() is not None
+
+
+def _invoice_row_to_result(r):
+    """Map a stored closing_invoices row to the import-results display shape."""
+    return {'filename': r.get('filename') or '', 'invoice_no': r.get('invoice_no'),
+            'booking_id': r.get('booking_id'),
+            'event': r.get('event_name') or r.get('organization'),
+            'currency': r.get('currency'), 'commission_amount': r.get('commission_amount'),
+            'ok': True, 'status': r.get('verification_status'), 'variance': r.get('variance'),
+            'iid': r.get('id'), 'cid': r.get('config_id'),
+            'confirmed': r.get('confirmed'), 'message': ''}
+
+
 @app.route('/pickup/<int:cid>/invoice/import', methods=['POST'])
 def pickup_invoice_import(cid):
     """Import one or more closing (commission) invoice PDFs, verify each against
@@ -12218,6 +12238,10 @@ def pickup_invoice_import(cid):
         if not _booking_in_pipeline(db, bk):
             n_skipped += 1
             skip_notes.append(f'{inv.get("invoice_no") or label}: booking {bk or "?"} not in pipeline')
+            continue
+        if _invoice_already_imported(db, inv.get('invoice_no')):
+            n_skipped += 1
+            skip_notes.append(f'{inv.get("invoice_no") or label}: already imported')
             continue
 
         facts  = _gather_hhr_commission_facts(db, config, inv)
@@ -12270,7 +12294,17 @@ def pickup_invoice_result(cid, iid):
     if not config or not inv:
         flash('Invoice not found.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    return render_template('pickup_invoice_result.html', config=dict(config), inv=dict(inv))
+    return render_template('pickup_invoice_result.html', config=dict(config), inv=dict(inv),
+                           back_ids=request.args.get('back_ids', ''))
+
+
+def _invoice_action_redirect(cid):
+    """After accept/discard, return to the batch review list if we came from one,
+    otherwise back to the event page."""
+    back_ids = request.form.get('back_ids')
+    if back_ids:
+        return redirect(url_for('import_invoice_review', ids=back_ids))
+    return redirect(url_for('pickup_event', cid=cid))
 
 
 @app.route('/pickup/<int:cid>/invoice/<int:iid>/accept', methods=['POST'])
@@ -12279,7 +12313,7 @@ def pickup_invoice_accept(cid, iid):
     db.execute('UPDATE closing_invoices SET confirmed=1 WHERE id=? AND config_id=?', (iid, cid))
     db.commit()
     flash('Invoice accepted and saved despite the variance — available to download anytime.', 'success')
-    return redirect(url_for('pickup_event', cid=cid))
+    return _invoice_action_redirect(cid)
 
 
 @app.route('/pickup/<int:cid>/invoice/<int:iid>/discard', methods=['POST'])
@@ -12288,7 +12322,7 @@ def pickup_invoice_discard(cid, iid):
     db.execute('DELETE FROM closing_invoices WHERE id=? AND config_id=?', (iid, cid))
     db.commit()
     flash('Invoice discarded — nothing was saved.', 'info')
-    return redirect(url_for('pickup_event', cid=cid))
+    return _invoice_action_redirect(cid)
 
 
 @app.route('/pickup/<int:cid>/invoice/<int:iid>/download')
@@ -12335,6 +12369,8 @@ def import_invoice():
         bk = inv.get('booking_id')
         out['invoice_no'] = inv.get('invoice_no'); out['booking_id'] = bk
         out['commission_amount'] = inv.get('commission_amount'); out['currency'] = inv.get('currency')
+        if _invoice_already_imported(db, inv.get('invoice_no')):
+            out['message'] = 'Already imported — skipped.'; results.append(out); continue
         if not _booking_in_pipeline(db, bk):
             out['message'] = f'Booking {bk or "?"} not in pipeline — skipped.'; results.append(out); continue
         config = db.execute('SELECT * FROM pickup_config WHERE booking_id=? ORDER BY id DESC LIMIT 1',
@@ -12367,7 +12403,38 @@ def import_invoice():
         results.append(out)
 
     db.commit()
-    return render_template('import_invoice_result.html', results=results)
+
+    # Post/Redirect/Get → a revisitable review page keyed by the imported ids.
+    imported = [r for r in results if r.get('ok')]
+    skipped  = [r for r in results if not r.get('ok')]
+    if skipped:
+        flash('Skipped %d: %s' % (
+            len(skipped),
+            '; '.join(f"{s.get('invoice_no') or s.get('filename')}: {s.get('message')}" for s in skipped)),
+            'warning')
+    if not imported:
+        flash('Nothing imported.', 'error')
+        return redirect(url_for('import_invoice'))
+    return redirect(url_for('import_invoice_review',
+                            ids=','.join(str(r['iid']) for r in imported)))
+
+
+@app.route('/import/invoice/review')
+def import_invoice_review():
+    """Revisitable review of a just-imported batch of invoices (by id). Pending
+    ones link to their verification page and return here after accept/discard."""
+    ids = [int(x) for x in request.args.get('ids', '').split(',') if x.strip().isdigit()]
+    db = get_db()
+    results = []
+    if ids:
+        ph = ','.join('?' * len(ids))
+        rows = db.execute(
+            f'SELECT ci.*, pc.event_name, pc.organization FROM closing_invoices ci '
+            f'LEFT JOIN pickup_config pc ON pc.id = ci.config_id '
+            f'WHERE ci.id IN ({ph}) ORDER BY ci.id', ids).fetchall()
+        results = [_invoice_row_to_result(dict(r)) for r in rows]
+    return render_template('import_invoice_result.html', results=results,
+                           batch_ids=request.args.get('ids', ''))
 
 
 def _get_post_report_data(cid):

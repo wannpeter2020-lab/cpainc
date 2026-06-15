@@ -36,8 +36,10 @@
           <td class="text-center">
             {% if not r['ok'] %}
               <span class="badge bg-secondary" title="{{ r['message'] }}">Skipped</span>
-            {% elif r['status'] == 'match' %}
+            {% elif r['confirmed'] and r['status'] == 'match' %}
               <span class="badge bg-success">Verified</span>
+            {% elif r['confirmed'] %}
+              <span class="badge bg-danger">Accepted w/ variance</span>
             {% elif r['status'] == 'mismatch' %}
               <span class="badge bg-warning text-dark">Pending — variance
                 {{ (r['currency']|cursym) ~ '{:,.2f}'.format(r['variance']|abs) if r['variance'] is not none else '' }}</span>
@@ -47,8 +49,8 @@
           </td>
           <td class="text-end">
             {% if r['ok'] %}
-              <a href="{{ url_for('pickup_invoice_result', cid=r['cid'], iid=r['iid']) }}"
-                 class="btn btn-outline-secondary btn-sm" title="View verification"><i class="bi bi-search"></i></a>
+              <a href="{{ url_for('pickup_invoice_result', cid=r['cid'], iid=r['iid'], back_ids=batch_ids|default('')) }}"
+                 class="btn btn-outline-secondary btn-sm" title="View / verify"><i class="bi bi-search"></i></a>
               <a href="{{ url_for('pickup_invoice_download', cid=r['cid'], iid=r['iid']) }}"
                  class="btn btn-outline-primary btn-sm" title="Download invoice PDF"><i class="bi bi-download"></i></a>
             {% endif %}
@@ -63,11 +65,16 @@
   </div>
 </div>
 
-{% if imported | selectattr('status', 'equalto', 'mismatch') | list %}
+{% set pending = imported | rejectattr('confirmed') | list %}
+{% if pending %}
 <div class="alert alert-warning mt-3 mb-0">
   <i class="bi bi-exclamation-triangle me-1"></i>
-  Some invoices did not match the HHR and are held as <strong>Pending</strong>. Open each (search icon)
-  to review and Accept or Discard.
+  <strong>{{ pending | length }}</strong> invoice{{ 's' if pending | length != 1 }} still need review.
+  Click the <i class="bi bi-search"></i> to verify each one — you'll come straight back to this list to do the next.
+</div>
+{% elif imported %}
+<div class="alert alert-success mt-3 mb-0">
+  <i class="bi bi-check-circle me-1"></i>All imported invoices are reviewed.
 </div>
 {% endif %}
 

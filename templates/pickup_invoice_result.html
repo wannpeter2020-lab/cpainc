@@ -11,9 +11,15 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-receipt me-2"></i>Closing Invoice Verification</h4>
+  {% if back_ids %}
+  <a href="{{ url_for('import_invoice_review', ids=back_ids) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Import List
+  </a>
+  {% else %}
   <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
     <i class="bi bi-arrow-left me-1"></i>Back to Event
   </a>
+  {% endif %}
 </div>
 
 {# ── Status banner ─────────────────────────────────────────────────────────── #}
@@ -112,14 +118,20 @@
   <a href="{{ url_for('pickup_invoice_download', cid=config['id'], iid=inv['id']) }}"
      class="btn btn-outline-primary"><i class="bi bi-download me-1"></i>Download Invoice PDF</a>
   {% if inv['confirmed'] %}
+    {% if back_ids %}
+    <a href="{{ url_for('import_invoice_review', ids=back_ids) }}" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Done — Back to List</a>
+    {% else %}
     <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Done</a>
+    {% endif %}
   {% else %}
     <form method="POST" action="{{ url_for('pickup_invoice_accept', cid=config['id'], iid=inv['id']) }}" class="d-inline">
+      <input type="hidden" name="back_ids" value="{{ back_ids|default('') }}">
       <button type="submit" class="btn btn-warning"
               onclick="return confirm('Save this invoice even though it does not match the HHR?');">
         <i class="bi bi-save me-1"></i>Accept &amp; Save Anyway</button>
     </form>
     <form method="POST" action="{{ url_for('pickup_invoice_discard', cid=config['id'], iid=inv['id']) }}" class="d-inline">
+      <input type="hidden" name="back_ids" value="{{ back_ids|default('') }}">
       <button type="submit" class="btn btn-outline-danger"
               onclick="return confirm('Discard this invoice? It will not be saved.');">
         <i class="bi bi-trash me-1"></i>Discard</button>
