@@ -305,7 +305,7 @@
           <td class="fw-semibold">{{ ci['invoice_no'] or '—' }}</td>
           <td>{{ ci['invoice_date'] or '—' }}</td>
           <td class="text-end">
-            {{ '%s $%s' % (ci['currency'] or 'USD', '{:,.2f}'.format(ci['commission_amount'])) if ci['commission_amount'] is not none else '—' }}
+            {{ (ci['currency']|cursym) ~ '{:,.2f}'.format(ci['commission_amount']) if ci['commission_amount'] is not none else '—' }}
           </td>
           <td class="text-center">
             {% if not ci['confirmed'] %}
@@ -319,7 +319,7 @@
             {% endif %}
           </td>
           <td class="text-end {{ 'text-danger' if ci['variance'] and ci['variance'] != 0 else 'text-muted' }}">
-            {{ '$%s' % '{:,.2f}'.format(ci['variance']|abs) if ci['variance'] is not none else '—' }}
+            {{ (ci['currency']|cursym) ~ '{:,.2f}'.format(ci['variance']|abs) if ci['variance'] is not none else '—' }}
           </td>
           <td class="text-end">
             <a href="{{ url_for('pickup_invoice_result', cid=config['id'], iid=ci['id']) }}"

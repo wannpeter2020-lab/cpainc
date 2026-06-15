@@ -3525,6 +3525,16 @@ def parse_hhr_excel(file_bytes):
                                 stats['fb_revenue'] = v
                                 break
                     break
+        if 'total meeting room revenue' in row_text and not stats.get('meeting_room_revenue'):
+            for i, cell in enumerate(row):
+                if 'total meeting room revenue' in _sv(cell.value).lower():
+                    for j in (i+2, i+1, i+3):
+                        if j < len(row):
+                            v = _num(row[j].value)
+                            if v and v > 0:
+                                stats['meeting_room_revenue'] = v
+                                break
+                    break
 
         # Earned comps
         elif 'total comp amount' in lbl or ('earned comp' in lbl and 'total' in lbl):
@@ -6587,23 +6597,47 @@ def parse_hhr_pdf(file_bytes, fallback_year=None):
 
 # ── Closing-invoice parsing + HHR verification ────────────────────────────────
 
+_CURRENCY_SYMBOLS = {
+    'USD': '$', 'EUR': '€', 'GBP': '£', 'CAD': 'C$', 'AUD': 'A$', 'NZD': 'NZ$',
+    'JPY': '¥', 'CNY': '¥', 'CHF': 'CHF ', 'MXN': 'MX$', 'SGD': 'S$', 'HKD': 'HK$',
+    'SEK': 'kr ', 'NOK': 'kr ', 'DKK': 'kr ', 'ZAR': 'R', 'BRL': 'R$', 'INR': '₹',
+}
+
+
+def currency_symbol(code):
+    """Return a display symbol for a 3-letter currency code (falls back to 'CODE ')."""
+    code = (code or 'USD').upper()
+    return _CURRENCY_SYMBOLS.get(code, code + ' ')
+
+
+def fmt_money(amount, code='USD'):
+    """Format an amount with its currency symbol, e.g. '€35,988.50'."""
+    if amount is None:
+        return '—'
+    return f'{currency_symbol(code)}{amount:,.2f}'
+
+
 def _ci_money(s):
-    """Parse a currency-ish string ('$1,102.90', 'USD 1102.9') to float, or None."""
+    """Parse a currency-ish string ('$1,102.90', 'USD 1102.9', '€14,520.60') → float."""
     if s is None:
         return None
+    import re as _re
+    s = _re.sub(r'[^\d.\-]', '', str(s))
     try:
-        return float(str(s).replace(',', '').replace('$', '').strip())
+        return float(s) if s not in ('', '-', '.', '-.') else None
     except (ValueError, TypeError):
         return None
 
 
 def parse_commission_invoice_pdf(file_bytes):
-    """Parse a ConferenceDirect commission (closing) invoice PDF.
+    """Parse a ConferenceDirect commission (closing) invoice PDF — including
+    foreign-currency and multi-component (Accommodation / F&B / Meeting Room)
+    invoices.
 
-    Returns a dict with: invoice_no, booking_id, invoice_date, payment_terms,
-    currency, hotel, description, commission_pct (decimal), commission_amount,
-    commissionable_revenue (implied = commission / pct), total, amount_due,
-    credits, event_start, event_end, error.
+    Returns: invoice_no, booking_id, invoice_date, payment_terms, currency,
+    hotel, description, commission_pct, components {rooms,fb,meeting},
+    room_commission, commission_amount (= invoice total), commissionable_revenue
+    (rooms, implied), total, amount_due, credits, event_start/end, error.
     """
     import io as _io, re as _re
     r = {'error': None}
@@ -6624,11 +6658,13 @@ def parse_commission_invoice_pdf(file_bytes):
         m = _re.search(pat, txt, flags)
         return m.group(grp).strip() if m else None
 
+    AMT = r'([\d,]+(?:\.\d{1,2})?)'   # number, optional 1–2 decimals (handles 1,102.9 and 35,988.50)
+
     inv_no = _find(r'Invoice\s*No\.?\s*([0-9]+\s*-\s*[A-Za-z0-9]+)')
     r['invoice_no']    = _re.sub(r'\s+', '', inv_no) if inv_no else None
     r['booking_id']    = r['invoice_no'].split('-')[0] if r['invoice_no'] else None
     r['invoice_date']  = _find(r'Date:\s*([\d/]+)')
-    r['payment_terms'] = _find(r'Payment Terms:\s*([^\n]+?)(?:\s{2,}|\n|$)')
+    r['payment_terms'] = _find(r'Payment Terms:[ \t]*([^\n]*)')
     r['currency']      = _find(r'Currency:\s*([A-Z]{3})') or 'USD'
     # Bill-To hotel: first line after "Bill To"; trim the side-by-side "Remit To" column
     _hotel = _find(r'Bill To.*?\n\s*([^\n]+)', _re.S)
@@ -6637,75 +6673,124 @@ def parse_commission_invoice_pdf(file_bytes):
     r['hotel'] = _hotel
     _pct = _find(r'at\s*(\d+(?:\.\d+)?)\s*%')
     r['commission_pct'] = (float(_pct) / 100.0) if _pct else None
-    r['description'] = _find(r'^\s*\d+\s+(.+?)\s+\$[\d,]+\.\d{2}\s+\$[\d,]+\.\d{2}', _re.M)
-    r['billed_commission'] = _ci_money(_find(
-        r'commissionable revenue at[^\n]*?is\s*[A-Z]{0,3}\s*\$?([\d,]+\.?\d*)'))
-    r['total']      = _ci_money(_find(r'Total:\s*\$?([\d,]+\.\d{2})'))
-    r['amount_due'] = _ci_money(_find(r'Amount Due:\s*\$?([\d,]+\.\d{2})'))
-    r['credits']    = _ci_money(_find(r'Credit Memos?/Payments?:\s*\$?([\d,]+\.\d{2})'))
-    m = _re.search(r'Dates?:\s*([\d/]+)\s*to\s*([\d/]+)', txt)
-    if m:
-        r['event_start'], r['event_end'] = m.group(1), m.group(2)
-    else:
-        r['event_start'] = r['event_end'] = None
+    r['description'] = _find(r'([^\n]*\(booking\))', _re.M)
 
-    comm = r.get('total') or r.get('amount_due') or r.get('billed_commission')
-    r['commission_amount'] = comm
-    r['commissionable_revenue'] = (round(comm / r['commission_pct'], 2)
-                                   if (comm and r.get('commission_pct')) else None)
-    if not r['invoice_no'] or comm is None:
+    # Per-component commission lines:
+    #   "Billing for [Component] commissionable revenue at X% is <cur><amount> [CUR]"
+    # An unlabelled line (single-component USD invoices) is treated as rooms.
+    comps = {'rooms': None, 'fb': None, 'meeting': None}
+    for m in _re.finditer(
+            r'Billing for\s+(.*?)commissionable revenue\s+at\s*[\d.]+\s*%\s*is\s*[^\d\-]*' + AMT,
+            txt, _re.I):
+        lbl = (m.group(1) or '').strip().lower()
+        amt = _ci_money(m.group(2))
+        if amt is None:
+            continue
+        if 'f&b' in lbl or 'food' in lbl or 'beverage' in lbl:
+            comps['fb'] = amt
+        elif 'meeting room' in lbl or 'rent' in lbl:
+            comps['meeting'] = amt
+        elif comps['rooms'] is None:          # accommodation / room / unlabelled
+            comps['rooms'] = amt
+    r['components'] = comps
+
+    r['total']      = _ci_money(_find(r'Total:\s*[^\d\-]*' + AMT))
+    r['amount_due'] = _ci_money(_find(r'Amount Due[^:]*:\s*[^\d\-]*' + AMT))
+    r['credits']    = _ci_money(_find(r'Credit Memos?/Payments?:\s*[^\d\-]*' + AMT))
+    m = _re.search(r'(?:Event )?[Dd]ates?:\s*([\d/]+)\s*to\s*([\d/]+)', txt)
+    r['event_start'], r['event_end'] = (m.group(1), m.group(2)) if m else (None, None)
+
+    total = r.get('total') or r.get('amount_due')
+    room  = comps['rooms']
+    r['room_commission']   = room if room is not None else total          # verified vs HHR
+    r['commission_amount'] = total if total is not None else room          # headline = invoice total
+    r['commissionable_revenue'] = (round(r['room_commission'] / r['commission_pct'], 2)
+                                   if (r['room_commission'] and r.get('commission_pct')) else None)
+    if not r['invoice_no'] or r['commission_amount'] is None:
         r['error'] = 'Could not read the invoice number or commission amount.'
     return r
 
 
 def verify_invoice_against_hhr(invoice, hhr_facts, tol=1.00):
-    """Compare a parsed commission invoice to the HHR-derived expectation.
+    """Compare a parsed commission invoice to the HHR, component by component.
 
-    hhr_facts: {'final_pickup', 'rate', 'commission_pct', 'commissionable_revenue'}
-               (commissionable_revenue may be None → derived from pickup*rate).
-    Returns a result dict with status ('match' | 'mismatch' | 'no_hhr'),
-    expected vs billed figures, variance, and human-readable reasons.
+    hhr_facts: {'final_pickup', 'rate', 'commission_pct', 'commissionable_revenue'
+                (rooms; may be None → pickup*rate), 'fb_revenue', 'meeting_revenue'}.
+    Returns status ('match' | 'mismatch' | 'no_hhr'), a per-component breakdown,
+    rooms-centric top-level fields, variance, and human-readable reasons.
     """
-    res = {'status': 'no_hhr', 'reasons': [], 'tol': tol}
+    cur = invoice.get('currency') or 'USD'
+    def _f(v):
+        return fmt_money(v, cur)
 
-    inv_comm = invoice.get('commission_amount')
-    inv_pct  = invoice.get('commission_pct')
+    res = {'status': 'no_hhr', 'reasons': [], 'tol': tol, 'components': []}
+    inv_pct = invoice.get('commission_pct')
+    hpct    = hhr_facts.get('commission_pct') or inv_pct
 
-    pickup = hhr_facts.get('final_pickup')
-    rate   = hhr_facts.get('rate')
-    hpct   = hhr_facts.get('commission_pct') or inv_pct
-    h_rev  = hhr_facts.get('commissionable_revenue')
-    if h_rev is None and pickup and rate:
-        h_rev = round(float(pickup) * float(rate), 2)
-    h_comm = round(h_rev * hpct, 2) if (h_rev is not None and hpct) else None
+    pickup    = hhr_facts.get('final_pickup')
+    rate      = hhr_facts.get('rate')
+    rooms_rev = hhr_facts.get('commissionable_revenue')
+    if rooms_rev is None and pickup and rate:
+        rooms_rev = round(float(pickup) * float(rate), 2)
 
+    comps_inv = dict(invoice.get('components') or {})
+    if not any(comps_inv.get(k) for k in ('rooms', 'fb', 'meeting')):
+        comps_inv = {'rooms': invoice.get('room_commission') or invoice.get('commission_amount')}
+
+    DEFS = [
+        ('rooms',   'Accommodation / Rooms', rooms_rev),
+        ('fb',      'Food & Beverage',       hhr_facts.get('fb_revenue')),
+        ('meeting', 'Meeting Room',          hhr_facts.get('meeting_revenue')),
+    ]
+    checkable = 0
+    any_mismatch = False
+    for key, label, hrev in DEFS:
+        inv_amt = comps_inv.get(key)
+        if inv_amt is None:
+            continue   # invoice doesn't bill this component
+        exp = round(hrev * hpct, 2) if (hrev is not None and hpct) else None
+        comp = {'key': key, 'label': label, 'invoice': inv_amt, 'hhr_revenue': hrev,
+                'expected': exp, 'variance': None, 'status': 'no_data'}
+        if exp is not None:
+            comp['variance'] = round(inv_amt - exp, 2)
+            comp['status'] = 'match' if abs(comp['variance']) <= tol else 'mismatch'
+            checkable += 1
+            any_mismatch = any_mismatch or comp['status'] == 'mismatch'
+        res['components'].append(comp)
+
+    rooms_comp = next((c for c in res['components'] if c['key'] == 'rooms'), None)
     res.update({
-        'invoice_commission': inv_comm,
+        'currency': cur,
         'invoice_pct': inv_pct,
-        'invoice_commissionable_revenue': invoice.get('commissionable_revenue'),
         'hhr_final_pickup': pickup,
         'hhr_rate': rate,
         'hhr_commission_pct': hpct,
-        'hhr_commissionable_revenue': h_rev,
-        'hhr_expected_commission': h_comm,
-        'variance': (round(inv_comm - h_comm, 2) if (inv_comm is not None and h_comm is not None) else None),
+        'hhr_commissionable_revenue': rooms_rev,
+        'hhr_expected_commission': (rooms_comp['expected'] if rooms_comp else None),
+        'variance': (rooms_comp['variance'] if rooms_comp else None),
     })
 
-    if h_comm is None or inv_comm is None:
-        res['reasons'].append('No Final History / rate on file to verify against.')
+    pct_ok = (inv_pct is None or hpct is None or abs(inv_pct - hpct) < 1e-9)
+    if checkable == 0:
+        res['reasons'].append('No HHR figures on file to verify against.')
         res['status'] = 'no_hhr'
         return res
 
-    amt_ok = abs(res['variance']) <= tol
-    pct_ok = (inv_pct is None or hpct is None or abs(inv_pct - hpct) < 1e-9)
-    if not amt_ok:
-        res['reasons'].append(
-            f"Commission differs by ${res['variance']:,.2f} "
-            f"(invoice ${inv_comm:,.2f} vs HHR-expected ${h_comm:,.2f}).")
-    if not pct_ok:
-        res['reasons'].append(
-            f"Commission rate differs (invoice {inv_pct*100:.1f}% vs HHR {hpct*100:.1f}%).")
-    res['status'] = 'match' if (amt_ok and pct_ok) else 'mismatch'
-    if res['status'] == 'match':
-        res['reasons'].append('Invoice commission and rate match the HHR.')
+    if any_mismatch or not pct_ok:
+        res['status'] = 'mismatch'
+        for c in res['components']:
+            if c['status'] == 'mismatch':
+                res['reasons'].append(
+                    f"{c['label']}: invoice {_f(c['invoice'])} vs HHR-expected {_f(c['expected'])} "
+                    f"(off {_f(c['variance'])}).")
+        if not pct_ok:
+            res['reasons'].append(
+                f"Commission rate differs (invoice {inv_pct*100:.1f}% vs HHR {hpct*100:.1f}%).")
+    else:
+        res['status'] = 'match'
+        res['reasons'].append('All billed components match the HHR.')
+
+    nd = [c['label'] for c in res['components'] if c['status'] == 'no_data']
+    if nd:
+        res['reasons'].append('Could not verify (no HHR figure): ' + ', '.join(nd) + '.')
     return res

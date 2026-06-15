@@ -131,6 +131,11 @@ def fromjson_filter(value):
     except Exception:
         return {}
 
+@app.template_filter('cursym')
+def cursym_filter(code):
+    from pickup_utils import currency_symbol
+    return currency_symbol(code)
+
 @app.template_filter('us_date')
 def us_date_filter(value):
     """Convert YYYY-MM-DD (or datetime) to the configured display format."""
@@ -4885,6 +4890,7 @@ def ensure_pickup_tables():
             verification_status TEXT,
             variance REAL,
             verify_notes TEXT,
+            components_json TEXT,
             confirmed INTEGER DEFAULT 0,
             filename TEXT,
             file_data BLOB,
@@ -5011,6 +5017,12 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # closing_invoices.components_json — per-component (rooms/F&B/meeting) verification
+    try:
+        db.execute('ALTER TABLE closing_invoices ADD COLUMN components_json TEXT')
+        db.commit()
+    except Exception:
+        pass
     # Add rooming_list_required flag to pickup_config
     try:
         db.execute('ALTER TABLE pickup_config ADD COLUMN rooming_list_required INTEGER DEFAULT 0')
@@ -12110,7 +12122,8 @@ def _gather_hhr_commission_facts(db, config, invoice=None):
     cid = config['id']
     bk  = config['booking_id']
     facts = {'final_pickup': None, 'rate': config['contracted_rate'],
-             'commission_pct': None, 'commissionable_revenue': None}
+             'commission_pct': None, 'commissionable_revenue': None,
+             'fb_revenue': None, 'meeting_revenue': None}
 
     fh = db.execute(
         "SELECT total_rooms FROM pickup_weekly WHERE config_id=? AND label='Final History' "
@@ -12147,6 +12160,10 @@ def _gather_hhr_commission_facts(db, config, invoice=None):
                     st = parse_hhr_excel(raw)
                     if st.get('room_revenue'):
                         facts['commissionable_revenue'] = float(st['room_revenue'])
+                    if st.get('fb_revenue'):
+                        facts['fb_revenue'] = float(st['fb_revenue'])
+                    if st.get('meeting_room_revenue'):
+                        facts['meeting_revenue'] = float(st['meeting_room_revenue'])
                 except Exception:
                     pass
     return facts
@@ -12211,15 +12228,16 @@ def pickup_invoice_import(cid):
                (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
                 commission_pct, commission_amount, commissionable_revenue,
                 hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
-                hhr_expected_commission, verification_status, variance, verify_notes,
+                hhr_expected_commission, verification_status, variance, verify_notes, components_json,
                 confirmed, filename, file_data)
-               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
+               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?)''',
             (cid, bk, inv.get('invoice_no'),
              inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
              inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
              facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
              result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
              result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
+             json.dumps(result.get('components') or []),
              confirmed, f.filename, file_bytes))
         imported_iids.append(cur.lastrowid)
         if confirmed: n_match += 1
@@ -12332,15 +12350,16 @@ def import_invoice():
                (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
                 commission_pct, commission_amount, commissionable_revenue,
                 hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
-                hhr_expected_commission, verification_status, variance, verify_notes,
+                hhr_expected_commission, verification_status, variance, verify_notes, components_json,
                 confirmed, filename, file_data)
-               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
+               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?)''',
             (config['id'], bk, inv.get('invoice_no'),
              inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
              inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
              facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
              result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
              result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
+             json.dumps(result.get('components') or []),
              confirmed, f.filename, file_bytes))
         out.update(ok=True, status=result['status'], iid=cur.lastrowid, cid=config['id'],
                    event=config['event_name'] or config['organization'],

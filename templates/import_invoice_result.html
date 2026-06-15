@@ -31,7 +31,7 @@
           <td>{{ r['booking_id'] or '—' }}</td>
           <td class="small">{{ r['event'] or '—' }}</td>
           <td class="text-end">
-            {{ '%s $%s' % (r['currency'] or 'USD', '{:,.2f}'.format(r['commission_amount'])) if r['commission_amount'] is not none else '—' }}
+            {{ (r['currency']|cursym) ~ '{:,.2f}'.format(r['commission_amount']) if r['commission_amount'] is not none else '—' }}
           </td>
           <td class="text-center">
             {% if not r['ok'] %}
@@ -40,7 +40,7 @@
               <span class="badge bg-success">Verified</span>
             {% elif r['status'] == 'mismatch' %}
               <span class="badge bg-warning text-dark">Pending — variance
-                {{ '$%s' % '{:,.2f}'.format(r['variance']|abs) if r['variance'] is not none else '' }}</span>
+                {{ (r['currency']|cursym) ~ '{:,.2f}'.format(r['variance']|abs) if r['variance'] is not none else '' }}</span>
             {% else %}
               <span class="badge bg-secondary">Unverified</span>
             {% endif %}
