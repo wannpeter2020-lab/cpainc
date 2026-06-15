@@ -1839,27 +1839,12 @@ def check_delete(check_id):
 
 # ── Commission Report ─────────────────────────────────────────────────────────
 
-@app.route('/reports/commission')
-def report_commission():
-    user = get_current_user()
-    who_param = request.args.get('who', 'team')
-    if who_param == 'kristin' and not has_permission(user, 'reports_commission_kristin'):
-        flash('You do not have access to that report.', 'error')
-        return redirect(url_for('pipeline'))
-    if who_param == 'team' and not has_permission(user, 'reports_commission_team'):
-        flash('You do not have access to that report.', 'error')
-        return redirect(url_for('pipeline'))
-    date_from = request.args.get('date_from', '').strip()
-    date_to   = request.args.get('date_to', '').strip()
-    who       = who_param
-    today     = datetime.now().strftime('%Y-%m-%d')
-    rows, totals = [], {}
+def _commission_report_data(db, date_from, date_to, today, who):
+    """Build Missing Commission rows + totals for the given who (team/kristin) —
+    shared by the report view and the Excel export. Caller manages the connection."""
+    dismissed = {str(x[0]) for x in db.execute('SELECT booking_id FROM short_pay_dismissals').fetchall()}
 
-    if date_from and date_to:
-        db = get_db()
-        dismissed = {str(x[0]) for x in db.execute('SELECT booking_id FROM short_pay_dismissals').fetchall()}
-
-        base_select = '''
+    base_select = '''
             SELECT
                 r.BookingId          AS booking_id,
                 r.AccountName        AS account,
@@ -1906,77 +1891,99 @@ def report_commission():
                 WHERE w.label = 'Final History' GROUP BY pc.booking_id
             ) fh ON CAST(fh.booking_id AS INTEGER) = CAST(r.BookingId AS INTEGER)
         '''
-        assoc_filter = '''
-            AND (r.BookingStatus IS NULL OR r.BookingStatus != 'Cancelled')
-            AND NOT EXISTS (SELECT 1 FROM ChkRegNote c2 WHERE c2.BookingID = r.BookingId AND c2.Cancelled = 1)
-            AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
-                 OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
-        '''
-        query_a = base_select + '''
-            WHERE DATE(r.StartDate) BETWEEN ? AND ?
-            AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR DATE(r.StartDate) > ?)
-        ''' + assoc_filter + ' ORDER BY r.StartDate'
-        set_a = [dict(x) for x in db.execute(query_a, (date_from, date_to, today)).fetchall()]
+    assoc_filter = '''
+        AND (r.BookingStatus IS NULL OR r.BookingStatus != 'Cancelled')
+        AND NOT EXISTS (SELECT 1 FROM ChkRegNote c2 WHERE c2.BookingID = r.BookingId AND c2.Cancelled = 1)
+        AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
+             OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
+    '''
+    query_a = base_select + '''
+        WHERE DATE(r.StartDate) BETWEEN ? AND ?
+        AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR DATE(r.StartDate) > ?)
+    ''' + assoc_filter + ' ORDER BY r.StartDate'
+    set_a = [dict(x) for x in db.execute(query_a, (date_from, date_to, today)).fetchall()]
 
-        query_b = base_select + '''
-            WHERE ci.invoiced IS NOT NULL AND ci.invoiced > 0
-            AND COALESCE(pay.total_paid, 0) > 0
-            AND COALESCE(pay.total_paid, 0) < ci.invoiced * 0.99
-            AND (ci.inv_currency IS NULL OR ci.inv_currency = 'USD')
-        ''' + assoc_filter + ' ORDER BY r.StartDate'
-        set_b = [dict(x) for x in db.execute(query_b).fetchall()]
+    query_b = base_select + '''
+        WHERE ci.invoiced IS NOT NULL AND ci.invoiced > 0
+        AND COALESCE(pay.total_paid, 0) > 0
+        AND COALESCE(pay.total_paid, 0) < ci.invoiced * 0.99
+        AND (ci.inv_currency IS NULL OR ci.inv_currency = 'USD')
+    ''' + assoc_filter + ' ORDER BY r.StartDate'
+    set_b = [dict(x) for x in db.execute(query_b).fetchall()]
 
-        seen = {str(x['booking_id']) for x in set_a}
-        merged = list(set_a)
-        for x in set_b:
-            bid = str(x['booking_id'])
-            if bid in seen or bid in dismissed:
-                continue
-            seen.add(bid); merged.append(x)
+    seen = {str(x['booking_id']) for x in set_a}
+    merged = list(set_a)
+    for x in set_b:
+        bid = str(x['booking_id'])
+        if bid in seen or bid in dismissed:
+            continue
+        seen.add(bid); merged.append(x)
 
-        default_split  = get_commission_split()
-        account_splits = get_account_splits()
-        kristin_split  = get_kristin_split()
-        kristin_cut    = get_kristin_cut()
-        for r in merged:
-            bid = str(r['booking_id'])
-            split = effective_split(r.get('associate'), r.get('account'), r.get('country'),
-                                    account_splits, default_split, kristin_split, kristin_cut)
-            r['split_pct'] = split_label(r.get('associate'), split, default_split, kristin_split, kristin_cut)
+    default_split  = get_commission_split()
+    account_splits = get_account_splits()
+    kristin_split  = get_kristin_split()
+    kristin_cut    = get_kristin_cut()
+    for r in merged:
+        bid = str(r['booking_id'])
+        split = effective_split(r.get('associate'), r.get('account'), r.get('country'),
+                                account_splits, default_split, kristin_split, kristin_cut)
+        r['split_pct'] = split_label(r.get('associate'), split, default_split, kristin_split, kristin_cut)
+        try:
+            rev = float(r['usd_revenue'] or 0) or float(r['revenue'] or 0)
+            r['est_commission'] = rev * float(r['comm_pct'] or 0) * split
+        except Exception:
+            r['est_commission'] = 0
+        if r.get('has_hhr'):
             try:
-                rev = float(r['usd_revenue'] or 0) or float(r['revenue'] or 0)
-                r['est_commission'] = rev * float(r['comm_pct'] or 0) * split
+                r['actual_commission'] = (float(r['actual_pickup'] or 0) * float(r['room_rate'] or 0)
+                                          * float(r['comm_pct'] or 0) * split)
             except Exception:
-                r['est_commission'] = 0
-            if r.get('has_hhr'):
-                try:
-                    r['actual_commission'] = (float(r['actual_pickup'] or 0) * float(r['room_rate'] or 0)
-                                              * float(r['comm_pct'] or 0) * split)
-                except Exception:
-                    r['actual_commission'] = 0
-            else:
-                r['actual_commission'] = None
-            r['invoiced']     = float(r['invoiced']) if r.get('invoiced') is not None else None
-            r['inv_currency'] = r.get('inv_currency') or 'USD'
-            r['paid_total']   = float(r.get('paid_total') or 0)
-            short = (r['invoiced'] and r['invoiced'] > 0 and r['paid_total'] > 0
-                     and r['paid_total'] < r['invoiced'] * 0.99
-                     and r['inv_currency'] == 'USD' and bid not in dismissed)
-            r['short_pay']    = bool(short)
-            r['short_amount'] = round(r['invoiced'] - r['paid_total'], 2) if short else 0
-
-        if who == 'kristin':
-            rows = [r for r in merged if (r.get('associate') or '').strip().lower() == 'kristin house']
+                r['actual_commission'] = 0
         else:
-            rows = [r for r in merged if (r.get('associate') or '').strip().lower() != 'kristin house']
+            r['actual_commission'] = None
+        r['invoiced']     = float(r['invoiced']) if r.get('invoiced') is not None else None
+        r['inv_currency'] = r.get('inv_currency') or 'USD'
+        r['paid_total']   = float(r.get('paid_total') or 0)
+        short = (r['invoiced'] and r['invoiced'] > 0 and r['paid_total'] > 0
+                 and r['paid_total'] < r['invoiced'] * 0.99
+                 and r['inv_currency'] == 'USD' and bid not in dismissed)
+        r['short_pay']    = bool(short)
+        r['short_amount'] = round(r['invoiced'] - r['paid_total'], 2) if short else 0
 
-        totals = {
-            'est_commission':    sum(float(r['est_commission'] or 0) for r in rows),
-            'actual_commission': sum(float(r['actual_commission']) for r in rows if r['actual_commission'] is not None),
-            'prepaid':           sum(float(r.get('prepaid') or 0) for r in rows),
-            'invoiced':          sum(float(r['invoiced']) for r in rows if r.get('invoiced')),
-            'short_count':       sum(1 for r in rows if r['short_pay']),
-        }
+    if who == 'kristin':
+        rows = [r for r in merged if (r.get('associate') or '').strip().lower() == 'kristin house']
+    else:
+        rows = [r for r in merged if (r.get('associate') or '').strip().lower() != 'kristin house']
+
+    totals = {
+        'est_commission':    sum(float(r['est_commission'] or 0) for r in rows),
+        'actual_commission': sum(float(r['actual_commission']) for r in rows if r['actual_commission'] is not None),
+        'prepaid':           sum(float(r.get('prepaid') or 0) for r in rows),
+        'invoiced':          sum(float(r['invoiced']) for r in rows if r.get('invoiced')),
+        'short_count':       sum(1 for r in rows if r['short_pay']),
+    }
+    return rows, totals
+
+
+@app.route('/reports/commission')
+def report_commission():
+    user = get_current_user()
+    who_param = request.args.get('who', 'team')
+    if who_param == 'kristin' and not has_permission(user, 'reports_commission_kristin'):
+        flash('You do not have access to that report.', 'error')
+        return redirect(url_for('pipeline'))
+    if who_param == 'team' and not has_permission(user, 'reports_commission_team'):
+        flash('You do not have access to that report.', 'error')
+        return redirect(url_for('pipeline'))
+    date_from = request.args.get('date_from', '').strip()
+    date_to   = request.args.get('date_to', '').strip()
+    who       = who_param
+    today     = datetime.now().strftime('%Y-%m-%d')
+    rows, totals = [], {}
+
+    if date_from and date_to:
+        db = get_db()
+        rows, totals = _commission_report_data(db, date_from, date_to, today, who)
 
     title = 'Kristin House — Missing Commission' if who == 'kristin' else 'Team — Missing Commission'
     return render_template('report_commission.html',
@@ -2827,60 +2834,26 @@ def report_commission_export():
         return redirect(url_for('report_commission'))
 
     db = get_db()
-    query = '''
-        SELECT r.BookingId AS booking_id, r.AccountName AS account, r.Customer AS hotel,
-               r.BookedDate AS booked_date, r.StartDate AS start_date, r.EndDate AS end_date,
-               r.RoomRate AS room_rate, r.TotalRoomNights AS total_room_nights,
-               r.CommissionPercent AS comm_pct, r.Revenue AS revenue, r.USDRevenue AS usd_revenue,
-               r.Country AS country, r.BookingAssociate AS associate,
-               COALESCE(p.total_pickup,0) AS actual_pickup,
-               CASE WHEN pay.pay_count > 0 THEN 'Paid / Future' ELSE 'Unpaid' END AS payment_status
-        FROM ReportPipeline r
-        LEFT JOIN (SELECT BookingID, SUM(ActualPickup) AS total_pickup FROM Pickup GROUP BY BookingID) p
-            ON p.BookingID = r.BookingId
-        LEFT JOIN (SELECT BookingID, COUNT(*) AS pay_count FROM ChkRegNote
-                   WHERE (Cancelled IS NULL OR Cancelled=0) GROUP BY BookingID) pay
-            ON pay.BookingID = r.BookingId
-        WHERE DATE(r.StartDate) BETWEEN ? AND ?
-        AND (pay.pay_count IS NULL OR pay.pay_count=0 OR DATE(r.StartDate) > ?)
-        AND (r.BookingStatus IS NULL OR r.BookingStatus != 'Cancelled')
-        AND NOT EXISTS (SELECT 1 FROM ChkRegNote c2 WHERE c2.BookingID = r.BookingId AND c2.Cancelled=1)
-        AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
-             OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
-        ORDER BY r.StartDate
-    '''
-    all_rows = db.execute(query, (date_from, date_to, today)).fetchall()
-    if who == 'kristin':
-        rows = [r for r in all_rows if (r['associate'] or '').strip().lower() == 'kristin house']
-    else:
-        rows = [r for r in all_rows if (r['associate'] or '').strip().lower() != 'kristin house']
+    rows, _ = _commission_report_data(db, date_from, date_to, today, who)
 
-    default_split  = get_commission_split()
-    account_splits = get_account_splits()
-    kristin_split  = get_kristin_split()
-    kristin_cut    = get_kristin_cut()
+    def _us2(iso):
+        try:
+            return datetime.strptime(str(iso)[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
+        except Exception:
+            return str(iso or '')
+
+    def _status(r):
+        if r['short_pay']:
+            return f"Short Paid −${r['short_amount']:,.2f}"
+        if not r['has_hhr']:
+            return 'No HHR yet'
+        return 'Unpaid' if r['is_paid'] == 0 else 'Paid / Future'
+
     export_rows     = []
     missing_pickups = set()   # 0-based data row indices with no pickup
     for r in rows:
-        split = effective_split(r['associate'], r['account'], r['country'],
-                                account_splits, default_split, kristin_split, kristin_cut)
-        try:
-            rev = float(r['usd_revenue'] or 0) or float(r['revenue'] or 0)
-            est = rev * float(r['comm_pct'] or 0) * split
-        except Exception:
-            est = 0
-        pickup = float(r['actual_pickup'] or 0)
-        try:
-            actual = pickup * float(r['room_rate'] or 0) * float(r['comm_pct'] or 0) * split
-        except Exception:
-            actual = 0
-        if pickup == 0:
+        if float(r['actual_pickup'] or 0) == 0:
             missing_pickups.add(len(export_rows))
-        def _us2(iso):
-            try:
-                return datetime.strptime(str(iso)[:10], '%Y-%m-%d').strftime('%m/%d/%Y')
-            except Exception:
-                return str(iso or '')
         export_rows.append({
             'Booking ID':        r['booking_id'],
             'Account':           r['account'],
@@ -2891,9 +2864,12 @@ def report_commission_export():
             'Room Rate':         r['room_rate'],
             'Contracted Nights': int(r['total_room_nights']) if r['total_room_nights'] else 0,
             'Pickup':            int(r['actual_pickup']) if r['actual_pickup'] else 0,
-            'Est. Commission':   round(est, 2),
-            'Actual Commission': round(actual, 2),
-            'Status':            r['payment_status'],
+            'Est. Commission':   round(r['est_commission'], 2) if r['est_commission'] else 0,
+            'Actual Commission': (round(r['actual_commission'], 2) if r['actual_commission'] is not None else None),
+            'Invoiced':          (round(r['invoiced'], 2) if r.get('invoiced') else None),
+            'Inv Cur':           (r['inv_currency'] if r.get('invoiced') else ''),
+            'Paid':              (round(r['paid_total'], 2) if r['paid_total'] else None),
+            'Status':            _status(r),
         })
 
     df = pd.DataFrame(export_rows)
@@ -2902,7 +2878,7 @@ def report_commission_export():
         df.to_excel(writer, index=False, sheet_name='Missing Commission')
         ws = writer.sheets['Missing Commission']
         ws.freeze_panes = 'A2'
-        col_widths = [14,30,35,14,14,14,12,14,10,16,18,14]
+        col_widths = [14,28,32,13,13,13,11,11,9,15,16,14,8,14,18]
         for i, width in enumerate(col_widths, 1):
             ws.column_dimensions[ws.cell(1,i).column_letter].width = width
         from openpyxl.styles import PatternFill, Font, Alignment
@@ -2915,9 +2891,9 @@ def report_commission_export():
             cell.alignment = Alignment(horizontal='center', wrap_text=True)
         for idx, row in enumerate(ws.iter_rows(min_row=2, max_row=ws.max_row)):
             for cell in row:
-                if cell.column_letter in ('G','J','K'):
+                if cell.column_letter in ('G','J','K','L','N'):   # Rate, Est, Actual, Invoiced, Paid
                     cell.number_format = '$#,##0.00'
-                if cell.column_letter in ('H','I'):
+                if cell.column_letter in ('H','I'):               # Nights, Pickup
                     cell.number_format = '#,##0'
             if idx in missing_pickups:
                 for cell in row:
@@ -2927,12 +2903,11 @@ def report_commission_export():
         ws.cell(total_row, 9).value = 'Totals:'
         ws.cell(total_row, 9).font = Font(bold=True)
         ws.cell(total_row, 9).alignment = Alignment(horizontal='right')
-        ws.cell(total_row,10).value = f'=SUM(J2:J{last_data})'
-        ws.cell(total_row,10).number_format = '$#,##0.00'
-        ws.cell(total_row,10).font = Font(bold=True)
-        ws.cell(total_row,11).value = f'=SUM(K2:K{last_data})'
-        ws.cell(total_row,11).number_format = '$#,##0.00'
-        ws.cell(total_row,11).font = Font(bold=True)
+        for col_letter, col_idx in [('J', 10), ('K', 11), ('L', 12)]:
+            c = ws.cell(total_row, col_idx)
+            c.value = f'=SUM({col_letter}2:{col_letter}{last_data})'
+            c.number_format = '$#,##0.00'
+            c.font = Font(bold=True)
 
     output.seek(0)
     who_label = 'Kristin_House' if who == 'kristin' else 'Team'
