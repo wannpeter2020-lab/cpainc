@@ -39,16 +39,16 @@
       <div class="section-label">Unpaid</div><div class="fs-4 fw-bold text-danger">{{ rows|selectattr('is_paid','equalto',0)|list|length }}</div>
     </div></div></div>
     <div class="col"><div class="card text-center"><div class="card-body py-2">
-      <div class="section-label">Short Paid</div><div class="fs-4 fw-bold text-danger">{{ totals.short_count }}</div>
+      <div class="section-label">Short Paid</div><div class="fs-4 fw-bold text-danger">{{ totals.short_count|default(0) }}</div>
     </div></div></div>
     <div class="col"><div class="card text-center"><div class="card-body py-2">
-      <div class="section-label">Est. Commission</div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.est_commission) }}</div>
+      <div class="section-label">Est. Commission</div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.est_commission|default(0)) }}</div>
     </div></div></div>
     <div class="col"><div class="card text-center"><div class="card-body py-2">
-      <div class="section-label">Actual Commission</div><div class="fs-5 fw-bold text-success">${{ '{:,.2f}'.format(totals.actual_commission) }}</div>
+      <div class="section-label">Actual Commission</div><div class="fs-5 fw-bold text-success">${{ '{:,.2f}'.format(totals.actual_commission|default(0)) }}</div>
     </div></div></div>
     <div class="col"><div class="card text-center"><div class="card-body py-2">
-      <div class="section-label">Invoiced</div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.invoiced) }}</div>
+      <div class="section-label">Invoiced <span class="text-muted fw-normal" style="font-size:.7rem">(your share)</span></div><div class="fs-5 fw-bold">${{ '{:,.2f}'.format(totals.invoiced|default(0)) }}</div>
     </div></div></div>
   </div>
 
@@ -76,7 +76,7 @@
             <th class="text-end">Pickup</th>
             <th class="text-end">Est. Commission</th>
             <th class="text-end">Actual Commission</th>
-            <th class="text-end">Invoiced</th>
+            <th class="text-end">Invoiced<br><small class="fw-normal text-muted">your share</small></th>
             <th class="text-end">Paid</th>
             {% if who == 'kristin' %}<th class="text-end">Prepaid</th>{% endif %}
             <th>Status</th>
@@ -136,9 +136,9 @@
         <tfoot class="table-light fw-bold">
           <tr>
             <td colspan="10" class="text-end">Totals:</td>
-            <td class="text-end">${{ '{:,.2f}'.format(totals.est_commission) }}</td>
-            <td class="text-end text-success">${{ '{:,.2f}'.format(totals.actual_commission) }}</td>
-            <td class="text-end">${{ '{:,.2f}'.format(totals.invoiced) }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(totals.est_commission|default(0)) }}</td>
+            <td class="text-end text-success">${{ '{:,.2f}'.format(totals.actual_commission|default(0)) }}</td>
+            <td class="text-end">${{ '{:,.2f}'.format(totals.invoiced|default(0)) }}</td>
             <td></td>
             {% if who == 'kristin' %}<td class="text-end">${{ '{:,.2f}'.format(totals.prepaid) }}</td>{% endif %}
             <td></td>

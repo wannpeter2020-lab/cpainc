@@ -1941,9 +1941,12 @@ def _commission_report_data(db, date_from, date_to, today, who):
                 r['actual_commission'] = 0
         else:
             r['actual_commission'] = None
-        r['invoiced']     = float(r['invoiced']) if r.get('invoiced') is not None else None
-        r['inv_currency'] = r.get('inv_currency') or 'USD'
-        r['paid_total']   = float(r.get('paid_total') or 0)
+        # Invoiced shown as YOUR share (× split) to match Est/Actual and the
+        # net payments tracked — the raw invoice is 100% of CD's commission.
+        r['invoiced_full'] = float(r['invoiced']) if r.get('invoiced') is not None else None
+        r['invoiced']      = round(r['invoiced_full'] * split, 2) if r['invoiced_full'] is not None else None
+        r['inv_currency']  = r.get('inv_currency') or 'USD'
+        r['paid_total']    = float(r.get('paid_total') or 0)
         short = (r['invoiced'] and r['invoiced'] > 0 and r['paid_total'] > 0
                  and r['paid_total'] < r['invoiced'] * 0.99
                  and r['inv_currency'] == 'USD' and bid not in dismissed)
