@@ -351,9 +351,10 @@
             enctype="multipart/form-data">
         <div class="modal-body">
           <p class="text-muted small mb-3">
-            Upload the ConferenceDirect closing (commission) invoice as a <strong>PDF</strong>.
-            It will be checked against this event's HHR — the billed commission and rate are
-            compared to the final pickup. You can download it for review anytime afterward.
+            Upload one or more ConferenceDirect closing (commission) invoice <strong>PDFs</strong>.
+            Each is checked against its booking's HHR — the billed commission and rate are
+            compared to the final pickup. Invoices for a booking that isn't in the pipeline are
+            skipped. You can download them for review anytime afterward.
           </p>
           <div id="invDropZone"
                onclick="document.getElementById('invFileInput').click()"
@@ -363,10 +364,10 @@
                style="border:2px dashed #0d6efd;border-radius:8px;padding:2.5rem 1rem;
                       text-align:center;cursor:pointer;transition:border-color .2s,background .2s">
             <i class="bi bi-file-earmark-text fs-2 text-primary d-block mb-2"></i>
-            <div class="text-muted">Drag &amp; drop the invoice PDF here, or <strong>click to browse</strong></div>
-            <div class="text-muted small mt-1">PDF only</div>
+            <div class="text-muted">Drag &amp; drop invoice PDFs here, or <strong>click to browse</strong></div>
+            <div class="text-muted small mt-1">PDF only — you can select several at once</div>
           </div>
-          <input type="file" id="invFileInput" name="invoice_file" accept=".pdf"
+          <input type="file" id="invFileInput" name="invoice_file" accept=".pdf" multiple
                  class="d-none" onchange="showInvoiceFile(this)">
           <div id="invFileChosen" class="mt-2 small text-primary d-none">
             <i class="bi bi-check-circle me-1"></i><span id="invFileName"></span>
@@ -1288,7 +1289,9 @@ function showInvoiceFile(input) {
   const btn    = document.getElementById('invSubmitBtn');
   if (input.files && input.files.length) {
     chosen.classList.remove('d-none');
-    name.textContent = input.files[0].name;
+    name.textContent = input.files.length === 1
+      ? input.files[0].name
+      : input.files.length + ' files selected';
     btn.disabled = false;
   }
 }
@@ -1301,7 +1304,7 @@ function handleInvoiceDrop(e) {
   if (files.length) {
     const input = document.getElementById('invFileInput');
     const dt = new DataTransfer();
-    dt.items.add(files[0]);
+    for (let i = 0; i < files.length; i++) dt.items.add(files[i]);
     input.files = dt.files;
     showInvoiceFile(input);
   }

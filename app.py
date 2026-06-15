@@ -12152,11 +12152,26 @@ def _gather_hhr_commission_facts(db, config, invoice=None):
     return facts
 
 
+def _booking_in_pipeline(db, booking_id):
+    """True if the booking exists in ReportPipeline. Invoices for bookings not in
+    the pipeline are skipped entirely (no record created)."""
+    if not booking_id:
+        return False
+    try:
+        row = db.execute(
+            'SELECT 1 FROM ReportPipeline WHERE CAST(BookingId AS INTEGER)=CAST(? AS INTEGER) LIMIT 1',
+            (booking_id,)).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
 @app.route('/pickup/<int:cid>/invoice/import', methods=['POST'])
 def pickup_invoice_import(cid):
-    """Import a closing (commission) invoice PDF, verify it against the HHR,
-    and store it. Matches save straight away; mismatches land as 'pending'
-    for the user to accept or discard."""
+    """Import one or more closing (commission) invoice PDFs, verify each against
+    the HHR, and store them. An invoice whose booking is not in ReportPipeline is
+    skipped (no record created). Matches save automatically; mismatches land as
+    'pending' for the user to accept or discard."""
     from pickup_utils import parse_commission_invoice_pdf, verify_invoice_against_hhr
     db = get_db()
     config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
@@ -12164,42 +12179,69 @@ def pickup_invoice_import(cid):
         flash('Event not found.', 'error')
         return redirect(url_for('pickup_dashboard'))
 
-    f = request.files.get('invoice_file')
-    if not f or not f.filename:
+    files = [f for f in request.files.getlist('invoice_file') if f and f.filename]
+    if not files:
         flash('No file uploaded.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-    if not f.filename.lower().endswith('.pdf'):
-        flash('Please upload the closing invoice as a PDF.', 'error')
-        return redirect(url_for('pickup_event', cid=cid))
 
-    file_bytes = f.read()
-    inv = parse_commission_invoice_pdf(file_bytes)
-    if inv.get('error'):
-        flash(f'Could not read invoice: {inv["error"]}', 'error')
-        return redirect(url_for('pickup_event', cid=cid))
+    imported_iids = []
+    n_match = n_pending = n_skipped = 0
+    skip_notes = []
 
-    facts  = _gather_hhr_commission_facts(db, config, inv)
-    result = verify_invoice_against_hhr(inv, facts)
-    confirmed = 1 if result['status'] == 'match' else 0
+    for f in files:
+        label = f.filename
+        if not f.filename.lower().endswith('.pdf'):
+            n_skipped += 1; skip_notes.append(f'{label}: not a PDF'); continue
+        file_bytes = f.read()
+        inv = parse_commission_invoice_pdf(file_bytes)
+        if inv.get('error'):
+            n_skipped += 1; skip_notes.append(f'{label}: {inv["error"]}'); continue
 
-    cur = db.execute(
-        '''INSERT INTO closing_invoices
-           (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
-            commission_pct, commission_amount, commissionable_revenue,
-            hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
-            hhr_expected_commission, verification_status, variance, verify_notes,
-            confirmed, filename, file_data)
-           VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
-        (cid, inv.get('booking_id') or config['booking_id'], inv.get('invoice_no'),
-         inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
-         inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
-         facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
-         result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
-         result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
-         confirmed, f.filename, file_bytes))
-    iid = cur.lastrowid
+        bk = inv.get('booking_id') or config['booking_id']
+        if not _booking_in_pipeline(db, bk):
+            n_skipped += 1
+            skip_notes.append(f'{inv.get("invoice_no") or label}: booking {bk or "?"} not in pipeline')
+            continue
+
+        facts  = _gather_hhr_commission_facts(db, config, inv)
+        result = verify_invoice_against_hhr(inv, facts)
+        confirmed = 1 if result['status'] == 'match' else 0
+        cur = db.execute(
+            '''INSERT INTO closing_invoices
+               (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
+                commission_pct, commission_amount, commissionable_revenue,
+                hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
+                hhr_expected_commission, verification_status, variance, verify_notes,
+                confirmed, filename, file_data)
+               VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
+            (cid, bk, inv.get('invoice_no'),
+             inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
+             inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
+             facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
+             result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
+             result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
+             confirmed, f.filename, file_bytes))
+        imported_iids.append(cur.lastrowid)
+        if confirmed: n_match += 1
+        else:         n_pending += 1
+
     db.commit()
-    return redirect(url_for('pickup_invoice_result', cid=cid, iid=iid))
+
+    if len(imported_iids) == 1 and n_skipped == 0:
+        return redirect(url_for('pickup_invoice_result', cid=cid, iid=imported_iids[0]))
+
+    if not imported_iids:
+        flash('Nothing imported. ' + '; '.join(skip_notes), 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    parts = []
+    if n_match:   parts.append(f'{n_match} verified')
+    if n_pending: parts.append(f'{n_pending} pending review')
+    summary = f'Imported {len(imported_iids)} invoice(s) — {", ".join(parts)}.'
+    if n_skipped:
+        summary += f' Skipped {n_skipped}: ' + '; '.join(skip_notes)
+    flash(summary, 'warning' if (n_skipped or n_pending) else 'success')
+    return redirect(url_for('pickup_event', cid=cid))
 
 
 @app.route('/pickup/<int:cid>/invoice/<int:iid>')
