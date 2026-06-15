@@ -274,10 +274,113 @@
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-file-earmark-bar-graph me-1"></i>Email Client HHR Summary
     </a>
+    <button type="button" class="btn btn-outline-primary btn-sm"
+            data-bs-toggle="modal" data-bs-target="#importInvoiceModal">
+      <i class="bi bi-receipt me-1"></i>Import Closing Invoice
+    </button>
     {% endif %}
     {% endif %}
   </div>
 
+</div>
+
+{# ── Closing Invoices card ──────────────────────────────────────────────────── #}
+{% if closing_invoices %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-receipt me-2"></i>Closing Invoices</span>
+    <small class="text-muted">Verified against the HHR</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Invoice #</th><th>Date</th><th class="text-end">Commission</th>
+          <th class="text-center">Status</th><th class="text-end">Variance</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ci in closing_invoices %}
+        <tr>
+          <td class="fw-semibold">{{ ci['invoice_no'] or '—' }}</td>
+          <td>{{ ci['invoice_date'] or '—' }}</td>
+          <td class="text-end">
+            {{ '%s $%s' % (ci['currency'] or 'USD', '{:,.2f}'.format(ci['commission_amount'])) if ci['commission_amount'] is not none else '—' }}
+          </td>
+          <td class="text-center">
+            {% if not ci['confirmed'] %}
+              <span class="badge bg-warning text-dark">Pending review</span>
+            {% elif ci['verification_status'] == 'match' %}
+              <span class="badge bg-success">Verified</span>
+            {% elif ci['verification_status'] == 'mismatch' %}
+              <span class="badge bg-danger">Accepted w/ variance</span>
+            {% else %}
+              <span class="badge bg-secondary">Unverified</span>
+            {% endif %}
+          </td>
+          <td class="text-end {{ 'text-danger' if ci['variance'] and ci['variance'] != 0 else 'text-muted' }}">
+            {{ '$%s' % '{:,.2f}'.format(ci['variance']|abs) if ci['variance'] is not none else '—' }}
+          </td>
+          <td class="text-end">
+            <a href="{{ url_for('pickup_invoice_result', cid=config['id'], iid=ci['id']) }}"
+               class="btn btn-outline-secondary btn-sm" title="View verification">
+              <i class="bi bi-search"></i>
+            </a>
+            <a href="{{ url_for('pickup_invoice_download', cid=config['id'], iid=ci['id']) }}"
+               class="btn btn-outline-primary btn-sm" title="Download invoice PDF">
+              <i class="bi bi-download"></i>
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Import Closing Invoice modal ───────────────────────────────────────────── #}
+<div class="modal fade" id="importInvoiceModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-receipt me-2 text-primary"></i>Import Closing Invoice</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('pickup_invoice_import', cid=config['id']) }}"
+            enctype="multipart/form-data">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            Upload the ConferenceDirect closing (commission) invoice as a <strong>PDF</strong>.
+            It will be checked against this event's HHR — the billed commission and rate are
+            compared to the final pickup. You can download it for review anytime afterward.
+          </p>
+          <div id="invDropZone"
+               onclick="document.getElementById('invFileInput').click()"
+               ondragover="event.preventDefault();this.classList.add('drag-over')"
+               ondragleave="this.classList.remove('drag-over')"
+               ondrop="handleInvoiceDrop(event)"
+               style="border:2px dashed #0d6efd;border-radius:8px;padding:2.5rem 1rem;
+                      text-align:center;cursor:pointer;transition:border-color .2s,background .2s">
+            <i class="bi bi-file-earmark-text fs-2 text-primary d-block mb-2"></i>
+            <div class="text-muted">Drag &amp; drop the invoice PDF here, or <strong>click to browse</strong></div>
+            <div class="text-muted small mt-1">PDF only</div>
+          </div>
+          <input type="file" id="invFileInput" name="invoice_file" accept=".pdf"
+                 class="d-none" onchange="showInvoiceFile(this)">
+          <div id="invFileChosen" class="mt-2 small text-primary d-none">
+            <i class="bi bi-check-circle me-1"></i><span id="invFileName"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="invSubmitBtn" disabled>
+            <i class="bi bi-shield-check me-1"></i>Import &amp; Verify
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 {# Contract upload modal #}
@@ -1176,6 +1279,31 @@ function handleHhrDrop(e) {
     dt.items.add(files[0]);
     input.files = dt.files;
     showHhrFile(input);
+  }
+}
+
+function showInvoiceFile(input) {
+  const chosen = document.getElementById('invFileChosen');
+  const name   = document.getElementById('invFileName');
+  const btn    = document.getElementById('invSubmitBtn');
+  if (input.files && input.files.length) {
+    chosen.classList.remove('d-none');
+    name.textContent = input.files[0].name;
+    btn.disabled = false;
+  }
+}
+
+function handleInvoiceDrop(e) {
+  e.preventDefault();
+  const zone = document.getElementById('invDropZone');
+  if (zone) zone.classList.remove('drag-over');
+  const files = e.dataTransfer.files;
+  if (files.length) {
+    const input = document.getElementById('invFileInput');
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    showInvoiceFile(input);
   }
 }
 

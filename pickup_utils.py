@@ -6583,3 +6583,129 @@ def parse_hhr_pdf(file_bytes, fallback_year=None):
         result['error'] = str(e)
 
     return result
+
+
+# ── Closing-invoice parsing + HHR verification ────────────────────────────────
+
+def _ci_money(s):
+    """Parse a currency-ish string ('$1,102.90', 'USD 1102.9') to float, or None."""
+    if s is None:
+        return None
+    try:
+        return float(str(s).replace(',', '').replace('$', '').strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_commission_invoice_pdf(file_bytes):
+    """Parse a ConferenceDirect commission (closing) invoice PDF.
+
+    Returns a dict with: invoice_no, booking_id, invoice_date, payment_terms,
+    currency, hotel, description, commission_pct (decimal), commission_amount,
+    commissionable_revenue (implied = commission / pct), total, amount_due,
+    credits, event_start, event_end, error.
+    """
+    import io as _io, re as _re
+    r = {'error': None}
+    txt = ''
+    try:
+        import pdfplumber
+        with pdfplumber.open(_io.BytesIO(file_bytes)) as pdf:
+            for p in pdf.pages:
+                txt += (p.extract_text() or '') + '\n'
+    except Exception as e:
+        r['error'] = f'Could not read PDF: {e}'
+        return r
+    if not txt.strip():
+        r['error'] = 'No text found in invoice PDF.'
+        return r
+
+    def _find(pat, flags=0, grp=1):
+        m = _re.search(pat, txt, flags)
+        return m.group(grp).strip() if m else None
+
+    inv_no = _find(r'Invoice\s*No\.?\s*([0-9]+\s*-\s*[A-Za-z0-9]+)')
+    r['invoice_no']    = _re.sub(r'\s+', '', inv_no) if inv_no else None
+    r['booking_id']    = r['invoice_no'].split('-')[0] if r['invoice_no'] else None
+    r['invoice_date']  = _find(r'Date:\s*([\d/]+)')
+    r['payment_terms'] = _find(r'Payment Terms:\s*([^\n]+?)(?:\s{2,}|\n|$)')
+    r['currency']      = _find(r'Currency:\s*([A-Z]{3})') or 'USD'
+    # Bill-To hotel: first line after "Bill To"; trim the side-by-side "Remit To" column
+    _hotel = _find(r'Bill To.*?\n\s*([^\n]+)', _re.S)
+    if _hotel:
+        _hotel = _re.split(r'\s{2,}|\bConferenceDirect\b', _hotel)[0].strip()
+    r['hotel'] = _hotel
+    _pct = _find(r'at\s*(\d+(?:\.\d+)?)\s*%')
+    r['commission_pct'] = (float(_pct) / 100.0) if _pct else None
+    r['description'] = _find(r'^\s*\d+\s+(.+?)\s+\$[\d,]+\.\d{2}\s+\$[\d,]+\.\d{2}', _re.M)
+    r['billed_commission'] = _ci_money(_find(
+        r'commissionable revenue at[^\n]*?is\s*[A-Z]{0,3}\s*\$?([\d,]+\.?\d*)'))
+    r['total']      = _ci_money(_find(r'Total:\s*\$?([\d,]+\.\d{2})'))
+    r['amount_due'] = _ci_money(_find(r'Amount Due:\s*\$?([\d,]+\.\d{2})'))
+    r['credits']    = _ci_money(_find(r'Credit Memos?/Payments?:\s*\$?([\d,]+\.\d{2})'))
+    m = _re.search(r'Dates?:\s*([\d/]+)\s*to\s*([\d/]+)', txt)
+    if m:
+        r['event_start'], r['event_end'] = m.group(1), m.group(2)
+    else:
+        r['event_start'] = r['event_end'] = None
+
+    comm = r.get('total') or r.get('amount_due') or r.get('billed_commission')
+    r['commission_amount'] = comm
+    r['commissionable_revenue'] = (round(comm / r['commission_pct'], 2)
+                                   if (comm and r.get('commission_pct')) else None)
+    if not r['invoice_no'] or comm is None:
+        r['error'] = 'Could not read the invoice number or commission amount.'
+    return r
+
+
+def verify_invoice_against_hhr(invoice, hhr_facts, tol=1.00):
+    """Compare a parsed commission invoice to the HHR-derived expectation.
+
+    hhr_facts: {'final_pickup', 'rate', 'commission_pct', 'commissionable_revenue'}
+               (commissionable_revenue may be None → derived from pickup*rate).
+    Returns a result dict with status ('match' | 'mismatch' | 'no_hhr'),
+    expected vs billed figures, variance, and human-readable reasons.
+    """
+    res = {'status': 'no_hhr', 'reasons': [], 'tol': tol}
+
+    inv_comm = invoice.get('commission_amount')
+    inv_pct  = invoice.get('commission_pct')
+
+    pickup = hhr_facts.get('final_pickup')
+    rate   = hhr_facts.get('rate')
+    hpct   = hhr_facts.get('commission_pct') or inv_pct
+    h_rev  = hhr_facts.get('commissionable_revenue')
+    if h_rev is None and pickup and rate:
+        h_rev = round(float(pickup) * float(rate), 2)
+    h_comm = round(h_rev * hpct, 2) if (h_rev is not None and hpct) else None
+
+    res.update({
+        'invoice_commission': inv_comm,
+        'invoice_pct': inv_pct,
+        'invoice_commissionable_revenue': invoice.get('commissionable_revenue'),
+        'hhr_final_pickup': pickup,
+        'hhr_rate': rate,
+        'hhr_commission_pct': hpct,
+        'hhr_commissionable_revenue': h_rev,
+        'hhr_expected_commission': h_comm,
+        'variance': (round(inv_comm - h_comm, 2) if (inv_comm is not None and h_comm is not None) else None),
+    })
+
+    if h_comm is None or inv_comm is None:
+        res['reasons'].append('No Final History / rate on file to verify against.')
+        res['status'] = 'no_hhr'
+        return res
+
+    amt_ok = abs(res['variance']) <= tol
+    pct_ok = (inv_pct is None or hpct is None or abs(inv_pct - hpct) < 1e-9)
+    if not amt_ok:
+        res['reasons'].append(
+            f"Commission differs by ${res['variance']:,.2f} "
+            f"(invoice ${inv_comm:,.2f} vs HHR-expected ${h_comm:,.2f}).")
+    if not pct_ok:
+        res['reasons'].append(
+            f"Commission rate differs (invoice {inv_pct*100:.1f}% vs HHR {hpct*100:.1f}%).")
+    res['status'] = 'match' if (amt_ok and pct_ok) else 'mismatch'
+    if res['status'] == 'match':
+        res['reasons'].append('Invoice commission and rate match the HHR.')
+    return res

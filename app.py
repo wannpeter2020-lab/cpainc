@@ -4865,6 +4865,31 @@ def ensure_pickup_tables():
             file_data BLOB NOT NULL,
             upload_date TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS closing_invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config_id INTEGER,
+            booking_id TEXT,
+            invoice_no TEXT,
+            invoice_date TEXT,
+            hotel TEXT,
+            description TEXT,
+            currency TEXT,
+            commission_pct REAL,
+            commission_amount REAL,
+            commissionable_revenue REAL,
+            hhr_final_pickup REAL,
+            hhr_rate REAL,
+            hhr_commission_pct REAL,
+            hhr_commissionable_revenue REAL,
+            hhr_expected_commission REAL,
+            verification_status TEXT,
+            variance REAL,
+            verify_notes TEXT,
+            confirmed INTEGER DEFAULT 0,
+            filename TEXT,
+            file_data BLOB,
+            uploaded_at TEXT DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS client_contacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -8853,7 +8878,13 @@ def pickup_event(cid):
             (config['booking_id'],)
         ).fetchone()
 
+    closing_invoices = [dict(r) for r in db.execute(
+        'SELECT id, invoice_no, invoice_date, commission_amount, currency, '
+        'verification_status, variance, confirmed, uploaded_at '
+        'FROM closing_invoices WHERE config_id=? ORDER BY id DESC', (cid,)).fetchall()]
+
     return render_template('pickup_event.html',
+                           closing_invoices=closing_invoices,
                            config=config, weekly=weekly_display, historical_years=historical_years,
                            pace_comparison=pace_comparison,
                            rooming=rooming,
@@ -12067,6 +12098,150 @@ def pickup_hhr_download(cid):
     stored_name = hhr['filename'] or ('housing_history.pdf' if is_pdf else 'housing_history.xlsx')
     return send_file(_io.BytesIO(file_bytes),
                      download_name=stored_name,
+                     as_attachment=True)
+
+
+# ── Closing invoice: import, verify against HHR, store, download ──────────────
+
+def _gather_hhr_commission_facts(db, config, invoice=None):
+    """Best-available HHR facts to verify a commission invoice against:
+    final pickup (room nights), contracted rate, commission %, and the
+    actualized commissionable revenue (from an Excel HHR when present)."""
+    cid = config['id']
+    bk  = config['booking_id']
+    facts = {'final_pickup': None, 'rate': config['contracted_rate'],
+             'commission_pct': None, 'commissionable_revenue': None}
+
+    fh = db.execute(
+        "SELECT total_rooms FROM pickup_weekly WHERE config_id=? AND label='Final History' "
+        "ORDER BY id DESC LIMIT 1", (cid,)).fetchone()
+    if fh and fh['total_rooms']:
+        facts['final_pickup'] = float(fh['total_rooms'])
+    if facts['final_pickup'] is None and bk:
+        pk = db.execute('SELECT ActualPickup ap FROM Pickup WHERE BookingID=?', (bk,)).fetchone()
+        if pk and pk['ap']:
+            try:    facts['final_pickup'] = float(pk['ap'])
+            except (ValueError, TypeError): pass
+
+    if bk:
+        try:
+            rp = db.execute(
+                'SELECT CommissionPercent cp FROM ReportPipeline '
+                'WHERE CAST(BookingId AS INTEGER)=CAST(? AS INTEGER)', (bk,)).fetchone()
+            if rp and rp['cp']:
+                facts['commission_pct'] = float(rp['cp'])
+        except Exception:
+            pass
+    if not facts['commission_pct'] and invoice:
+        facts['commission_pct'] = invoice.get('commission_pct')
+
+    if bk:
+        hhr = db.execute(
+            'SELECT file_data FROM housing_history_files WHERE booking_id=? ORDER BY id DESC LIMIT 1',
+            (bk,)).fetchone()
+        if hhr and hhr['file_data']:
+            raw = bytes(hhr['file_data'])
+            if raw[:4] != b'%PDF':
+                try:
+                    from pickup_utils import parse_hhr_excel
+                    st = parse_hhr_excel(raw)
+                    if st.get('room_revenue'):
+                        facts['commissionable_revenue'] = float(st['room_revenue'])
+                except Exception:
+                    pass
+    return facts
+
+
+@app.route('/pickup/<int:cid>/invoice/import', methods=['POST'])
+def pickup_invoice_import(cid):
+    """Import a closing (commission) invoice PDF, verify it against the HHR,
+    and store it. Matches save straight away; mismatches land as 'pending'
+    for the user to accept or discard."""
+    from pickup_utils import parse_commission_invoice_pdf, verify_invoice_against_hhr
+    db = get_db()
+    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
+    if not config:
+        flash('Event not found.', 'error')
+        return redirect(url_for('pickup_dashboard'))
+
+    f = request.files.get('invoice_file')
+    if not f or not f.filename:
+        flash('No file uploaded.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    if not f.filename.lower().endswith('.pdf'):
+        flash('Please upload the closing invoice as a PDF.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    file_bytes = f.read()
+    inv = parse_commission_invoice_pdf(file_bytes)
+    if inv.get('error'):
+        flash(f'Could not read invoice: {inv["error"]}', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+
+    facts  = _gather_hhr_commission_facts(db, config, inv)
+    result = verify_invoice_against_hhr(inv, facts)
+    confirmed = 1 if result['status'] == 'match' else 0
+
+    cur = db.execute(
+        '''INSERT INTO closing_invoices
+           (config_id, booking_id, invoice_no, invoice_date, hotel, description, currency,
+            commission_pct, commission_amount, commissionable_revenue,
+            hhr_final_pickup, hhr_rate, hhr_commission_pct, hhr_commissionable_revenue,
+            hhr_expected_commission, verification_status, variance, verify_notes,
+            confirmed, filename, file_data)
+           VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?)''',
+        (cid, inv.get('booking_id') or config['booking_id'], inv.get('invoice_no'),
+         inv.get('invoice_date'), inv.get('hotel'), inv.get('description'), inv.get('currency'),
+         inv.get('commission_pct'), inv.get('commission_amount'), inv.get('commissionable_revenue'),
+         facts.get('final_pickup'), facts.get('rate'), result.get('hhr_commission_pct'),
+         result.get('hhr_commissionable_revenue'), result.get('hhr_expected_commission'),
+         result['status'], result.get('variance'), ' '.join(result.get('reasons') or []),
+         confirmed, f.filename, file_bytes))
+    iid = cur.lastrowid
+    db.commit()
+    return redirect(url_for('pickup_invoice_result', cid=cid, iid=iid))
+
+
+@app.route('/pickup/<int:cid>/invoice/<int:iid>')
+def pickup_invoice_result(cid, iid):
+    db = get_db()
+    config = db.execute('SELECT * FROM pickup_config WHERE id=?', (cid,)).fetchone()
+    inv = db.execute('SELECT * FROM closing_invoices WHERE id=? AND config_id=?', (iid, cid)).fetchone()
+    if not config or not inv:
+        flash('Invoice not found.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    return render_template('pickup_invoice_result.html', config=dict(config), inv=dict(inv))
+
+
+@app.route('/pickup/<int:cid>/invoice/<int:iid>/accept', methods=['POST'])
+def pickup_invoice_accept(cid, iid):
+    db = get_db()
+    db.execute('UPDATE closing_invoices SET confirmed=1 WHERE id=? AND config_id=?', (iid, cid))
+    db.commit()
+    flash('Invoice accepted and saved despite the variance — available to download anytime.', 'success')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/invoice/<int:iid>/discard', methods=['POST'])
+def pickup_invoice_discard(cid, iid):
+    db = get_db()
+    db.execute('DELETE FROM closing_invoices WHERE id=? AND config_id=?', (iid, cid))
+    db.commit()
+    flash('Invoice discarded — nothing was saved.', 'info')
+    return redirect(url_for('pickup_event', cid=cid))
+
+
+@app.route('/pickup/<int:cid>/invoice/<int:iid>/download')
+def pickup_invoice_download(cid, iid):
+    import io as _io
+    db = get_db()
+    inv = db.execute('SELECT filename, file_data FROM closing_invoices WHERE id=? AND config_id=?',
+                     (iid, cid)).fetchone()
+    if not inv or not inv['file_data']:
+        flash('Invoice file not found.', 'error')
+        return redirect(url_for('pickup_event', cid=cid))
+    return send_file(_io.BytesIO(bytes(inv['file_data'])),
+                     download_name=inv['filename'] or 'closing_invoice.pdf',
                      as_attachment=True)
 
 

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Invoice Verification — {{ inv['invoice_no'] }}{% endblock %}
+{% block content %}
+
+{% set status = inv['verification_status'] %}
+{% set is_match = status == 'match' %}
+{% set is_mismatch = status == 'mismatch' %}
+{% set cur = inv['currency'] or 'USD' %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-receipt me-2"></i>Closing Invoice Verification</h4>
+  <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i>Back to Event
+  </a>
+</div>
+
+{# ── Status banner ─────────────────────────────────────────────────────────── #}
+{% if is_match %}
+<div class="alert alert-success d-flex align-items-center">
+  <i class="bi bi-check-circle-fill fs-4 me-3"></i>
+  <div>
+    <strong>Verified — the invoice matches the HHR.</strong>
+    The commission and rate reconcile with the housing history. Saved automatically.
+  </div>
+</div>
+{% elif is_mismatch %}
+<div class="alert alert-warning d-flex align-items-center">
+  <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+  <div>
+    <strong>Does not match the HHR — review needed.</strong>
+    This invoice is <em>not saved yet</em>. Review the figures below, then accept or discard.
+  </div>
+</div>
+{% else %}
+<div class="alert alert-secondary d-flex align-items-center">
+  <i class="bi bi-question-circle-fill fs-4 me-3"></i>
+  <div>
+    <strong>Could not verify automatically.</strong>
+    {{ inv['verify_notes'] or 'No Final History / rate on file to check against.' }}
+    The invoice is held pending your review.
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+  {# ── Invoice side ──────────────────────────────────────────────────────── #}
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-file-earmark-text me-2"></i>From the Invoice</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><td class="text-muted">Invoice #</td><td class="fw-semibold">{{ inv['invoice_no'] or '—' }}</td></tr>
+          <tr><td class="text-muted">Date</td><td>{{ inv['invoice_date'] or '—' }}</td></tr>
+          <tr><td class="text-muted">Hotel</td><td>{{ inv['hotel'] or '—' }}</td></tr>
+          <tr><td class="text-muted">Description</td><td>{{ inv['description'] or '—' }}</td></tr>
+          <tr><td class="text-muted">Commission rate</td>
+              <td>{{ '%.1f%%' % (inv['commission_pct'] * 100) if inv['commission_pct'] is not none else '—' }}</td></tr>
+          <tr><td class="text-muted">Commissionable revenue</td>
+              <td>{{ '%s $%s' % (cur, '{:,.2f}'.format(inv['commissionable_revenue'])) if inv['commissionable_revenue'] is not none else '—' }}</td></tr>
+          <tr class="table-light"><td class="fw-semibold">Commission billed</td>
+              <td class="fw-semibold">{{ '%s $%s' % (cur, '{:,.2f}'.format(inv['commission_amount'])) if inv['commission_amount'] is not none else '—' }}</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ── HHR side ──────────────────────────────────────────────────────────── #}
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-clipboard-check me-2"></i>From the Housing History (HHR)</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><td class="text-muted">Final pickup</td>
+              <td>{{ '%g room nights' % inv['hhr_final_pickup'] if inv['hhr_final_pickup'] is not none else '—' }}</td></tr>
+          <tr><td class="text-muted">Contracted rate</td>
+              <td>{{ '$%s' % '{:,.2f}'.format(inv['hhr_rate']) if inv['hhr_rate'] is not none else '—' }}</td></tr>
+          <tr><td class="text-muted">Commission rate</td>
+              <td>{{ '%.1f%%' % (inv['hhr_commission_pct'] * 100) if inv['hhr_commission_pct'] is not none else '—' }}</td></tr>
+          <tr><td class="text-muted">Commissionable revenue</td>
+              <td>{{ '%s $%s' % (cur, '{:,.2f}'.format(inv['hhr_commissionable_revenue'])) if inv['hhr_commissionable_revenue'] is not none else '—' }}</td></tr>
+          <tr class="table-light"><td class="fw-semibold">Expected commission</td>
+              <td class="fw-semibold">{{ '%s $%s' % (cur, '{:,.2f}'.format(inv['hhr_expected_commission'])) if inv['hhr_expected_commission'] is not none else '—' }}</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Reconciliation line ───────────────────────────────────────────────────── #}
+<div class="card mt-3">
+  <div class="card-body d-flex flex-wrap align-items-center justify-content-between">
+    <div>
+      <span class="text-muted me-2">Variance (invoice − HHR):</span>
+      {% if inv['variance'] is not none %}
+        <span class="fw-bold fs-5 {{ 'text-success' if is_match else 'text-danger' }}">
+          {{ '%s$%s' % ('−' if inv['variance'] < 0 else '', '{:,.2f}'.format(inv['variance']|abs)) }}
+        </span>
+      {% else %}<span class="text-muted">—</span>{% endif %}
+    </div>
+    <div class="text-muted small">{{ inv['verify_notes'] }}</div>
+  </div>
+</div>
+
+{# ── Actions ───────────────────────────────────────────────────────────────── #}
+<div class="mt-3 d-flex gap-2">
+  <a href="{{ url_for('pickup_invoice_download', cid=config['id'], iid=inv['id']) }}"
+     class="btn btn-outline-primary">
+    <i class="bi bi-download me-1"></i>Download Invoice PDF
+  </a>
+
+  {% if inv['confirmed'] %}
+    <a href="{{ url_for('pickup_event', cid=config['id']) }}" class="btn btn-success">
+      <i class="bi bi-check2 me-1"></i>Done
+    </a>
+  {% else %}
+    <form method="POST" action="{{ url_for('pickup_invoice_accept', cid=config['id'], iid=inv['id']) }}" class="d-inline">
+      <button type="submit" class="btn btn-warning"
+              onclick="return confirm('Save this invoice even though it does not match the HHR?');">
+        <i class="bi bi-save me-1"></i>Accept &amp; Save Anyway
+      </button>
+    </form>
+    <form method="POST" action="{{ url_for('pickup_invoice_discard', cid=config['id'], iid=inv['id']) }}" class="d-inline">
+      <button type="submit" class="btn btn-outline-danger"
+              onclick="return confirm('Discard this invoice? It will not be saved.');">
+        <i class="bi bi-trash me-1"></i>Discard
+      </button>
+    </form>
+  {% endif %}
+</div>
+
+{% endblock %}
