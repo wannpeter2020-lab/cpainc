@@ -6298,6 +6298,64 @@ def parse_columnar_pickup_xlsx(file_bytes, filename=''):
                     fmt = 'B'
                     break
 
+    # ── Format C: vertical layout ─────────────────────────────────────────────
+    # Dates run DOWN a column (one per row, often with a day-name column beside
+    # them) and a "PICKED UP" column holds the per-night counts.
+    if not date_col_map:
+        def _cell_to_iso(v):
+            if v is None:
+                return None
+            if hasattr(v, 'year') and hasattr(v, 'month') and hasattr(v, 'day'):
+                return f'{v.year}-{v.month:02d}-{v.day:02d}'
+            s = str(v).strip()
+            m = re.match(r'^(20\d{2})-(\d{1,2})-(\d{1,2})', s)
+            if m:
+                return f'{int(m.group(1))}-{int(m.group(2)):02d}-{int(m.group(3)):02d}'
+            m = re.match(r'^(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?$', s)
+            if m:
+                mo, dy = int(m.group(1)), int(m.group(2))
+                yr = int(m.group(3)) if m.group(3) else year_a
+                if yr < 100:
+                    yr += 2000
+                return f'{yr}-{mo:02d}-{dy:02d}'
+            return None
+
+        ncols = max((len(r) for r in all_rows), default=0)
+        best_dc, best_dates = None, {}
+        for col_idx in range(ncols):
+            col_dates = {}
+            for row_idx, row in enumerate(all_rows):
+                if col_idx < len(row):
+                    iso = _cell_to_iso(row[col_idx])
+                    if iso:
+                        col_dates[row_idx] = iso
+            if len(col_dates) >= 3 and len(col_dates) > len(best_dates):
+                best_dc, best_dates = col_idx, col_dates
+
+        if best_dc is not None:
+            first_date_row = min(best_dates)
+            pc = None
+            for row in all_rows[:first_date_row]:
+                for col_idx, cell in enumerate(row):
+                    if not cell:
+                        continue
+                    lc = str(cell).strip().lower()
+                    if 'picked up' in lc or lc in ('pickup', 'picked', 'pick up'):
+                        if col_idx >= best_dc and (pc is None or col_idx < pc):
+                            pc = col_idx
+            if pc is not None:
+                vals = {}
+                for row_idx, iso in best_dates.items():
+                    row = all_rows[row_idx]
+                    cell = row[pc] if pc < len(row) else None
+                    try:
+                        vals[iso] = int(float(str(cell if cell not in (None, '') else 0)))
+                    except Exception:
+                        vals[iso] = 0
+                if vals:
+                    pairs = [{'date': d, 'count': c} for d, c in sorted(vals.items())]
+                    return {'pairs': pairs, 'text': '', 'source': 'Pickup by night', 'error': None}
+
     if not date_col_map:
         return {'pairs': [], 'text': '', 'source': '',
                 'error': 'No date header row found (tried MM/DD and YYYY-MM-DD formats)'}
