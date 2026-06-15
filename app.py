@@ -294,18 +294,19 @@ _TEAM_SUPPRESS_SQL = (
 )
 
 def effective_split(associate, account, country, account_splits, default_split, kristin_split, kristin_cut):
-    """Net split for a booking row, accounting for Kristin House structure."""
+    """Net split for a booking row. Commission waterfall: Team 60% / Kristin 10% /
+    CD 30%. The team member keeps their full account/default split — Kristin's 10%
+    cut comes out of CD's share, not the team member's. Kristin's own bookings use
+    kristin_split (70%)."""
     if associate and associate.strip().lower() == 'kristin house':
         return kristin_split
-    base = split_for_account(account, country, account_splits, default_split)
-    return max(0.0, base - kristin_cut)
+    return split_for_account(account, country, account_splits, default_split)
 
 def split_label(associate, split, default_split, kristin_split, kristin_cut):
     """Human-readable label for the split column."""
     if associate and associate.strip().lower() == 'kristin house':
         return f"Kristin {split*100:.0f}%"
-    base = split + kristin_cut   # reconstruct gross before Kristin cut
-    return f"{base*100:.0f}% − {kristin_cut*100:.0f}% = {split*100:.0f}%"
+    return f"{split*100:.0f}%"
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
