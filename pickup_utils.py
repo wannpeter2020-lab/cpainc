@@ -705,11 +705,13 @@ def _ai_parse_rooming_list_vision(images, api_key):
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
+        # Stream with a large token budget + retries — see _ai_parse_rooming_list.
+        with client.with_options(max_retries=4).messages.stream(
             model='claude-opus-4-5',
-            max_tokens=8192,
-            messages=[{'role': 'user', 'content': content}]
-        )
+            max_tokens=32000,
+            messages=[{'role': 'user', 'content': content}],
+        ) as stream:
+            message = stream.get_final_message()
         response_text = message.content[0].text.strip()
         response_text = re.sub(r'^```[a-z]*\s*', '', response_text)
         response_text = re.sub(r'\s*```$', '', response_text)
@@ -800,16 +802,20 @@ def _ai_parse_rooming_list(all_text):
         "- Convert all dates to YYYY-MM-DD regardless of the source format.\n"
         "- If a line has an obvious continuation (e.g. 'Res. Notes:'), skip it.\n\n"
         "Rooming list text:\n"
-        + all_text[:12000]   # ~3k tokens; enough for 100+ guests
+        + all_text[:200000]   # send the full list — large rooming lists run to many pages
     )
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
+        # Stream with a large token budget: a big rooming list (hundreds of
+        # guests) can exceed an 8K output and time out a non-streamed request;
+        # streaming + SDK retries also rides out transient connection drops.
+        with client.with_options(max_retries=4).messages.stream(
             model='claude-opus-4-5',
-            max_tokens=8192,
-            messages=[{'role': 'user', 'content': prompt}]
-        )
+            max_tokens=32000,
+            messages=[{'role': 'user', 'content': prompt}],
+        ) as stream:
+            message = stream.get_final_message()
         response_text = message.content[0].text.strip()
         # Strip markdown code fences if the model wrapped the JSON
         response_text = re.sub(r'^```[a-z]*\s*', '', response_text)
