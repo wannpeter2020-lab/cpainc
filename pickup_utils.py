@@ -3561,6 +3561,28 @@ def parse_hhr_excel(file_bytes):
                 if d and not stats.get('report_date'):
                     stats['report_date'] = d
 
+    # "Total Commissionable Revenue" is the hotel's authoritative room revenue
+    # (final pickup x avg rate — includes audit pickup) and the basis for the
+    # 10% commission. In the Cvent / Holiday-Inn layout it is a column header
+    # with its value in the cell directly BELOW it, not beside it — so the
+    # generic "label then value-to-the-right" scan above misses it and grabs the
+    # smaller inside-block "Total Actualized Pickup Revenue" instead. Prefer the
+    # commissionable total whenever it is present.
+    for _r in range(1, ws.max_row + 1):
+        _found = False
+        for _c in range(1, ws.max_column + 1):
+            if 'total commissionable revenue' in _sv(ws.cell(_r, _c).value).lower():
+                for (_dr, _dc) in ((1, 0), (0, 1), (0, 2), (2, 0)):
+                    _v = _num(ws.cell(_r + _dr, _c + _dc).value)
+                    if _v and _v > 0:
+                        stats['commissionable_revenue'] = _v
+                        stats['room_revenue'] = _v
+                        _found = True
+                        break
+                break
+        if _found:
+            break
+
     stats['contracted_block']     = contracted_block
     stats['final_pickup_by_night'] = final_pickup_by_night
 
