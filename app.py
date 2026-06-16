@@ -14197,6 +14197,10 @@ def rfp_upload_contract_confirm(rid):
             critical_dates_json = ?,
             status              = CASE WHEN status NOT IN ('contracted','dead')
                                        THEN 'contracted' ELSE status END,
+            -- Contracting a deal files it away: archive it so it leaves the
+            -- Master/Active lists and lands under the Contracted tab. (A dead
+            -- RFP is left as-is.)
+            archived            = CASE WHEN status='dead' THEN archived ELSE 1 END,
             updated_at          = datetime('now')
         WHERE id=?
     ''', (start_date, end_date, peak_rooms, total_room_nights,
@@ -14316,7 +14320,7 @@ def rfp_upload_contract_confirm(rid):
             cs_flash = 'Cost Savings reports updated with contract values.'
 
     db.commit()
-    msg = 'Contract saved — RFP and hotel updated.'
+    msg = 'Contract saved — RFP marked Contracted and moved to the Contracted tab.'
     if pickup_updated:
         msg += ' Pickup tracking updated with real block data.'
     flash(msg, 'success')
