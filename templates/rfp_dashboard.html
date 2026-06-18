@@ -81,6 +81,7 @@
       <table class="table table-bordered table-sm mb-0 rfp-master-table" style="min-width:2400px;">
         <thead class="table-light" style="position:sticky;top:38px;z-index:5;">
           <tr>
+            <th style="min-width:120px;">Cvent #</th>
             <th style="min-width:140px;">Customer</th>
             <th style="min-width:160px;">Meeting Name</th>
             <th style="min-width:90px;">Status</th>
@@ -106,7 +107,8 @@
           {% set r = mr.rfp %}
           {% set h = mr.hotel %}
           {% set cl = mr.checklist %}
-          <tr data-search="{{ ((r['client_org'] or '') ~ ' ' ~ (r['event_name'] or '') ~ ' ' ~ (r['rfp_name'] or '') ~ ' ' ~ (r['booking_id'] or ''))|lower }}">
+          <tr data-search="{{ ((r['client_org'] or '') ~ ' ' ~ (r['event_name'] or '') ~ ' ' ~ (r['rfp_name'] or '') ~ ' ' ~ (r['booking_id'] or '') ~ ' ' ~ (r['rfp_code'] or ''))|lower }}">
+            <td class="text-muted" style="font-family:monospace;font-size:0.78rem;white-space:nowrap;">{{ r['rfp_code'] or '—' }}</td>
             <td class="fw-semibold">{{ r['client_org'] or '—' }}</td>
             <td>{{ r['event_name'] or r['rfp_name'] or '—' }}</td>
             <td><span class="badge bg-{{ mr.badge }}">{{ mr.badge_label }}</span></td>
