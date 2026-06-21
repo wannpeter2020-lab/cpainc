@@ -447,6 +447,7 @@ DEFAULT_IHG_MAPPING = {
     'Event Start Date':                 'event_start',
     'Event End Date':                   'event_end',
     'Total Room Nights':                'total_room_nights',
+    'Date Contract Signed':             'contract_signature_date',
 }
 
 DEFAULT_OMNI_MAPPING = {
