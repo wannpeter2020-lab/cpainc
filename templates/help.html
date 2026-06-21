@@ -1779,54 +1779,107 @@ flowchart TD
   <!-- ── Cost Savings Analysis ──────────────────────────────── -->
   <div class="section" id="cost-savings">
     <div class="section-title"><i class="bi bi-piggy-bank"></i> Cost Savings Analysis</div>
-    <p>The <strong>Cost Savings Analysis</strong> tool lets you document and report the financial value you negotiated for a client at each hotel — rate discounts, complimentary rooms, reduced meeting room rental, F&amp;B concessions, and any other custom savings line items. Reports are tied to RFP hotel responses and can be exported to Excel for client presentations.</p>
+
+    <!-- VIDEO: Replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Cost Savings Analysis — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
+
+    <p>The <strong>Cost Savings Analysis</strong> tool documents and reports the financial value you negotiated for a client — rate discounts, complimentary rooms, meeting room concessions, F&amp;B savings, attrition improvements, and any other custom items. Reports are tied to RFP hotel responses and export to a formatted Excel file for client presentations. All dollar totals calculate live as you type.</p>
 
     <h3>Accessing Cost Savings</h3>
-    <p>There are two ways to get to cost savings reports:</p>
     <ul>
-      <li><strong>From the navigation bar:</strong> Click <strong>Reports → Cost Savings Analysis</strong> to see the full dashboard of all reports across all meetings.</li>
-      <li><strong>From an RFP:</strong> Open an RFP, scroll to a hotel response, and click the <strong>Cost Savings</strong> button next to that hotel. This takes you directly to that hotel's cost savings page.</li>
+      <li><strong>Reports → Cost Savings Analysis</strong> — the full dashboard showing all reports across all meetings</li>
+      <li><strong>From an RFP</strong> — open any RFP to see a card grid with one card per hotel. Each card shows the hotel's savings total and status. Click <strong>Open</strong> to edit an existing report or <strong>Create Report</strong> to start a new one for that hotel.</li>
     </ul>
 
     <h3>Creating a Report</h3>
     <div class="steps">
-      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the RFP and go to the hotel response</strong><p>Navigate to <strong>RFP Process</strong>, find the RFP, and click into the hotel whose savings you want to document.</p></div></div>
-      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "Cost Savings"</strong><p>On the RFP hotel page, click the <strong>Cost Savings</strong> button. If no report exists yet, one is created automatically using the hotel's proposed rate as the starting rate.</p></div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Fill in the report fields</strong><p>The report opens with several sections pre-populated from the RFP data. Complete each section described below.</p></div></div>
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the RFP</strong><p>Navigate to <strong>RFP Process</strong>, find the RFP, and open it. You'll see a card for each hotel on the RFP showing its current savings total and status (Draft, Final, or No Report).</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "Create Report" or "Open"</strong><p>Click <strong>Create Report</strong> on any hotel card that doesn't have a report yet. The form opens with meeting details pre-filled from the RFP.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Fill in the report sections</strong><p>Complete each section. The grand total banner at the top updates live as you enter numbers.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Set status and Save</strong><p>Set <strong>Status</strong> to <em>Draft</em> while in progress, <em>Final</em> when ready to share with the client. Click <strong>Save</strong>.</p></div></div>
     </div>
 
     <h3>Report Sections</h3>
+
+    <h4>Meeting Details</h4>
+    <p>Meeting name, hotel name, meeting dates, lead date requested, booked date, hours worked, hotel brand, and status (Draft / Final). Pre-filled from the RFP where available.</p>
+
+    <h4>Guest Rooms</h4>
     <table class="info-table">
-      <tr><th>Section</th><th>What to Enter</th></tr>
-      <tr><td><strong>Meeting Info</strong></td><td>Meeting name, hotel name, meeting dates, lead date requested, and the date the contract was booked. These are pre-filled from the RFP.</td></tr>
-      <tr><td><strong>Guest Room Rate</strong></td><td>The rack rate (hotel's standard rate) and the contracted group rate. The system calculates the savings per night and multiplies by total room nights.</td></tr>
-      <tr><td><strong>Staff Rate</strong></td><td>If a separate staff room rate was negotiated, enter the published group rate and the contracted staff rate with total nights.</td></tr>
-      <tr><td><strong>Comp Policy</strong></td><td>The industry standard comp ratio and what you negotiated (e.g. 1 comp per 40 rooms paid vs. 1 per 50). The savings value is calculated automatically.</td></tr>
-      <tr><td><strong>Meeting Room Rental</strong></td><td>Initial quote vs. what was negotiated. Enter both values; the difference is calculated as savings.</td></tr>
-      <tr><td><strong>F&amp;B Minimum</strong></td><td>Initial F&amp;B minimum vs. negotiated minimum. Savings are calculated from the difference.</td></tr>
-      <tr><td><strong>Hotel Brand / Points</strong></td><td>Select the hotel chain. The system calculates approximate planner points value based on the contracted rate and room nights.</td></tr>
-      <tr><td><strong>Hours Worked</strong></td><td>Total hours you spent negotiating this contract — used for your value summary.</td></tr>
-      <tr><td><strong>Custom Line Items</strong></td><td>Add any additional savings — complimentary suites, waived resort fees, welcome amenities, rebates, etc. Each item has a name and dollar value.</td></tr>
+      <tr><th>Field</th><th>What to Enter</th></tr>
+      <tr><td><strong>Rack Rate (Proposal)</strong></td><td>The hotel's published / standard rate from the proposal</td></tr>
+      <tr><td><strong>Contracted Rate</strong></td><td>The rate you negotiated in the signed contract</td></tr>
+      <tr><td><strong>Total Guestrooms Contracted</strong></td><td>Total room nights in the block</td></tr>
+    </table>
+    <p>Savings per room and total guest room savings calculate automatically.</p>
+
+    <h4>Staff Rooms</h4>
+    <p>If a separate staff rate was negotiated, enter the group room rate from the proposal, the contracted staff rate, and total staff room nights. Savings calculate automatically.</p>
+
+    <h4>Complimentary Rooms</h4>
+    <p>Enter the industry standard comp ratio (default: 1 per 50) and your negotiated comp ratio (e.g. 1 per 40). The system calculates the dollar value of the improved comp policy based on the contracted rate and room nights.</p>
+
+    <h4>Meeting Room &amp; F&amp;B</h4>
+    <p>Two rows — Meeting Room Rental and F&amp;B Minimum. For each, enter the initial quote and what you negotiated. The savings column (Initial − Negotiated) calculates automatically.</p>
+
+    <h4>Other Cost Savings Elements</h4>
+    <p>A flexible line-item table for any additional savings — rebates, waived fees, complimentary suites, welcome amenities, transportation, AV concessions, etc. Each row has:</p>
+    <table class="info-table">
+      <tr><th>Column</th><th>Purpose</th></tr>
+      <tr><td><strong>Item</strong></td><td>Name of the concession or savings item</td></tr>
+      <tr><td><strong>Calc Type</strong></td><td>How the savings are calculated (see table below)</td></tr>
+      <tr><td><strong>Standard $</strong></td><td>The hotel's standard / rack price for this item</td></tr>
+      <tr><td><strong>Negotiated $</strong></td><td>What you negotiated</td></tr>
+      <tr><td><strong>Qty / %</strong></td><td>Quantity, nights, or percentage depending on the calc type</td></tr>
+      <tr><td><strong>Savings</strong></td><td>Auto-calculated, shown in green (or red if negative)</td></tr>
+      <tr><td><strong>Notes</strong></td><td>Any notes on this item</td></tr>
     </table>
 
-    <h3>Auto-Extracting from a Proposal or Contract</h3>
-    <p>Instead of manually entering rates, you can upload a document and have the AI extract the numbers:</p>
-    <ul>
-      <li><strong>Extract from Proposal:</strong> Upload the hotel's original proposal PDF. The AI reads the rack rate, proposed group rate, meeting room quote, and F&amp;B minimum.</li>
-      <li><strong>Extract from Contract:</strong> Upload the signed contract PDF. The AI reads the contracted rates and any negotiated concessions. If the pickup card already has a contract uploaded, the system can pull from that.</li>
-    </ul>
-    <p>After extraction, review the pre-filled values — always verify that the numbers match your documents before saving.</p>
+    <p>Click <strong>Add Item</strong> to add a new row. Click the trash icon on any row to remove it (a confirmation prompt appears).</p>
 
-    <h3>Saving and Finalizing</h3>
-    <p>Click <strong>Save Report</strong> at any time to save your progress. Reports can have a status of <em>Draft</em> or <em>Final</em> — set it to Final when the report is ready to share with the client. The grand total savings is displayed prominently on the report and on the dashboard.</p>
+    <h4>Calc Type Options</h4>
+    <table class="info-table">
+      <tr><th>Calc Type</th><th>Formula / Behaviour</th></tr>
+      <tr><td><strong>Simple</strong></td><td>(Standard $ − Negotiated $) × Qty — standard dollar-per-unit savings</td></tr>
+      <tr><td><strong>Attrition</strong></td><td>Calculates the dollar value of an improved attrition clause: Contracted Rate × Room Nights × (90% minus your Contracted Attrition %). Enter your attrition % in the Qty field.</td></tr>
+      <tr><td><strong>Points</strong></td><td>Calculates the dollar value of planner loyalty points based on the hotel brand's point value, the contracted rate, room nights, and negotiated meeting room cost</td></tr>
+      <tr><td><strong>Note Only</strong></td><td>No calculation — item appears in the report as a descriptive note with no dollar value</td></tr>
+      <tr><td><strong>Risk Mitigation</strong></td><td>No dollar savings — item is placed in the separate <strong>Mitigated Risk</strong> section of the report (see below)</td></tr>
+    </table>
+
+    <h4>Mitigated Risk</h4>
+    <p>Items with Calc Type = <strong>Risk Mitigation</strong> (or added directly via the <strong>Add Risk Item</strong> button) appear in a separate Mitigated Risk section. These are contractual protections you negotiated that have no direct dollar value but reduce the client's risk — for example: "No attrition penalty if group picks up 80%", "Force majeure clause added", "Cancellation fee waived for government shutdown". They appear in their own section of the exported Excel file, clearly separated from the dollar savings.</p>
+
+    <h3>Auto-fill from Proposal or Contract</h3>
+    <p>Instead of entering rates manually, use the AI auto-fill buttons at the top of the report:</p>
+    <table class="info-table">
+      <tr><th>Button</th><th>What It Does</th></tr>
+      <tr><td><strong>Auto-fill from Proposal</strong></td><td>Re-reads the hotel's proposal document (already on file) and overwrites the proposal-side fields — rack rate, proposed group rate, meeting room quote, F&amp;B minimum</td></tr>
+      <tr><td><strong>Auto-fill from Contract</strong></td><td>Re-reads the signed contract (already uploaded to the pickup card) and overwrites the contracted-rate fields</td></tr>
+    </table>
+    <p>A confirmation prompt appears before overwriting. Always review the auto-filled values to confirm they match your documents.</p>
 
     <h3>Exporting to Excel</h3>
-    <p>Click <strong>Export to Excel</strong> on any report to download a formatted spreadsheet ready for client presentation. The spreadsheet includes all sections, savings calculations, and a grand total. If an RFP has multiple hotels, you can also export all of them in a single workbook from the RFP cost savings page.</p>
+    <ul>
+      <li><strong>Single report:</strong> Click <strong>Export</strong> on the report edit form or from the dashboard row. Downloads a formatted Excel file with all sections, savings calculations, and a grand total — ready for the client.</li>
+      <li><strong>All hotels on one RFP:</strong> From the RFP's cost savings page, click <strong>Export All (Multi-Sheet)</strong> to download a single Excel workbook with one tab per hotel — useful when presenting a comparison across multiple properties.</li>
+    </ul>
 
     <h3>Cost Savings Dashboard</h3>
-    <p>The <strong>Reports → Cost Savings Analysis</strong> page shows all reports across all meetings with their grand total savings, sorted by most recently updated. Use the search box to filter by meeting name, hotel name, or RFP code. The dashboard also shows total savings and total hours worked across all reports.</p>
+    <p><strong>Reports → Cost Savings Analysis</strong> shows all reports with four summary KPI tiles at the top:</p>
+    <table class="info-table">
+      <tr><th>Tile</th><th>Shows</th></tr>
+      <tr><td><strong>Reports</strong></td><td>Total number of cost savings reports on file</td></tr>
+      <tr><td><strong>Total Savings</strong></td><td>Sum of grand totals across all reports</td></tr>
+      <tr><td><strong>Avg Savings / Meeting</strong></td><td>Average grand total per report</td></tr>
+      <tr><td><strong>Total Hours Worked</strong></td><td>Sum of hours worked across all reports</td></tr>
+    </table>
+    <p>The table below shows each report with its status badge (green Final / grey Draft), total savings, hours, and last-updated timestamp. Use the search box to filter by meeting name, hotel, or RFP code. Click the pencil icon to edit or the Excel icon to export any row.</p>
 
-    <div class="callout info"><i class="bi bi-info-circle"></i><p>Cost savings reports are linked to RFP hotel responses, not directly to bookings. If the RFP was marked as booked and a pickup card exists, the rate from the contract is used automatically when the contract is uploaded to the pickup card.</p></div>
+    <div class="callout info"><i class="bi bi-info-circle"></i><p>Cost savings reports are linked to RFP hotel responses. Reports marked <strong>Final</strong> are ready to share with the client via the Excel export. Keep reports as <strong>Draft</strong> until all figures have been confirmed against the signed contract.</p></div>
   </div>
 
   <!-- ── Hotel Points Tracking ───────────────────────────────── -->
