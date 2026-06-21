@@ -442,6 +442,7 @@ DEFAULT_IHG_MAPPING = {
     'Phone':                            'user_phone',
     'Hotel Name':                       'hotel',
     'Event Name':                       'event_name',
+    'Cvent ID':                         'cvent_rfp_code',
     'Account / Organization':           'client_organization',
     'Event Start Date':                 'event_start',
     'Event End Date':                   'event_end',

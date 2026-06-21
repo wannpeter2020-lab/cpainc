@@ -15025,8 +15025,20 @@ def _build_field_values_for_request(db, request_row):
 
     pickup_cfg_d = dict(pickup_cfg) if pickup_cfg else None
     booking_d    = dict(booking)    if booking    else None
-    return build_field_values(user_profile, program_d,
-                              dict(request_row), pickup_cfg_d, booking_d), program, pickup_cfg, booking
+    fv = build_field_values(user_profile, program_d,
+                            dict(request_row), pickup_cfg_d, booking_d)
+    # Cvent ID: if the request row didn't capture it, fall back to the linked
+    # RFP's rfp_code so the helper / .docx always show the Cvent number.
+    if not fv.get('cvent_rfp_code'):
+        bid = request_row['booking_id'] or (pickup_cfg_d or {}).get('booking_id')
+        if bid:
+            rfp_row = db.execute(
+                "SELECT rfp_code FROM rfp WHERE CAST(booking_id AS INTEGER)=CAST(? AS INTEGER) "
+                "AND rfp_code IS NOT NULL AND rfp_code != '' ORDER BY id DESC LIMIT 1",
+                (bid,)).fetchone()
+            if rfp_row and rfp_row['rfp_code']:
+                fv['cvent_rfp_code'] = rfp_row['rfp_code']
+    return fv, program, pickup_cfg, booking
 
 
 @app.route('/points')
