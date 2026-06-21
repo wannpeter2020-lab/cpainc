@@ -5209,12 +5209,27 @@ def _ensure_cost_savings_tables(db):
     except Exception:
         pass
 
-    # Backfill: add Travel Expense rows to any existing report that lacks them.
-    travel_items = [
-        ('Travel Expenses – Site Visits',
-         'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
-        ('Travel Expenses – Attending Meeting Dates',
-         'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
+    # Backfill: add newer default rows to any existing report that lacks them.
+    # (name, calc_type, std_price, neg_price, qty, notes)
+    backfill_items = [
+        ('Travel Expenses – Site Visits',                                   'simple', 0, 0, 1, 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
+        ('Travel Expenses – Attending Meeting Dates',                       'simple', 0, 0, 1, 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'),
+        ('10% F&B Discount / Custom Menus',                                 'simple', 0, 0, 1, 'Enter total F&B spend × discount %'),
+        ('A/V Negotiated Discount',                                         'simple', 0, 0, 1, 'Enter standard A/V cost vs. negotiated rate'),
+        ('Comp Beer and Wine at Opening Reception',                         'simple', 0, 0, 1, 'Per-person × attendees'),
+        ('Waived or discounted branding / signage fees',                    'note_only', None, None, None, 'TBD'),
+        ('$X per Gallon Coffee Discount',                                   'simple', 0, 0, 1, 'Standard vs. negotiated per gallon × gallons'),
+        ('Free Shipping / Receiving / Storage of Pallets',                  'simple', 0, 0, 5, 'Per-pallet × pallet count'),
+        ('Comp Permit for Outside Venue',                                   'note_only', None, None, None, 'TBD'),
+        ('Hotel to provide audit for rooms booked outside the group block', 'risk_mitigation', None, None, None, 'Audit clause'),
+        ('Allowable attrition is Cumulative (not Per Night)',               'risk_mitigation', None, None, None, 'Risk reduction'),
+        ('Damages Calculated on Profit — Rooms Shortfall',                  'risk_mitigation', None, None, None, 'Reduces liability exposure'),
+        ('Damages Calculated on Profit of 40% — F&B Minimum Shortfall',     'risk_mitigation', None, None, None, 'Reduces liability exposure'),
+        ('Rooms Resold Off-set Attrition',                                  'risk_mitigation', None, None, None, 'Resold rooms credit toward attrition'),
+        ('Rooms (and F&B) Resold Off-set Cancellation',                     'risk_mitigation', None, None, None, 'Resold credit toward cancellation damages'),
+        ('No Show Charges Off-set Rooms Attrition',                         'risk_mitigation', None, None, None, 'No-show fees applied to attrition shortfall'),
+        ('Cancellation Rebook Credit',                                      'risk_mitigation', None, None, None, 'Future rebook credits paid damages'),
+        ('Overage to F&B Off-set Rooms Attrition',                          'risk_mitigation', None, None, None, 'F&B above minimum credits attrition'),
     ]
     reports = db.execute('SELECT id FROM cost_savings_report').fetchall()
     for r in reports:
@@ -5225,15 +5240,15 @@ def _ensure_cost_savings_tables(db):
             'SELECT COALESCE(MAX(sort_order), -1) FROM cost_savings_item WHERE report_id=?',
             (r[0],)
         ).fetchone()[0]
-        for name, note in travel_items:
+        for name, ct, std, neg, qty, note in backfill_items:
             if name in existing_names:
                 continue
             max_order += 1
             db.execute('''INSERT INTO cost_savings_item
                 (report_id, sort_order, item_name, calc_type,
                  standard_price, negotiated_price, quantity, notes)
-                VALUES (?, ?, ?, 'simple', 0, 0, 1, ?)''',
-                (r[0], max_order, name, note))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (r[0], max_order, name, ct, std, neg, qty, note))
     db.commit()
 
 
@@ -5255,7 +5270,25 @@ COST_SAVINGS_SEED_ITEMS = [
     {'item_name': 'No deposit required',                             'calc_type': 'note_only',  'notes': 'TBD'},
     {'item_name': 'Travel Expenses – Site Visits',                   'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'},
     {'item_name': 'Travel Expenses – Attending Meeting Dates',       'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter total travel cost as Standard, 0 in Negotiated if hotel covered'},
+    # New (May 2026 — APM Sourcing PPT)
+    {'item_name': '10% F&B Discount / Custom Menus',                 'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter total F&B spend × discount %'},
+    {'item_name': 'A/V Negotiated Discount',                         'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Enter standard A/V cost vs. negotiated rate'},
+    {'item_name': 'Comp Beer and Wine at Opening Reception',         'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Per-person × attendees'},
+    {'item_name': 'Waived or discounted branding / signage fees',    'calc_type': 'note_only',  'notes': 'TBD'},
+    {'item_name': '$X per Gallon Coffee Discount',                   'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 1, 'notes': 'Standard vs. negotiated per gallon × gallons'},
+    {'item_name': 'Free Shipping / Receiving / Storage of Pallets',  'calc_type': 'simple',     'standard_price': 0, 'negotiated_price': 0, 'quantity': 5, 'notes': 'Per-pallet × pallet count'},
+    {'item_name': 'Comp Permit for Outside Venue',                   'calc_type': 'note_only',  'notes': 'TBD'},
     {'item_name': 'Meeting Planner Points',                          'calc_type': 'points'},
+    # ── Mitigated Risk ── separately rendered in the export; no $ savings.
+    {'item_name': 'Hotel to provide audit for rooms booked outside the group block',  'calc_type': 'risk_mitigation', 'notes': 'Audit clause'},
+    {'item_name': 'Allowable attrition is Cumulative (not Per Night)',                 'calc_type': 'risk_mitigation', 'notes': 'Risk reduction'},
+    {'item_name': 'Damages Calculated on Profit — Rooms Shortfall',                    'calc_type': 'risk_mitigation', 'notes': 'Reduces liability exposure'},
+    {'item_name': 'Damages Calculated on Profit of 40% — F&B Minimum Shortfall',       'calc_type': 'risk_mitigation', 'notes': 'Reduces liability exposure'},
+    {'item_name': 'Rooms Resold Off-set Attrition',                                    'calc_type': 'risk_mitigation', 'notes': 'Resold rooms credit toward attrition'},
+    {'item_name': 'Rooms (and F&B) Resold Off-set Cancellation',                       'calc_type': 'risk_mitigation', 'notes': 'Resold credit toward cancellation damages'},
+    {'item_name': 'No Show Charges Off-set Rooms Attrition',                           'calc_type': 'risk_mitigation', 'notes': 'No-show fees applied to attrition shortfall'},
+    {'item_name': 'Cancellation Rebook Credit',                                        'calc_type': 'risk_mitigation', 'notes': 'Future rebook credits paid damages'},
+    {'item_name': 'Overage to F&B Off-set Rooms Attrition',                            'calc_type': 'risk_mitigation', 'notes': 'F&B above minimum credits attrition'},
 ]
 
 PLANNER_POINTS_BY_BRAND = {
@@ -5297,7 +5330,7 @@ def _compute_report_totals(report, items):
             saving = gr_contr * gr_nights * max(0.90 - d, 0)
         elif ct == 'points':
             saving = (points_dollar - c) * points_base
-        elif ct == 'note_only':
+        elif ct in ('note_only', 'risk_mitigation'):
             saving = 0
         else:
             saving = (b - c) * d
@@ -16274,9 +16307,13 @@ def cost_savings_item_add(report_id):
         'SELECT COALESCE(MAX(sort_order), -1) FROM cost_savings_item WHERE report_id=?',
         (report_id,)
     ).fetchone()[0]
+    ct = (request.form.get('calc_type') or 'simple').strip()
+    if ct not in ('simple', 'attrition', 'points', 'note_only', 'risk_mitigation'):
+        ct = 'simple'
+    default_name = 'New Risk Item' if ct == 'risk_mitigation' else 'New Item'
     db.execute('''INSERT INTO cost_savings_item
         (report_id, sort_order, item_name, calc_type) VALUES (?, ?, ?, ?)''',
-        (report_id, max_order + 1, 'New Item', 'simple'))
+        (report_id, max_order + 1, default_name, ct))
     db.commit()
     return redirect(url_for('cost_savings_edit', report_id=report_id))
 
@@ -16344,9 +16381,14 @@ def _cs_populate_template_sheet(ws, report, items):
     brand = report['hotel_brand'] or 'Preferred'
     brand_cell = {'Hyatt': 'K7', 'Hilton': 'K8', 'Marriott': 'K9',
                   'IHG': 'K10', 'Preferred': 'K11'}.get(brand, 'K11')
+    # Separate $-savings items from risk-mitigation items — they render in
+    # two distinct sections of the export.
+    dollar_items = [it for it in items if it['calc_type'] != 'risk_mitigation']
+    risk_items = [it for it in items if it['calc_type'] == 'risk_mitigation']
+
     row = 31
     item_rows = []
-    for it in items:
+    for it in dollar_items:
         ws.cell(row=row, column=1, value=it['item_name'])
         ct = it['calc_type']
         if ct == 'simple':
@@ -16392,6 +16434,29 @@ def _cs_populate_template_sheet(ws, report, items):
         for col in ('B', 'C', 'E'):
             ws[f'{col}{r}'].number_format = '$#,##0.00'
     ws[f'E{total_items_row}'].number_format = '$#,##0.00'
+
+    # ── Mitigated Risk section ───────────────────────────────────────────────
+    risk_section_row = grand_total_row + 2
+    if risk_items:
+        from openpyxl.styles import PatternFill
+        hdr = ws.cell(row=risk_section_row, column=1, value='MITIGATED RISK')
+        hdr.font = Font(bold=True, color='FFFFFF')
+        hdr.fill = PatternFill('solid', start_color='1A3A5C')
+        ws.cell(row=risk_section_row, column=2,
+                value='Items that reduce risk; no direct dollar savings.').font = Font(italic=True, color='666666')
+        sub_row = risk_section_row + 1
+        sub_a = ws.cell(row=sub_row, column=1, value='Item')
+        sub_b = ws.cell(row=sub_row, column=2, value='Notes')
+        sub_a.font = Font(bold=True); sub_b.font = Font(bold=True)
+        sub_a.fill = PatternFill('solid', start_color='EAF0FB')
+        sub_b.fill = PatternFill('solid', start_color='EAF0FB')
+        r = sub_row + 1
+        for it in risk_items:
+            ws.cell(row=r, column=1, value=it['item_name'])
+            if it['notes']:
+                ws.cell(row=r, column=2, value=it['notes'])
+            r += 1
+
     return {'grand_total_row': grand_total_row, 'hours_row': hours_row}
 
 

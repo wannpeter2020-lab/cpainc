@@ -185,10 +185,12 @@
     </div>
 
     <!-- Other Cost Savings Items -->
+    {% set dollar_items = items | rejectattr('calc_type', 'equalto', 'risk_mitigation') | list %}
+    {% set risk_items   = items | selectattr('calc_type', 'equalto', 'risk_mitigation') | list %}
     <div class="col-12">
       <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
-          <span>Other Cost Savings Elements</span>
+          <span>Other Cost Savings Elements <span class="text-white-50 small">($ savings)</span></span>
           <span class="badge bg-success">Subtotal: <span id="cs_item_subtotal">${{ '{:,.2f}'.format(totals.item_total) }}</span></span>
         </div>
         <div class="card-body p-0">
@@ -207,16 +209,17 @@
                 </tr>
               </thead>
               <tbody>
-                {% for it in items %}
+                {% for it in dollar_items %}
                 {% set saving = (totals.item_calcs | selectattr('id', 'equalto', it['id']) | list | first).savings %}
                 <tr data-item-id="{{ it['id'] }}">
                   <td><input class="form-control form-control-sm" name="item_{{ it['id'] }}_item_name" value="{{ it['item_name'] or '' }}"></td>
                   <td>
                     <select class="form-select form-select-sm cs-item-calc" name="item_{{ it['id'] }}_calc_type">
-                      <option value="simple"    {% if it['calc_type'] == 'simple' %}selected{% endif %}>Simple</option>
-                      <option value="attrition" {% if it['calc_type'] == 'attrition' %}selected{% endif %}>Attrition</option>
-                      <option value="points"    {% if it['calc_type'] == 'points' %}selected{% endif %}>Points</option>
-                      <option value="note_only" {% if it['calc_type'] == 'note_only' %}selected{% endif %}>Note Only</option>
+                      <option value="simple"          {% if it['calc_type'] == 'simple' %}selected{% endif %}>Simple</option>
+                      <option value="attrition"       {% if it['calc_type'] == 'attrition' %}selected{% endif %}>Attrition</option>
+                      <option value="points"          {% if it['calc_type'] == 'points' %}selected{% endif %}>Points</option>
+                      <option value="note_only"       {% if it['calc_type'] == 'note_only' %}selected{% endif %}>Note Only</option>
+                      <option value="risk_mitigation" {% if it['calc_type'] == 'risk_mitigation' %}selected{% endif %}>Risk Mitigation</option>
                     </select>
                   </td>
                   <td><input class="form-control form-control-sm text-end cs-item-std" type="number" step="0.01"
@@ -252,8 +255,56 @@
             Calc types: <b>Simple</b> = (Std − Neg) × Qty &nbsp; · &nbsp;
             <b>Attrition</b> = Contracted Rate × GR Nights × MAX(90% − Contracted Attrition[Qty], 0) &nbsp; · &nbsp;
             <b>Points</b> = (Brand $/pt − Neg) × ((GR Nights × Contracted) + MR Negotiated) &nbsp; · &nbsp;
-            <b>Note Only</b> = no calc, notes column only.
+            <b>Note Only</b> = no calc, notes column only &nbsp; · &nbsp;
+            <b>Risk Mitigation</b> = no $ savings; listed in the "Mitigated Risk" section of the exported XLSX.
           </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mitigated Risk (non-monetary concessions that reduce risk) -->
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center"
+             style="background:#6c757d">
+          <span><i class="bi bi-shield-check me-2"></i>Mitigated Risk <span class="text-white-50 small">(no $ savings — separate section in the export)</span></span>
+          <span class="badge bg-light text-dark">{{ risk_items|length }} item{{ '' if risk_items|length == 1 else 's' }}</span>
+        </div>
+        <div class="card-body p-0">
+          <div style="max-height:35vh; overflow-y:auto;">
+            <table class="table table-sm mb-0">
+              <thead style="position:sticky; top:0; z-index:2; background:#eaf0fb;">
+                <tr>
+                  <th style="width:45%">Item</th>
+                  <th style="width:50%">Notes</th>
+                  <th style="width:5%"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for it in risk_items %}
+                <tr data-item-id="{{ it['id'] }}">
+                  <td><input class="form-control form-control-sm" name="item_{{ it['id'] }}_item_name" value="{{ it['item_name'] }}"></td>
+                  <td><input class="form-control form-control-sm" name="item_{{ it['id'] }}_notes" value="{{ it['notes'] or '' }}"></td>
+                  <td class="text-end">
+                    <input type="hidden" name="item_{{ it['id'] }}_calc_type" value="risk_mitigation">
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            onclick="if (confirm('Remove this risk-mitigation item?')) { document.getElementById('del_item_{{ it['id'] }}').submit(); }">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-muted text-center p-3">No risk-mitigation items yet. Add one above with Calc Type = "Risk Mitigation", or click Add Risk Item below.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card-footer bg-white">
+          <button type="button" class="btn btn-sm btn-outline-secondary"
+                  onclick="document.getElementById('add_risk_item_form').submit();">
+            <i class="bi bi-shield-plus me-1"></i>Add Risk Item
+          </button>
         </div>
       </div>
     </div>
@@ -267,6 +318,9 @@
 
 <!-- Hidden item-management forms (kept outside the main form so they aren't nested) -->
 <form id="add_item_form" method="post" action="{{ url_for('cost_savings_item_add', report_id=report['id']) }}"></form>
+<form id="add_risk_item_form" method="post" action="{{ url_for('cost_savings_item_add', report_id=report['id']) }}">
+  <input type="hidden" name="calc_type" value="risk_mitigation">
+</form>
 {% for it in items %}
 <form id="del_item_{{ it['id'] }}" method="post"
       action="{{ url_for('cost_savings_item_delete', report_id=report['id'], iid=it['id']) }}"></form>
@@ -333,7 +387,7 @@
       if (ct === 'simple')         saving = (std - neg) * qty;
       else if (ct === 'attrition') saving = grContr * grNights * Math.max(0.9 - qty, 0);
       else if (ct === 'points')    saving = (pointsDollar - neg) * pointsBase;
-      // note_only -> 0
+      // note_only and risk_mitigation -> 0
       const cell = row.querySelector('.cs-item-savings');
       if (cell) {
         cell.textContent = fmt(saving);
