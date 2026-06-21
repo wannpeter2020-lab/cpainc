@@ -245,6 +245,20 @@
       #main { margin-left: 0; padding: 24px 18px; }
     }
 
+    /* ── Video placeholder (screen only) ── */
+    .video-placeholder {
+      display: flex; align-items: center; gap: 16px;
+      background: #f0f4ff; border: 2px dashed #b0c0e0;
+      border-radius: 10px; padding: 18px 22px; margin: 18px 0;
+      color: #4a6080;
+    }
+    .video-placeholder i { font-size: 2.2rem; color: #1a3a5c; flex-shrink: 0; }
+    .video-placeholder strong { display: block; font-size: .92rem; color: #1a3a5c; margin-bottom: 3px; }
+    .video-placeholder p { margin: 0; font-size: .8rem; color: #6080a0; }
+    /* Live Loom embed wrapper */
+    .video-embed { margin: 18px 0; border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; }
+    .video-embed iframe { width: 100%; height: 100%; border: none; border-radius: 10px; }
+
     /* ── Flowchart print note — hidden on screen, shown in print ── */
     .flowchart-print-note { display: none; }
 
@@ -404,6 +418,9 @@
       .badge-success { background: #d1f0e0 !important; color: #198754 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .badge-warning { background: #fff3cd !important; color: #856404 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .badge-danger  { background: #f8d7da !important; color: #dc3545 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+      /* Video placeholders and embeds — hide in print */
+      .video-placeholder, .video-embed { display: none !important; }
 
       /* Flowcharts — hide in print, show replacement note */
       .flowchart-wrap { display: none !important; }
@@ -583,6 +600,11 @@
   {% if can_status %}
   <div class="section" id="status-board">
     <div class="section-title"><i class="bi bi-clipboard2-check"></i> Status Board</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Status Board — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click <strong>Status Board</strong> in the top navigation. This is your personal action-item dashboard — it scans all of your assigned accounts and surfaces bookings that need attention right now. Items are filtered to only the accounts you have access to.</p>
 
     <div class="screen">
@@ -662,6 +684,11 @@
   {% if can_dash %}
   <div class="section" id="dashboard">
     <div class="section-title"><i class="bi bi-speedometer2"></i> Dashboard</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Dashboard — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>The Dashboard shows a financial snapshot of the current year's commission activity. Click <strong>Dashboard</strong> in the top navigation bar to access it.</p>
 
     <div class="screen">
@@ -717,6 +744,11 @@
   {% if can_bk %}
   <div class="section" id="bookings-list">
     <div class="section-title"><i class="bi bi-list-ul"></i> Bookings List</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Bookings List — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click <strong>Bookings</strong> in the top navigation to see all active hotel bookings. You will only see bookings for accounts assigned to you.</p>
 
     <div class="screen">
@@ -811,6 +843,11 @@
   {% if can_rfp %}
   <div class="section" id="cvent-rfp">
     <div class="section-title"><i class="bi bi-cloud-download"></i> Cvent RFP Download</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Cvent RFP Download — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Before working with an RFP in CPAinc, you will need to download it from Cvent. There are two documents you may need: the <strong>RFP Word document</strong> (the event requirements) and the <strong>CRF Excel file</strong> (hotel proposals for import).</p>
 
     <!-- ── Part 1: RFP Word Document ── -->
@@ -891,6 +928,11 @@
 
   <div class="section" id="rfp-list">
     <div class="section-title"><i class="bi bi-clipboard2-check"></i> RFP Process — List</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>RFP Process — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click <strong>RFP Process</strong> in the navigation to manage Requests for Proposals. This is where you source and track hotels for upcoming events. You will only see RFPs for your assigned accounts.</p>
 
     <div class="screen">
@@ -982,6 +1024,11 @@ flowchart LR
   {% if can_pickup %}
   <div class="section" id="pickup-dashboard">
     <div class="section-title"><i class="bi bi-graph-up"></i> Pickup Tracking and Reporting — Dashboard</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Pickup Tracking Dashboard — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click <strong>Pickup Tracking & Reporting</strong> in the top navigation. This is the main hub for monitoring hotel room block pickup across all active events.</p>
 
     <div class="screen">
@@ -1063,6 +1110,11 @@ flowchart LR
 
   <div class="section" id="pickup-event">
     <div class="section-title"><i class="bi bi-calendar-check"></i> Pickup Event Detail</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Pickup Event Detail — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click any event name or the <strong>Pickup History</strong> button from the dashboard to open the full event detail page.</p>
 
     <div class="screen">
@@ -1161,6 +1213,11 @@ flowchart LR
   {% if can_contracts %}
   <div class="section" id="pickup-contract">
     <div class="section-title"><i class="bi bi-file-earmark-arrow-up"></i> Upload Contract &amp; Extract Data</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Upload Contract — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>CPAinc can read a hotel contract (PDF or Word) and automatically pull out the key terms — room block, rate, cutoff, attrition, and contacts — so you don't have to type them in manually.</p>
 
     <div class="callout info"><i class="bi bi-robot"></i><p>Contract data is extracted by <strong>Claude AI</strong>. The review page lets you correct anything before saving, so it's always safe to upload even if a field comes back wrong.</p></div>
@@ -1239,6 +1296,11 @@ flowchart LR
 
   <div class="section" id="pickup-weekly">
     <div class="section-title"><i class="bi bi-pencil-square"></i> Adding Weekly Pickup Reports</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Weekly Pickup Reports — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Open the Event Detail page</strong><p>Click the event name or Pickup History button from the dashboard.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "+ Add Weekly Entry"</strong><p>Found in the button bar near the top of the page.</p></div></div>
@@ -1270,6 +1332,11 @@ flowchart LR
 
   <div class="section" id="pickup-email">
     <div class="section-title"><i class="bi bi-envelope"></i> Email Tools</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Email Tools — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>From any Pickup Event Detail page, email buttons let you generate pre-formatted messages:</p>
     <table class="info-table">
       <tr><th>Button</th><th>Sent To</th><th>Purpose</th></tr>
@@ -1289,6 +1356,11 @@ flowchart LR
 
   <div class="section" id="pickup-rooming">
     <div class="section-title"><i class="bi bi-people"></i> Rooming Lists</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Rooming Lists — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Upload Rooming List"</strong><p>From the Pickup Event Detail page.</p></div></div>
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Upload your file</strong><p>Accepts Excel (.xlsx) or CSV formats. You can also enter the rooming list manually.</p></div></div>
@@ -1459,6 +1531,11 @@ flowchart TD
   {% if can_imp %}
   <div class="section" id="import">
     <div class="section-title"><i class="bi bi-upload"></i> Import Tools</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Import Tools — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>All import tools are found under the <strong>Import</strong> menu in the navigation. Imports add or update records — they do not delete existing data.</p>
 
     <h3>Available Import Types</h3>
@@ -1539,6 +1616,11 @@ flowchart TD
   {% if can_admin %}
   <div class="section" id="settings">
     <div class="section-title"><i class="bi bi-gear"></i> Settings</div>
+    <!-- VIDEO: replace with <div class="video-embed"><iframe src="https://www.loom.com/embed/YOUR_ID" allowfullscreen></iframe></div> -->
+    <div class="video-placeholder">
+      <i class="bi bi-play-circle-fill"></i>
+      <div><strong>Settings — Video walkthrough</strong><p>Coming soon &nbsp;·&nbsp; Record in Loom and replace this block with your embed code</p></div>
+    </div>
     <p>Click <strong>Settings</strong> in the navigation, then <strong>Settings</strong>. Controls commission splits, payment tolerance, date format, and account-level overrides.</p>
 
     <div class="screen">
