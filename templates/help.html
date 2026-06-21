@@ -629,7 +629,10 @@
       <tr><td><strong>Overdue Pickup</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Event has passed its cutoff date but no final pickup has been entered</td></tr>
       <tr><td><strong>Past Cutoff</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>Cutoff has passed and no pickup history exists at all</td></tr>
       <tr><td><strong>Event Ended — No HHR Uploaded</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>The event end date has passed and no Housing History Report has been imported for this booking</td></tr>
+      <tr><td><strong>Rooming List Due</strong></td><td><span style="color:var(--danger);font-weight:600;">● Red</span></td><td>The rooming list is due to the hotel and has not yet been uploaded</td></tr>
       <tr><td><strong>No Recent Contact</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contact logged in the past 14 days and cutoff is approaching</td></tr>
+      <tr><td><strong>Amenity Order</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>The event is within 14 days and an amenity order action is needed</td></tr>
+      <tr><td><strong>Block Review Due</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>The block review date has arrived — verify the room block with the hotel</td></tr>
       <tr><td><strong>Cutoff Approaching — Block Unverified</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>Cutoff is within 30 days and the contracted block has not been verified (all nights still identical)</td></tr>
       <tr><td><strong>Uniform Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>All nightly block values are identical — possible copy-paste error, needs verification</td></tr>
       <tr><td><strong>Empty Block</strong></td><td><span style="color:var(--warning);font-weight:600;">● Orange</span></td><td>No contracted block data has been entered yet</td></tr>
@@ -897,22 +900,38 @@
         <span class="url">/rfp</span>
       </div>
       <div class="mock-content">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-          <div style="font-size:1.1rem;font-weight:700;color:var(--navy);">RFP Process</div>
-          <div style="display:flex;gap:8px;">
-            <span class="mock-btn outline" style="font-size:.78rem;">Archived</span>
-            <span class="mock-btn primary" style="font-size:.78rem;">+ New RFP</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <div style="display:flex;gap:4px;">
+            <span class="mock-btn primary" style="font-size:.75rem;border-radius:6px 6px 0 0;">Master View</span>
+            <span class="mock-btn outline" style="font-size:.75rem;border-radius:6px 6px 0 0;">Active</span>
+            <span class="mock-btn outline" style="font-size:.75rem;border-radius:6px 6px 0 0;">Contracted</span>
+            <span class="mock-btn outline" style="font-size:.75rem;border-radius:6px 6px 0 0;">Dead</span>
           </div>
+          <span class="mock-btn primary" style="font-size:.78rem;">+ New RFP</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+          <div style="flex:1;border:1px solid #ccc;border-radius:6px;padding:6px 10px;font-size:.8rem;color:#999;">🔍 Search by client, event name, or booking ID…</div>
+          <span style="font-size:.75rem;color:#888;">3 results</span>
         </div>
         <table class="mock-table">
-          <thead><tr><th>RFP / Event</th><th>Client</th><th>Dates</th><th>Status</th><th>Hotels</th><th>Decision Date</th></tr></thead>
+          <thead><tr><th>Cvent #</th><th>Customer</th><th>Meeting Name</th><th>Status</th><th>Notes</th><th>Booking #</th><th>Hotel</th><th>Start</th><th>End</th><th>Peak</th><th>Est. Commission</th></tr></thead>
           <tbody>
-            <tr><td><div style="font-weight:600;">2027 NCSL Annual Summit</div><div style="font-size:.72rem;color:#888;">RFP-2026-041</div></td><td>NCSL</td><td>Jul 25–Aug 2, 2027</td><td><span class="badge badge-info">Negotiating</span></td><td>3</td><td>06/15/2026</td></tr>
-            <tr><td><div style="font-weight:600;">2027 IECA World Conference</div><div style="font-size:.72rem;color:#888;">RFP-2026-038</div></td><td>IECA</td><td>Feb 12–16, 2027</td><td><span class="badge" style="background:#d1f0e0;color:var(--success);">Contracted</span></td><td>2</td><td>05/01/2026</td></tr>
+            <tr><td style="font-size:.72rem;">CV-2026-041</td><td>NCSL</td><td>2027 NCSL Annual Summit</td><td><span class="badge badge-info">Negotiating</span></td><td style="color:#888;">—</td><td>—</td><td>Hilton DC</td><td>07/25/2027</td><td>08/02/2027</td><td>320</td><td>$28,400</td></tr>
+            <tr><td style="font-size:.72rem;">CV-2026-038</td><td>IECA</td><td>2027 IECA World Conference</td><td><span class="badge" style="background:#d1f0e0;color:var(--success);">Contracted</span></td><td style="color:#888;">—</td><td>240505</td><td>Omni Fort Worth</td><td>02/12/2027</td><td>02/16/2027</td><td>180</td><td>$14,200</td></tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <h3>Dashboard Tabs</h3>
+    <table class="info-table">
+      <tr><th>Tab</th><th>What It Shows</th></tr>
+      <tr><td><strong>Master View</strong></td><td>Wide spreadsheet of all active and contracted RFPs with 19 checklist columns tracking every step from site visit through contracting. Dates turn green when entered. Use the <strong>N/A</strong> button to mark steps that don't apply.</td></tr>
+      <tr><td><strong>Active</strong></td><td>RFPs in progress — Sourcing, Proposals Received, Negotiating, Hotel Selected, Contracting</td></tr>
+      <tr><td><strong>Contracted</strong></td><td>RFPs that have reached Contracted status. When you upload a signed contract on an RFP, it moves here automatically.</td></tr>
+      <tr><td><strong>Dead</strong></td><td>RFPs that did not result in a booking</td></tr>
+    </table>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Use the <strong>Master View</strong> as your weekly checklist — it shows every open RFP side-by-side with a column for each process step, so you can see at a glance what still needs to be done across all accounts.</p></div>
 
     <h3>RFP Status Flow</h3>
     <div class="flowchart-wrap">
@@ -1087,9 +1106,11 @@ flowchart LR
 
     <h3>Page Sections</h3>
     <ul>
-      <li><strong>Event Info</strong> — hotel, organization, contracted block by night, cutoff, attrition %, rate, contacts</li>
-      <li><strong>Weekly Pickup History</strong> — all weekly reports with total rooms, % of block, % of attrition</li>
+      <li><strong>Event Info</strong> — hotel, organization, contracted block by night, cutoff, attrition %, rate, OTA check link, contacts</li>
+      <li><strong>Weekly Pickup History</strong> — all weekly reports with total rooms, % of block, % of attrition, and OTA rate per week</li>
       <li><strong>Pace Chart</strong> — visual graph of pickup over time vs. contracted block</li>
+      <li><strong>Closing Invoices</strong> — commission invoices imported and verified against the HHR</li>
+      <li><strong>Contract Amendments</strong> — any amendments or addenda imported after the original contract</li>
       <li><strong>Tasks &amp; Follow-ups</strong> — action items assigned to this event with due dates</li>
       <li><strong>Event Notes</strong> — free-text notes with author and timestamp</li>
       <li><strong>Rooming List History</strong> — all uploaded rooming lists</li>
@@ -1097,6 +1118,27 @@ flowchart LR
       <li><strong>Recently Deleted Reports</strong> — pickup reports deleted in the last 90 days, with a Restore button</li>
     </ul>
     <div class="callout info"><i class="bi bi-buildings"></i><p><strong>Multi-Hotel Events:</strong> If an event spans multiple hotels, a blue banner appears with a link to the <strong>Combined Event Report</strong> showing pickup across all hotels together.</p></div>
+
+    <h3>Cancel Meeting</h3>
+    <p>If a meeting is cancelled, click <strong>Cancel Meeting</strong> in the top-right button area of the event page. This marks the booking as Cancelled in the pipeline and archives the pickup card in one step. A confirmation prompt appears before anything is changed — this action cannot be undone.</p>
+
+    <h3>Import Amendment</h3>
+    <p>When the hotel sends a contract amendment or addendum, upload it directly on the event page without re-importing the whole contract.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Import Amendment"</strong><p>Found in the button area of the event page, below the Upload Contract button.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Upload the signed amendment (PDF or Word)</strong><p>Click <strong>Extract Changes</strong>. The AI reads the document and identifies what changed — room block, rate, hotel name, or cutoff date.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review and apply</strong><p>The review screen shows what will change. Confirm to apply the updates to the event record. The amendment is stored in the <strong>Contract Amendments</strong> card on the event page for reference.</p></div></div>
+    </div>
+
+    <h3>Closing Invoice Import</h3>
+    <p>After the HHR is imported and final history is recorded, you can import the commission closing invoice from ConferenceDirect and verify it against the HHR automatically.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Click "Import Closing Invoice"</strong><p>This button appears on the event page once final history has been recorded.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Upload the invoice PDF</strong><p>You can upload multiple files at once. Click <strong>Import &amp; Verify</strong>.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review the verification result</strong><p>The system matches the invoice to the event by Booking ID and compares the billed commission to the expected amount based on the HHR. A green banner means it verified; yellow means there's a discrepancy to review.</p></div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Accept or discard</strong><p>If there's a discrepancy you can <strong>Accept &amp; Save Anyway</strong> (with a note) or <strong>Discard</strong>. Verified invoices save automatically. All invoices appear in the <strong>Closing Invoices</strong> card on the event page.</p></div></div>
+    </div>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>Closing invoices can also be imported in bulk from <strong>Import → Closing Invoice</strong> in the navigation — useful when processing a batch of invoices across multiple events at once.</p></div>
 
     <h3>Tasks &amp; Follow-ups</h3>
     <p>Each event has a task list for tracking action items. Tasks have a title, due date, and assigned owner. Overdue tasks are highlighted in red.</p>
@@ -1201,7 +1243,16 @@ flowchart LR
       <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Click "+ Add Weekly Entry"</strong><p>Found in the button bar near the top of the page.</p></div></div>
       <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Enter the Report Date</strong><p>The date you received or recorded this pickup snapshot.</p></div></div>
       <div class="step"><div class="step-num">4</div><div class="step-body"><strong>Enter pickup by night</strong><p>For each date in the hotel block, enter how many rooms have been picked up. The system calculates the total and % of block automatically.</p></div></div>
-      <div class="step"><div class="step-num">5</div><div class="step-body"><strong>Click Save</strong><p>The report appears in the Weekly Pickup History table.</p></div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-body"><strong>Enter OTA rate and link (optional)</strong><p>If you checked online rates this week, enter the OTA rate you found in the <strong>OTA Rate</strong> field and paste the search URL into <strong>OTA Link (this week)</strong>. If the OTA rate is below your contracted rate, the <strong>Email Hotel Rate Issue</strong> button will appear on the event page automatically.</p></div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-body"><strong>Click Save</strong><p>The report appears in the Weekly Pickup History table. Rows with an OTA rate show a link icon you can click to reopen that week's exact search.</p></div></div>
+    </div>
+
+    <h3>Paste Pickup Panel</h3>
+    <p>If the hotel sends pickup data in an email as a table or text block, you can paste it directly instead of typing night by night. The paste panel is always visible on the Add Weekly Entry form.</p>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><strong>Copy the pickup data from the hotel email</strong><p>Select the table or list of numbers and copy it.</p></div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><strong>Paste into the Paste Pickup panel</strong><p>Click inside the paste area on the weekly entry form and paste. The system parses the data and fills in the night-by-night fields automatically — it supports both horizontal (dates across columns) and vertical (dates down a column) layouts.</p></div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><strong>Review and save</strong><p>Check that the numbers look correct, then click Save as normal.</p></div></div>
     </div>
   </div>
 
@@ -1222,11 +1273,17 @@ flowchart LR
     <table class="info-table">
       <tr><th>Button</th><th>Sent To</th><th>Purpose</th></tr>
       <tr><td><strong>Email Hotel</strong></td><td>Hotel contact on file</td><td>Request a pickup report from the hotel</td></tr>
+      <tr><td><strong>Email Hotel Rate Issue</strong></td><td>Hotel contact on file</td><td>Notify the hotel of an OTA rate lower than the contracted rate (button only appears when the most recent weekly entry has an OTA rate below the contracted rate)</td></tr>
       <tr><td><strong>Email Client</strong></td><td>Association/client contact</td><td>Send pickup update to the client</td></tr>
       <tr><td><strong>Email Hotel HHR</strong></td><td>Hotel contact</td><td>Request the Housing History Report after cutoff</td></tr>
-      <tr><td><strong>Post-Report Email</strong></td><td>Client</td><td>Send final summary after cutoff with actual results</td></tr>
+      <tr><td><strong>Email Client HHR Summary</strong></td><td>Client</td><td>Send final summary after cutoff with actual results (only visible once the HHR has been imported)</td></tr>
     </table>
     <p>Each button generates an email that is posted into your <strong>Outlook draft folder</strong>. You can open it from there and make edits and open attachments to verify the data is correct before sending.</p>
+
+    <h3>Email Hotel Rate Issue</h3>
+    <p>The <strong>Email Hotel Rate Issue</strong> button appears in red next to Email Hotel only when the system detects a rate parity problem — meaning the OTA rate recorded in the most recent weekly entry is lower than the contracted rate.</p>
+    <p>The email it generates includes the hotel name, address, contracted rate, OTA rate found, and the exact OTA link used for that week's search, so the hotel can look it up directly. This information is never shared in client-facing emails — it stays between you and the hotel.</p>
+    <div class="callout tip"><i class="bi bi-lightbulb"></i><p>To track OTA rates week by week, enter the OTA rate and paste the search URL into the <strong>OTA Link (this week)</strong> field when adding a weekly pickup entry. The link icon in the pickup history table lets you reopen that exact search later.</p></div>
   </div>
 
   <div class="section" id="pickup-rooming">
@@ -1409,6 +1466,7 @@ flowchart TD
       {% if can_imp_bk %}<tr><td><strong>Bookings</strong></td><td>Import → Bookings</td><td>.xls, .xlsx, .csv</td><td>Adds/updates bookings from the ConferenceDirect Pipeline Report export</td></tr>{% endif %}
       {% if can_imp_pay %}<tr><td><strong>Payments</strong></td><td>Import → Payments</td><td>.xlsx</td><td>Records commission checks received, matched by Booking ID</td></tr>{% endif %}
       {% if can_imp_pay %}<tr><td><strong>Voucher</strong></td><td>Import → Voucher</td><td>.pdf</td><td>Imports voucher/commission payment data from a PDF</td></tr>{% endif %}
+      {% if can_imp_pay %}<tr><td><strong>Closing Invoice</strong></td><td>Import → Closing Invoice</td><td>.pdf</td><td>Imports ConferenceDirect commission closing invoices and verifies each against the event's HHR; supports multiple files at once</td></tr>{% endif %}
       {% if can_imp_can %}<tr><td><strong>Cancelled Meetings</strong></td><td>Import → Cancelled Meetings</td><td>.xlsx</td><td>Updates booking statuses to Cancelled</td></tr>{% endif %}
       {% if can_imp_hhr %}<tr><td><strong>HHR</strong></td><td>Import → HHR</td><td>.xlsx</td><td>Imports Housing History Report data after an event's cutoff date</td></tr>{% endif %}
     </table>
