@@ -4705,7 +4705,29 @@ def import_hhr():
             file.save(tmp_path)
             file_bytes = open(tmp_path, 'rb').read()
 
-            parsed = parse_pickup_report(tmp_path)
+            from pickup_utils import parse_hhr_excel as _parse_xl
+            try:
+                _xl = _parse_xl(file_bytes)
+            except Exception as _e:
+                _xl = {'error': str(_e)}
+            parsed = {
+                'error':            _xl.get('error'),
+                'booking_id':       _xl.get('booking_id') or None,
+                'organization':     _xl.get('organization') or '',
+                'hotel':            _xl.get('hotel') or '',
+                'event_name':       _xl.get('event_name') or '',
+                'actual_pickup':    _xl.get('final_total_pickup') or 0,
+                'total_revenue':    _xl.get('room_revenue') or None,
+                'avg_rate':         _xl.get('contracted_rate') or None,
+                'comm_pct':         _xl.get('commission_pct') or None,
+                'pickup_by_night':  _xl.get('final_pickup_by_night') or {},
+                'currency_code':    'USD',
+                'currency_label':   'USD',
+                'original_revenue': _xl.get('room_revenue') or None,
+                'exchange_rate':    1.0,
+            }
+            if not parsed['error'] and not parsed['actual_pickup']:
+                parsed['error'] = 'No final total pickup found in the Excel file'
 
             if parsed['error']:
                 results.append({'filename': file.filename, 'status': 'error',
