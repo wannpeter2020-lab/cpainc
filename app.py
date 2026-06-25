@@ -4568,14 +4568,16 @@ def parse_pickup_report(filepath):
                 result[key] = str(row_vals[1]).strip()
 
         # Find DATE header row → map column index to ISO date
+        # Some HHRs put dates in DATE row, others put them in DAY row (day-names in DATE)
         date_col_map = {}
         for idx, row in df.iterrows():
             row_vals = list(row.values)
-            if str(row_vals[0]).strip().upper() == 'DATE':
+            if str(row_vals[0]).strip().upper() in ('DATE', 'DAY'):
                 for ci, val in enumerate(row_vals):
                     if hasattr(val, 'strftime'):
                         date_col_map[ci] = val.strftime('%Y-%m-%d')
-                break
+                if date_col_map:
+                    break  # stop once we've found actual dates
 
         # Find FINAL TOTAL PICKUP row → total rooms + night-by-night breakdown
         for idx, row in df.iterrows():
