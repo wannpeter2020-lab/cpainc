@@ -3457,7 +3457,8 @@ def parse_hhr_excel(file_bytes):
                             break
 
         # Date header row — find which columns have dates
-        elif 'date' == lbl and not date_cols:
+        # Some HHRs put dates in DATE row, others put them in DAY row
+        elif lbl in ('date', 'day') and not date_cols:
             for i, cell in enumerate(row):
                 if i < 2:
                     continue
