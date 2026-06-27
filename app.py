@@ -10928,7 +10928,7 @@ def _build_housing_form_wb(config, pipeline, pickup_dates=None):
     n_dates = len(all_dates)
 
     comm_pct   = float(pipeline['CommissionPercent']) if pipeline and pipeline['CommissionPercent'] else 0.0
-    currency   = (pipeline.get('Currency') or 'USD') if pipeline else 'USD'
+    currency   = (pipeline['Currency'] or 'USD') if pipeline and pipeline['Currency'] else 'USD'
     booking_id = config['booking_id'] or ''
     org_name   = (pipeline['AccountName'] or '') if pipeline else (config['organization'] or '')
     hotel_name = config['hotel'] or ''
