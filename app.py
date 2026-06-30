@@ -5111,6 +5111,13 @@ def ensure_pickup_tables():
             db.commit()
         except Exception:
             pass
+    # Add shoulder night window columns to pickup_config
+    for _col, _default in [('shoulder_pre', 3), ('shoulder_post', 3)]:
+        try:
+            db.execute(f'ALTER TABLE pickup_config ADD COLUMN {_col} INTEGER DEFAULT {_default}')
+            db.commit()
+        except Exception:
+            pass
     # Add per-week OTA rate + URL to pickup_weekly
     for _col, _typ in [('ota_rate', 'REAL'), ('ota_url', 'TEXT')]:
         try:
