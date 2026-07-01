@@ -274,10 +274,16 @@
        class="btn btn-sm" style="background-color:#003F87;border-color:#003F87;color:#fff">
       <i class="bi bi-file-earmark-bar-graph me-1"></i>Email Client HHR Summary
     </a>
+    {% if hotel_chain in ('Marriott', 'Hilton') %}
+    <span class="badge bg-info text-dark fs-6 px-3 py-2" title="FastPay — ConferenceDirect does not issue a closing invoice for {{ hotel_chain }} properties">
+      <i class="bi bi-lightning-charge-fill me-1"></i>FastPay — No Invoice Issued
+    </span>
+    {% else %}
     <button type="button" class="btn btn-outline-primary btn-sm"
             data-bs-toggle="modal" data-bs-target="#importInvoiceModal">
       <i class="bi bi-receipt me-1"></i>Import Closing Invoice
     </button>
+    {% endif %}
     {% endif %}
     {% endif %}
   </div>

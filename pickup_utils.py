@@ -4916,51 +4916,16 @@ def parse_contract_document(file_bytes, filename='', hotel_hint=''):
             images_added = 0
             for page_num in range(min(len(doc), 10)):
                 page = doc[page_num]
-                # Prefer large embedded images (actual scanned pages) over re-rendering.
-                # Skip tiny images < 50KB (DocuSign badges, logos, etc.)
-                embedded = sorted(page.get_images(full=True),
-                                  key=lambda x: x[2] * x[3], reverse=True)  # sort by w×h
-                added_from_page = False
-                for img_info in embedded[:1]:   # only the largest image per page
-                    xref = img_info[0]
-                    w, h = img_info[2], img_info[3]
-                    if w * h < 100_000:
-                        continue
-                    img_data = doc.extract_image(xref)
-                    raw = img_data['image']
-                    if len(raw) < 30_000:
-                        continue
-                    # Downscale large images to ≤1600px wide for the API
-                    if w > 1600:
-                        import io as _io
-                        try:
-                            from PIL import Image as _PILImage
-                            pil = _PILImage.open(_io.BytesIO(raw))
-                            scale = 1600 / w
-                            pil = pil.resize((1600, int(h * scale)), _PILImage.LANCZOS)
-                            buf = _io.BytesIO()
-                            pil.save(buf, format='JPEG', quality=85)
-                            raw = buf.getvalue()
-                        except ImportError:
-                            pass
-                    ext_img = img_data.get('ext', 'jpeg')
-                    mime = 'image/jpeg' if ext_img in ('jpg', 'jpeg') else 'image/png'
-                    img_b64 = base64.standard_b64encode(raw).decode()
-                    content.append({'type': 'image',
-                                     'source': {'type': 'base64', 'media_type': mime,
-                                                'data': img_b64}})
-                    images_added += 1
-                    added_from_page = True
-                    break
-                # Fallback: render page at 150 DPI if no usable embedded image
-                if not added_from_page:
-                    mat = fitz.Matrix(150/72, 150/72)
-                    pix = page.get_pixmap(matrix=mat)
-                    img_b64 = base64.standard_b64encode(pix.tobytes('jpeg')).decode()
-                    content.append({'type': 'image',
-                                     'source': {'type': 'base64', 'media_type': 'image/jpeg',
-                                                'data': img_b64}})
-                    images_added += 1
+                # Always render via fitz rather than extracting embedded images —
+                # embedded images in scanned PDFs can be corrupted/garbled due to
+                # CMYK/ICC color space issues, producing unreadable noise to Claude.
+                mat = fitz.Matrix(200/72, 200/72)
+                pix = page.get_pixmap(matrix=mat)
+                img_b64 = base64.standard_b64encode(pix.tobytes('jpeg')).decode()
+                content.append({'type': 'image',
+                                 'source': {'type': 'base64', 'media_type': 'image/jpeg',
+                                            'data': img_b64}})
+                images_added += 1
                 if images_added >= 8:
                     break
             doc.close()

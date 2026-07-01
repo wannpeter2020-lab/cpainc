@@ -8982,10 +8982,10 @@ def pickup_event(cid):
 
     # Hotel Points integration
     from points_utils import detect_chain
+    chain = detect_chain(config['hotel']) if config['hotel'] else None
     points_program = None
     points_request = None
     if config['contract_data']:
-        chain = detect_chain(config['hotel'])
         if chain:
             points_program = db.execute(
                 'SELECT * FROM hotel_points_program WHERE chain_name=? AND active=1',
@@ -9030,7 +9030,8 @@ def pickup_event(cid):
                            amendments=amendments,
                            points_program=points_program,
                            points_request=points_request,
-                           rfp_for_dates=rfp_for_dates)
+                           rfp_for_dates=rfp_for_dates,
+                           hotel_chain=chain)
 
 
 # ── Event Report: combined view across all hotels for an event ────────────────
@@ -13678,7 +13679,7 @@ def rfp_parse_document():
         return jsonify({'_error': str(e)})
 
 
-def _build_critical_dates_email(rfp, client_email='', hotel_name=''):
+def _build_critical_dates_email(rfp, client_email='', hotel_name='', hotel_contact=None):
     """Return (subject, body) for the critical-dates client email."""
     event_name = rfp['event_name'] or rfp['client_org'] or 'Your Event'
     start_date = rfp['start_date'] or ''
@@ -13738,6 +13739,28 @@ def _build_critical_dates_email(rfp, client_email='', hotel_name=''):
         'in advance so you have time to take action if needed.',
         '',
         'A copy of the signed contract is attached for your reference.',
+    ]
+
+    hc = hotel_contact or {}
+    hc_name  = hc.get('name', '').strip()
+    hc_email = hc.get('email', '').strip()
+    hc_phone = hc.get('phone', '').strip()
+    hc_title = hc.get('title', '').strip()
+    if hc_name or hc_email:
+        body_lines += [
+            '',
+            '── HOTEL SALES CONTACT ──',
+            '',
+            'For Direct Bill or Credit Card Authorization applications please reach out to the Hotel Sales Contact:',
+            '',
+        ]
+        if hc_name:  body_lines.append(hc_name)
+        if hc_title: body_lines.append(hc_title)
+        if hotel_name and not hc_name: body_lines.append(hotel_name)
+        if hc_phone: body_lines.append(hc_phone)
+        if hc_email: body_lines.append(hc_email)
+
+    body_lines += [
         '',
         'Please reach out if you have any questions.',
     ]
@@ -13746,17 +13769,23 @@ def _build_critical_dates_email(rfp, client_email='', hotel_name=''):
 
 
 def _rfp_email_lookup(db, rfp):
-    """Return (client_email, hotel_name) for an rfp row."""
-    client_email = ''
-    hotel_name   = ''
+    """Return (client_email, hotel_name, hotel_contact) for an rfp row.
+    hotel_contact is a dict with name/email/phone/title keys.
+    """
+    client_email  = ''
+    hotel_name    = ''
+    hotel_contact = {'name': '', 'email': '', 'phone': '', 'title': ''}
     if rfp['booking_id']:
         pc = db.execute(
-            "SELECT group_contact_email, hotel FROM pickup_config "
-            "WHERE booking_id=? LIMIT 1", (rfp['booking_id'],)
+            "SELECT group_contact_email, hotel, hotel_contact, hotel_contact_email "
+            "FROM pickup_config WHERE booking_id=? LIMIT 1", (rfp['booking_id'],)
         ).fetchone()
         if pc:
             client_email = pc['group_contact_email'] or ''
             hotel_name   = pc['hotel'] or ''
+            if pc['hotel_contact'] or pc['hotel_contact_email']:
+                hotel_contact['name']  = pc['hotel_contact'] or ''
+                hotel_contact['email'] = pc['hotel_contact_email'] or ''
     if not hotel_name:
         sel = db.execute(
             "SELECT hotel_name FROM rfp_hotel WHERE rfp_id=? AND status='selected' "
@@ -13764,7 +13793,18 @@ def _rfp_email_lookup(db, rfp):
         ).fetchone()
         if sel:
             hotel_name = sel['hotel_name'] or ''
-    return client_email, hotel_name
+    if not hotel_contact['name'] and not hotel_contact['email']:
+        rh = db.execute(
+            "SELECT contact_name, contact_email, contact_phone, contact_title "
+            "FROM rfp_hotel WHERE rfp_id=? AND status='selected' "
+            "ORDER BY updated_at DESC LIMIT 1", (rfp['id'],)
+        ).fetchone()
+        if rh:
+            hotel_contact['name']  = rh['contact_name']  or ''
+            hotel_contact['email'] = rh['contact_email'] or ''
+            hotel_contact['phone'] = rh['contact_phone'] or ''
+            hotel_contact['title'] = rh['contact_title'] or ''
+    return client_email, hotel_name, hotel_contact
 
 
 @app.route('/rfp/<int:rid>/email-dates')
@@ -13776,10 +13816,10 @@ def rfp_client_dates_email(rid):
         db.close()
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
-    client_email, hotel_name = _rfp_email_lookup(db, rfp)
+    client_email, hotel_name, hotel_contact = _rfp_email_lookup(db, rfp)
     db.close()
 
-    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name)
+    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name, hotel_contact=hotel_contact)
     raw_cd = rfp['critical_dates_json'] if rfp['critical_dates_json'] else '[]'
     try:
         critical_dates = sorted(json.loads(raw_cd), key=lambda x: x.get('date', ''))
@@ -13806,7 +13846,7 @@ def rfp_dates_email_launch(rid):
         db.close()
         flash('RFP not found.', 'error')
         return redirect(url_for('rfp_dashboard'))
-    client_email, hotel_name = _rfp_email_lookup(db, rfp)
+    client_email, hotel_name, hotel_contact = _rfp_email_lookup(db, rfp)
     contract_data     = bytes(rfp['contract_data']) if rfp['contract_data'] else None
     contract_filename = rfp['contract_filename'] or 'contract.pdf'
     # Mark as sent at the same time
@@ -13817,7 +13857,7 @@ def rfp_dates_email_launch(rid):
     db.commit()
     db.close()
 
-    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name)
+    subject, body = _build_critical_dates_email(rfp, client_email, hotel_name, hotel_contact=hotel_contact)
 
     def write_tmp(content, suffix, mode='w', encoding='utf-8'):
         t = tempfile.NamedTemporaryFile(mode=mode, suffix=suffix, delete=False,
