@@ -943,26 +943,37 @@ def import_bookings():
 
                 exists = db.execute('SELECT 1 FROM ReportPipeline WHERE BookingId = ?', (bid,)).fetchone()
                 if exists:
-                    # Update Commission Percent and Event ID if previously missing
-                    comm_idx    = fields.index('Commission Percent')
-                    eventid_idx = fields.index('Event ID')
-                    changed = False
-                    if values[comm_idx] is not None:
+                    # Update key fields from the import — always overwrite with CD data
+                    val_dict = dict(zip(fields, values))
+                    update_pairs = [
+                        ('BookingStatus',           val_dict.get('Booking Status')),
+                        ('BookingAssociate',         val_dict.get('Booking Associate')),
+                        ('StartDate',               val_dict.get('Start Date')),
+                        ('EndDate',                 val_dict.get('End Date')),
+                        ('AccountName',             val_dict.get('Account Name')),
+                        ('EventName',               val_dict.get('Event Name')),
+                        ('BookingName',             val_dict.get('Booking Name')),
+                        ('Customer',                val_dict.get('Customer')),
+                        ('Brand',                   val_dict.get('Brand')),
+                        ('Chain',                   val_dict.get('Chain')),
+                        ('PeakRooms',               val_dict.get('Peak Rooms')),
+                        ('TotalRoomNights',         val_dict.get('Total Room Nights')),
+                        ('RoomRate',                val_dict.get('Room Rate')),
+                        ('Revenue',                 val_dict.get('Revenue')),
+                        ('USDRevenue',              val_dict.get('USD Revenue')),
+                        ('CommissionPercent',        val_dict.get('Commission Percent')),
+                        ('USDCommissionableAmount', val_dict.get('USD Commissionable Amount')),
+                        ('EventID',                 val_dict.get('Event ID')),
+                    ]
+                    set_parts = [f'{col}=?' for col, v in update_pairs if v is not None]
+                    set_vals  = [v          for col, v in update_pairs if v is not None]
+                    if set_parts:
                         db.execute(
-                            'UPDATE ReportPipeline SET CommissionPercent = ? WHERE BookingId = ? AND (CommissionPercent IS NULL OR CommissionPercent = "")',
-                            (values[comm_idx], bid)
+                            f'UPDATE ReportPipeline SET {", ".join(set_parts)} WHERE BookingId=?',
+                            set_vals + [bid]
                         )
                         if db.execute('SELECT changes()').fetchone()[0]:
-                            changed = True
-                    if values[eventid_idx] is not None:
-                        db.execute(
-                            'UPDATE ReportPipeline SET EventID = ? WHERE BookingId = ? AND (EventID IS NULL OR EventID = "")',
-                            (values[eventid_idx], bid)
-                        )
-                        if db.execute('SELECT changes()').fetchone()[0]:
-                            changed = True
-                    if changed:
-                        updated += 1
+                            updated += 1
                     skipped += 1
                     continue
 
