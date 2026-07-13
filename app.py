@@ -4175,6 +4175,10 @@ def report_customer_summary():
     date_from   = (request.form.get('date_from')   or request.args.get('date_from',   default_start)).strip()
     date_to     = (request.form.get('date_to')     or request.args.get('date_to',     default_end)).strip()
     team_member = (request.form.get('team_member') or request.args.get('team_member', '')).strip()
+    date_mode   = (request.form.get('date_mode')   or request.args.get('date_mode',   'start')).strip()
+    if date_mode not in ('start', 'booked'):
+        date_mode = 'start'
+    date_col = 'BookedDate' if date_mode == 'booked' else 'StartDate'
     submitted   = request.method == 'POST' or bool(export)
 
     brand_rows, chain_groups, grand_total, grand_bookings = [], {}, 0.0, 0
@@ -4184,14 +4188,14 @@ def report_customer_summary():
         brand_rows, chain_groups, grand_total, grand_bookings = _query_customer_summary(
             conn, selected_customers, date_from, date_to,
             customer_col='AccountName', status_col='BookingStatus',
-            date_col='StartDate', contract_col='ContractedAmount',
+            date_col=date_col, contract_col='ContractedAmount',
             revenue_col='Revenue', chain_col='Chain', brand_col='Brand',
             city_col='City', state_col='State', cast_contract=False,
             team_member=team_member, team_member_col='BookingAssociate')
         city_meetings = _query_meeting_summary(
             conn, selected_customers, date_from, date_to,
             customer_col='AccountName', status_col='BookingStatus',
-            date_col='StartDate', contract_col='ContractedAmount',
+            date_col=date_col, contract_col='ContractedAmount',
             revenue_col='Revenue', event_col='EventName',
             booking_col='BookingId', hotel_col='Customer',
             city_col='City', state_col='State', cast_contract=False,
@@ -4249,7 +4253,7 @@ def report_customer_summary():
         chain_colors=chain_colors, city_count=city_count,
         city_meetings=city_meetings, city_map_data=city_map_data,
         team_members=team_members, team_member=team_member,
-        tm_customers=tm_customers,
+        tm_customers=tm_customers, date_mode=date_mode,
     )
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -5236,6 +5240,13 @@ def _ensure_cost_savings_tables(db):
     # pickup_config.contract_extracted_data — cache for the richer extractor.
     try:
         db.execute('ALTER TABLE pickup_config ADD COLUMN contract_extracted_data TEXT')
+        db.commit()
+    except Exception:
+        pass
+
+    # One-time cleanup: remove erroneously inserted booking 614206 (correct ID is 301247)
+    try:
+        db.execute("DELETE FROM ReportPipeline WHERE BookingId='614206'")
         db.commit()
     except Exception:
         pass
