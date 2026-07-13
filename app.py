@@ -979,7 +979,7 @@ def import_bookings():
 
                 placeholders_str = ', '.join(db_fields)
                 qmarks_str = ', '.join(['?' for _ in db_fields])
-                db.execute(f'INSERT INTO ReportPipeline ({placeholders_str}) VALUES ({qmarks_str})', values)
+                db.execute(f'INSERT OR IGNORE INTO ReportPipeline ({placeholders_str}) VALUES ({qmarks_str})', values)
                 added += 1
 
                 # Auto-create pickup tracking entry for this new booking
@@ -5251,6 +5251,24 @@ def _ensure_cost_savings_tables(db):
     # pickup_config.contract_extracted_data — cache for the richer extractor.
     try:
         db.execute('ALTER TABLE pickup_config ADD COLUMN contract_extracted_data TEXT')
+        db.commit()
+    except Exception:
+        pass
+
+    # Deduplicate ReportPipeline — keep the row with the highest rowid for each BookingId
+    try:
+        db.execute('''
+            DELETE FROM ReportPipeline
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid) FROM ReportPipeline GROUP BY BookingId
+            )
+        ''')
+        db.commit()
+    except Exception:
+        pass
+    # Enforce uniqueness on BookingId going forward
+    try:
+        db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_booking_id ON ReportPipeline (BookingId)')
         db.commit()
     except Exception:
         pass
