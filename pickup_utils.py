@@ -3475,11 +3475,20 @@ def parse_hhr_excel(file_bytes):
                     v = _num(row[i].value)
                     if v and v > 0:
                         contracted_block[d] = int(v)
-            # Total in col 12 (index 12)
-            if len(row) > 12:
-                stats['contracted_total'] = _num(row[12].value)
-            if len(row) > 13:
-                stats['contracted_rate'] = _num(row[13].value)
+            # Total may be in col 12 or 13 depending on hotel template
+            for _ci in (12, 13):
+                if len(row) > _ci:
+                    _v = _num(row[_ci].value)
+                    if _v and _v > 0:
+                        stats['contracted_total'] = _v
+                        break
+            # Rate is the next non-zero numeric column after the total
+            for _ci in (13, 14, 15):
+                if len(row) > _ci:
+                    _v = _num(row[_ci].value)
+                    if _v and _v > 0 and _v != stats.get('contracted_total'):
+                        stats['contracted_rate'] = _v
+                        break
 
         # Final total pickup
         elif 'final total pickup' in lbl:
@@ -3488,13 +3497,22 @@ def parse_hhr_excel(file_bytes):
                     v = _num(row[i].value)
                     if v and v > 0:
                         final_pickup_by_night[d] = int(v)
-            if len(row) > 12:
-                stats['final_total_pickup'] = _num(row[12].value)
+            # Total may be in col 12 or 13 depending on hotel template
+            for _ci in (12, 13):
+                if len(row) > _ci:
+                    _v = _num(row[_ci].value)
+                    if _v and _v > 0:
+                        stats['final_total_pickup'] = _v
+                        break
 
         # Total pickup inside block
         elif 'total pickup inside block' in lbl:
-            if len(row) > 12:
-                stats['pickup_inside_block'] = _num(row[12].value)
+            for _ci in (12, 13):
+                if len(row) > _ci:
+                    _v = _num(row[_ci].value)
+                    if _v and _v > 0:
+                        stats['pickup_inside_block'] = _v
+                        break
 
         # Audit pickup
         elif 'total audit pickup' in lbl:

@@ -4725,13 +4725,15 @@ def import_hhr():
                 _xl = _parse_xl(file_bytes)
             except Exception as _e:
                 _xl = {'error': str(_e)}
+            _nightly = _xl.get('final_pickup_by_night') or {}
+            _total_pickup = _xl.get('final_total_pickup') or sum(_nightly.values()) or 0
             parsed = {
                 'error':            _xl.get('error'),
                 'booking_id':       _xl.get('booking_id') or None,
                 'organization':     _xl.get('organization') or '',
                 'hotel':            _xl.get('hotel') or '',
                 'event_name':       _xl.get('event_name') or '',
-                'actual_pickup':    _xl.get('final_total_pickup') or 0,
+                'actual_pickup':    _total_pickup,
                 'total_revenue':    _xl.get('room_revenue') or None,
                 'avg_rate':         _xl.get('contracted_rate') or None,
                 'comm_pct':         _xl.get('commission_pct') or None,
