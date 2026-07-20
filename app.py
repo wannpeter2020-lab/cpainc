@@ -442,16 +442,29 @@ def dashboard():
     missing_commission_count = cats[3]['count'] + cats[4]['count']
 
     assoc_filter = '' if not is_kristin_view else ''
-    upcoming = db.execute('''
+    # StartDate is stored as M/D/YYYY — string comparison against ISO today is
+    # unreliable (e.g. "3/1/2021" > "2026-07-20" lexicographically). Filter in Python.
+    def _us_date_to_iso(s):
+        try:
+            parts = str(s or '').strip().split('/')
+            if len(parts) == 3:
+                return f"{int(parts[2]):04d}-{int(parts[0]):02d}-{int(parts[1]):02d}"
+        except Exception:
+            pass
+        return ''
+
+    _upcoming_raw = db.execute('''
         SELECT BookingId, EventName, Customer, AccountName, StartDate, BookingStatus,
                BookingAssociate AS associate
         FROM ReportPipeline
-        WHERE substr(StartDate,1,10) >= ?
-          AND (BookingStatus IS NULL OR BookingStatus NOT LIKE "%Cancel%")
+        WHERE (BookingStatus IS NULL OR BookingStatus NOT LIKE "%Cancel%")
           AND (LOWER(COALESCE(BookingAssociate,'')) = 'kristin house'
                OR LOWER(COALESCE(BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
-        ORDER BY StartDate ASC
-    ''', (today,)).fetchall()
+    ''').fetchall()
+    upcoming = sorted(
+        [u for u in _upcoming_raw if _us_date_to_iso(u['StartDate']) >= today],
+        key=lambda u: _us_date_to_iso(u['StartDate'])
+    )
     upcoming = [u for u in upcoming if is_kristin_view == _is_kristin(u['associate'])][:10]
 
     return render_template('dashboard.html',

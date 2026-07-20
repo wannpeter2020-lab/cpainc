@@ -429,7 +429,8 @@ def _query_meeting_summary(conn, customer, date_from, date_to,
                {state_col} as state,
                {event_col} as event_name,
                {booking_col} as booking_id,
-               substr({date_col}, 1, 10) as start_date,
+               substr(StartDate, 1, 10) as start_date,
+               substr(BookedDate, 1, 10) as booked_date,
                {hotel_col} as hotel,
                {rev_expr} as revenue
         FROM ReportPipeline r WHERE {wc}
@@ -443,11 +444,12 @@ def _query_meeting_summary(conn, customer, date_from, date_to,
             city_meetings[city] = {'state': r['state'] or '', 'total_revenue': 0.0, 'meetings': []}
         city_meetings[city]['total_revenue'] += r['revenue'] or 0
         city_meetings[city]['meetings'].append({
-            'event_name': r['event_name'] or '—',
-            'booking_id': r['booking_id'],
-            'start_date': r['start_date'] or '',
-            'hotel':      r['hotel'] or '—',
-            'revenue':    r['revenue'] or 0,
+            'event_name':  r['event_name'] or '—',
+            'booking_id':  r['booking_id'],
+            'start_date':  r['start_date'] or '',
+            'booked_date': r['booked_date'] or '',
+            'hotel':       r['hotel'] or '—',
+            'revenue':     r['revenue'] or 0,
         })
     city_meetings = dict(sorted(city_meetings.items(), key=lambda x: x[1]['total_revenue'], reverse=True))
     return city_meetings
@@ -525,21 +527,35 @@ def geocode_cities(city_state_list):
 def build_city_map_data(city_meetings):
     """
     Build list of map pin dicts from city_meetings structure.
-    Each dict: {city, state, count, revenue, lat, lng}
+    Produces one pin per city-year so pins can be color-coded by event year.
+    Each dict: {city, state, year, count, revenue, lat, lng}
     """
-    pairs = [(city, data.get('state', '')) for city, data in city_meetings.items()
-             if city and city.lower() != 'unknown']
+    city_year = {}
+    for city, data in city_meetings.items():
+        if not city or city.lower() == 'unknown':
+            continue
+        state = data.get('state', '')
+        for m in data.get('meetings', []):
+            year = (m.get('start_date') or '')[:4] or 'unknown'
+            key = (city, state, year)
+            if key not in city_year:
+                city_year[key] = {'city': city, 'state': state, 'year': year,
+                                  'count': 0, 'revenue': 0.0}
+            city_year[key]['count']   += 1
+            city_year[key]['revenue'] += m.get('revenue', 0)
+
+    pairs = list({(city, state) for (city, state, _) in city_year})
     coords = geocode_cities(pairs)
     pins = []
-    for city, data in city_meetings.items():
-        state = data.get('state', '')
+    for (city, state, year), d in city_year.items():
         coord = coords.get((city, state))
         if coord:
             pins.append({
                 'city':    city,
                 'state':   state,
-                'count':   len(data.get('meetings', [])),
-                'revenue': round(data.get('total_revenue', 0), 2),
+                'year':    year,
+                'count':   d['count'],
+                'revenue': round(d['revenue'], 2),
                 'lat':     coord[0],
                 'lng':     coord[1],
             })

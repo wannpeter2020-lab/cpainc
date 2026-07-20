@@ -7,7 +7,7 @@
   {%- set ns.cq = ns.cq ~ 'customer=' ~ (c | urlencode) ~ '&' -%}
 {%- endfor -%}
 {%- set tm_param = ('team_member=' ~ team_member|urlencode ~ '&') if team_member else '' -%}
-{%- set export_qs = ns.cq ~ tm_param ~ 'date_from=' ~ date_from ~ '&date_to=' ~ date_to -%}
+{%- set export_qs = ns.cq ~ tm_param ~ 'date_from=' ~ date_from ~ '&date_to=' ~ date_to ~ '&date_mode=' ~ date_mode -%}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Customer Summary Report</h4>
@@ -51,11 +51,26 @@
       </div>
 
       <div class="col-md-2">
-        <label class="form-label fw-semibold">Date From</label>
+        <label class="form-label fw-semibold">Date Type</label>
+        <div class="d-flex flex-column gap-1 pt-1">
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="date_mode" id="mode_start" value="start"
+                   {% if date_mode != 'booked' %}checked{% endif %}>
+            <label class="form-check-label" for="mode_start">Event Date</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="date_mode" id="mode_booked" value="booked"
+                   {% if date_mode == 'booked' %}checked{% endif %}>
+            <label class="form-check-label" for="mode_booked">Date Booked</label>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">{% if date_mode == 'booked' %}Booked Date{% else %}Event Date{% endif %} From</label>
         <input type="date" name="date_from" class="form-control" value="{{ date_from }}">
       </div>
       <div class="col-md-2">
-        <label class="form-label fw-semibold">Date To</label>
+        <label class="form-label fw-semibold">{% if date_mode == 'booked' %}Booked Date{% else %}Event Date{% endif %} To</label>
         <input type="date" name="date_to" class="form-control" value="{{ date_to }}">
       </div>
       <div class="col-md-2">
@@ -235,34 +250,65 @@
     </div>
   </div>
 
+  {# Year → pastel background for table rows #}
+  {%- set YEAR_BG = {
+    '2024': '#e2d9f3',
+    '2025': '#ffd6a5',
+    '2026': '#cfe2ff',
+    '2027': '#d1e7dd',
+    '2028': '#fff3cd',
+    '2029': '#f8d7da',
+    '2030': '#cff4fc',
+    '2031': '#e2e3e5',
+  } -%}
+
+  {# Collect years present in data for dynamic legend #}
+  {%- set ns2 = namespace(years_seen=[]) -%}
+  {%- for city, data in city_meetings.items() -%}
+    {%- for m in data.meetings -%}
+      {%- set yr = m.start_date[:4] if m.start_date else '' -%}
+      {%- if yr and yr not in ns2.years_seen -%}
+        {%- set ns2.years_seen = ns2.years_seen + [yr] -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endfor -%}
+
   {# ── Meeting Summary by City ─────────────────────────────────────────────── #}
   {% if city_meetings %}
   <div class="card mb-4">
-    <div class="card-header fw-semibold">Meeting Summary by City</div>
+    <div class="card-header fw-semibold d-flex align-items-center gap-3 flex-wrap">
+      Meeting Summary by City
+      <span class="d-flex gap-2 ms-2 flex-wrap">
+        {% for yr in ns2.years_seen | sort %}
+        <span class="badge" style="background:{{ YEAR_BG.get(yr, '#e2e3e5') }};color:#000;border:1px solid #ccc">{{ yr }}</span>
+        {% endfor %}
+      </span>
+    </div>
     <div class="table-responsive">
       <table class="table table-sm mb-0">
-        <thead class="table-dark">
+        <thead style="background:#f8f9fa;color:#000;border-bottom:2px solid #dee2e6">
           <tr>
-            <th>City / Meeting Name</th>
-            <th>Start Date</th>
-            <th>Hotel</th>
-            <th class="text-center">Booking ID</th>
-            <th class="text-end">Revenue (USD)</th>
+            <th style="color:#000">City / Meeting Name</th>
+            <th style="color:#000">Event Date</th>
+            <th style="color:#000">Booked Date</th>
+            <th style="color:#000">Hotel</th>
+            <th class="text-center" style="color:#000">Booking ID</th>
+            <th class="text-end" style="color:#000">Revenue (USD)</th>
           </tr>
         </thead>
         <tbody>
           {% for city, data in city_meetings.items() %}
           <tr style="background:#dce8f5;font-weight:600">
             <td>{{ city }}{% if data.state %}, {{ data.state }}{% endif %}</td>
-            <td></td>
-            <td></td>
-            <td></td>
+            <td></td><td></td><td></td><td></td>
             <td class="text-end">${{ '{:,.2f}'.format(data.total_revenue) }}</td>
           </tr>
           {% for m in data.meetings %}
-          <tr>
+          {%- set yr = m.start_date[:4] if m.start_date else '' -%}
+          <tr style="--bs-table-bg:{{ YEAR_BG.get(yr, 'transparent') }}">
             <td class="ps-4">{{ m.event_name }}</td>
-            <td class="text-muted small">{{ m.start_date | us_date if m.start_date else '—' }}</td>
+            <td class="small">{{ m.start_date | us_date }}</td>
+            <td class="small text-muted">{{ m.booked_date | us_date }}</td>
             <td class="small text-muted">{{ m.hotel }}</td>
             <td class="text-center">
               <a href="/booking/{{ m.booking_id | int }}" class="text-decoration-none small">
@@ -277,7 +323,7 @@
         <tfoot class="table-secondary fw-bold">
           <tr>
             <td>GRAND TOTAL</td>
-            <td></td><td></td><td></td>
+            <td></td><td></td><td></td><td></td>
             <td class="text-end">${{ '{:,.2f}'.format(grand_total) }}</td>
           </tr>
         </tfoot>
@@ -410,6 +456,22 @@ new Chart(document.getElementById('cityChart'), {
 </style>
 <script>
 (function(){
+  const YEAR_COLORS = {
+    '2024': { bg: '#6f42c1', fg: '#fff' },
+    '2025': { bg: '#fd7e14', fg: '#000' },
+    '2026': { bg: '#0d6efd', fg: '#fff' },
+    '2027': { bg: '#198754', fg: '#fff' },
+    '2028': { bg: '#e6ac00', fg: '#000' },
+    '2029': { bg: '#dc3545', fg: '#fff' },
+    '2030': { bg: '#0dcaf0', fg: '#000' },
+    '2031': { bg: '#6c757d', fg: '#fff' },
+  };
+  const DEFAULT_PIN = { bg: '#1a3a5c', fg: '#fff' };
+
+  function yearColor(year) {
+    return YEAR_COLORS[year] || DEFAULT_PIN;
+  }
+
   const allPins = {{ city_map_data | tojson }};
 
   // Continental 48 states + DC only — shown as map pins.
@@ -503,10 +565,11 @@ new Chart(document.getElementById('cityChart'), {
     return Math.round(32 + (count / maxCount) * 20);
   }
 
-  function makeIcon(count) {
+  function makeIcon(count, year) {
     const sz = pinSize(count);
+    const c  = yearColor(year);
     return L.divIcon({
-      html: `<div class="meeting-pin" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz*0.38)}px;">${count}</div>`,
+      html: `<div class="meeting-pin" style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz*0.38)}px;background:${c.bg};color:${c.fg};">${count}</div>`,
       className: '', iconSize: [sz,sz], iconAnchor: [sz/2,sz/2], popupAnchor: [0,-(sz/2+4)]
     });
   }
@@ -569,25 +632,25 @@ new Chart(document.getElementById('cityChart'), {
       const spreadLL = map.layerPointToLatLng(fPx);
       const rev    = p.revenue.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
       const label  = p.state ? `${p.city}, ${p.state}` : p.city;
+      const c      = yearColor(p.year);
 
-      L.marker(spreadLL, {icon: makeIcon(p.count)})
-        .bindPopup(`<b>${label}</b><br>${p.count} meeting${p.count!==1?'s':''}<br>Revenue: ${rev}`)
+      L.marker(spreadLL, {icon: makeIcon(p.count, p.year)})
+        .bindPopup(`<b>${label}</b><br>${p.year ? p.year + ' — ' : ''}${p.count} meeting${p.count!==1?'s':''}<br>Revenue: ${rev}`)
         .addTo(markerLayer);
 
       if (moved > LEADER_MIN) {
         let endPx = tPx;
-        // Clip leader so it never terminates under any other pin bubble
         for (let oi = 0; oi < pins.length; oi++) {
           if (oi === idx) continue;
           endPx = clipLine(fPx, endPx, finalPx[oi], pinSize(pins[oi].count)/2 + 4);
         }
         const termLL = map.layerPointToLatLng(endPx);
         L.polyline([spreadLL, termLL],{
-          color:'#1a3a5c', weight:3, opacity:0.75, dashArray:'6,4'
+          color: c.bg, weight:3, opacity:0.75, dashArray:'6,4'
         }).addTo(lineLayer);
         L.circleMarker(termLL,{
           pane:'dotsPane', radius:3.5,
-          color:'#fff', weight:1.5, fillColor:'#1a3a5c', fillOpacity:1
+          color:'#fff', weight:1.5, fillColor: c.bg, fillOpacity:1
         }).addTo(lineLayer);
       }
     }
@@ -595,6 +658,31 @@ new Chart(document.getElementById('cityChart'), {
 
   render();
   map.on('zoomend', render);
+
+  // ── Year legend ──────────────────────────────────────────────────────────
+  (function addLegend() {
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function() {
+      const div = L.DomUtil.create('div');
+      div.style.cssText = [
+        'background:rgba(255,255,255,0.93)', 'border:2px solid #ccc',
+        'border-radius:6px', 'padding:8px 12px', 'font-size:12px',
+        'box-shadow:0 2px 8px rgba(0,0,0,.2)', 'line-height:1.8'
+      ].join(';');
+      const entries = Object.entries(YEAR_COLORS).concat([['Other', DEFAULT_PIN]]);
+      div.innerHTML = '<div style="font-weight:700;margin-bottom:4px;color:#333">Event Year</div>' +
+        entries.map(([yr, c]) =>
+          `<div style="display:flex;align-items:center;gap:7px;">
+            <span style="display:inline-block;width:18px;height:18px;border-radius:50%;
+              background:${c.bg};border:2px solid #fff;
+              box-shadow:0 1px 3px rgba(0,0,0,.3);flex-shrink:0;"></span>
+            <span style="color:#333">${yr}</span>
+          </div>`
+        ).join('');
+      return div;
+    };
+    legend.addTo(map);
+  })();
 
   // ── International boxes overlaid on the map ──────────────────────────────
   // groups = [{label, count}, ...] already ordered
