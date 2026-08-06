@@ -19,7 +19,7 @@
         <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" required>
       </div>
       <div class="col-auto">
-        <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-search"></i> Run Report</button>
+        <button class="btn btn-primary btn-sm" type="submit" id="runReportBtn"><i class="bi bi-search" id="runReportIcon"></i> Run Report</button>
         {% if date_from %}<a href="/reports/commission?who={{ who }}" class="btn btn-outline-secondary btn-sm">Clear</a>{% endif %}
       </div>
       <div class="col-auto ms-3 text-muted small align-self-end pb-1">
@@ -155,4 +155,19 @@
 <div class="text-muted">Enter a date range above and click <strong>Run Report</strong>.</div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<style>
+  body.report-loading, body.report-loading * { cursor: wait !important; }
+</style>
+<script>
+document.querySelector('form').addEventListener('submit', function() {
+  const btn = document.getElementById('runReportBtn');
+  const icon = document.getElementById('runReportIcon');
+  btn.disabled = true;
+  icon.className = 'spinner-border spinner-border-sm';
+  document.body.classList.add('report-loading');
+});
+</script>
 {% endblock %}
