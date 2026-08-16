@@ -619,7 +619,7 @@ _GUEST_RE_HILTON_PMS = re.compile(
     r'\$[\d.]+[ \t]+'                          # Room rate
     r'N[ \t]+'                                 # RTG column
     r'(?:[A-Z]+[ \t]+)?'                       # Optional MOP (CC, CS, etc.)
-    r'(NA|AR|DP)[ \t]+'                        # Guest STATUS (active guests only)
+    r'(NA|AR|DP)[ \t]+'                        # Guest STATUS (active rooms only; CS/SX = cancelled)
     r'(\d{1,2}/\d{1,2}/\d{4})[ \t]+'          # Arrival  M/D/YYYY
     r'(\d{1,2}/\d{1,2}/\d{4})[ \t]*$'         # Departure M/D/YYYY (end of line)
     r'\n(\d{6,10})',                            # Confirmation number on next line
@@ -680,9 +680,13 @@ def _ai_parse_rooming_list_vision(images, api_key):
     rooming_prompt = (
         "You are parsing scanned pages of a hotel group rooming list.\n"
         "Extract every individual guest reservation visible across all the images.\n\n"
+        "IMPORTANT — some formats use TWO ROWS per guest (e.g. Preferred Hotels 'Group Guest List'):\n"
+        "  Row 1: Guest name | Arrival date | Confirmation # | VIP | Guests | Share | 'Advanced Payment' | Rate Plan | Room Type\n"
+        "  Row 2: (blank name) | Departure date | | | | | 'Reserved' | $Rate | Room #\n"
+        "In that case, pair each Row 1 with the Row 2 immediately below it to get one guest record.\n\n"
         "Return ONLY a valid JSON array — no other text, no markdown fences, no explanation.\n"
         "Each element must have exactly these keys:\n"
-        "  name       — guest name as it appears (e.g. \"Smith,John\" or \"John Smith\")\n"
+        "  name       — guest name as it appears (e.g. \"Smith, John\" or \"John Smith\")\n"
         "  conf_no    — reservation/confirmation number (string)\n"
         "  arrival    — arrival date in YYYY-MM-DD format\n"
         "  departure  — departure date in YYYY-MM-DD format\n"
@@ -690,8 +694,10 @@ def _ai_parse_rooming_list_vision(images, api_key):
         "  rooms      — integer number of rooms (default 1 if not shown)\n\n"
         "Rules:\n"
         "- Skip header rows, page headers/footers, summary/total rows, and note lines.\n"
+        "- Skip the 'Total Reservations' / 'Total Room Nights' footer line — do not include it as a guest.\n"
         "- If 'nights' is not explicit, compute it as (departure - arrival) in days.\n"
-        "- Convert all dates to YYYY-MM-DD regardless of the source format.\n"
+        "- Convert all dates to YYYY-MM-DD regardless of the source format (M/D/YYYY, MM/DD/YYYY, etc.).\n"
+        "- Each physical room reservation = one element, even if two guests share (rooms=1).\n"
         "- If a line has an obvious continuation (e.g. 'Res. Notes:'), skip it.\n"
         "- Include every guest across all pages — do not truncate the list."
     )
@@ -885,6 +891,39 @@ def parse_rooming_list_pdf(file_bytes):
                 text = page.extract_text() or ''
                 all_text += '\n' + text
 
+        # ── GPRMLSTS: Hilton/Embassy Suites Group Member Status Report ──
+        # Dedup by name+conf#+dates: collapses the same person listed twice (report
+        # artifact) but keeps different people on the same conf# as separate rooms.
+        # CS/SX (cancelled share) excluded by regex — not active room nights.
+        if 'REPORT: GPRMLSTS' in all_text:
+            seen_conf = set()
+            for m in _GUEST_RE_HILTON_PMS.finditer(all_text):
+                name_raw = m.group(1).strip().rstrip(',').rstrip()
+                arr_raw  = m.group(3)
+                dep_raw  = m.group(4)
+                conf_no  = m.group(5)
+                key = (name_raw.upper(), conf_no, arr_raw, dep_raw)
+                if key in seen_conf:
+                    continue
+                seen_conf.add(key)
+                try:
+                    arrival   = _mddyyyy_to_iso(arr_raw)
+                    departure = _mddyyyy_to_iso(dep_raw)
+                    nights    = (datetime.strptime(departure, '%Y-%m-%d') -
+                                 datetime.strptime(arrival,   '%Y-%m-%d')).days
+                except Exception:
+                    continue
+                if nights <= 0:
+                    continue
+                guests.append({
+                    'name':      name_raw,
+                    'conf_no':   conf_no,
+                    'arrival':   arrival,
+                    'departure': departure,
+                    'nights':    nights,
+                    'rooms':     1,
+                })
+
         for m in _GUEST_RE.finditer(all_text):
             name_raw  = m.group(1).strip().rstrip(',')
             conf_no   = m.group(2)
@@ -1061,7 +1100,7 @@ def parse_rooming_list_pdf(file_bytes):
                     import os
                     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
                 if api_key:
-                    images = _pdf_pages_to_images(file_bytes, max_pages=20, dpi=100)
+                    images = _pdf_pages_to_images(file_bytes, max_pages=20, dpi=150)
                     if images:
                         ai_guests, ai_error = _ai_parse_rooming_list_vision(images, api_key)
                         if ai_guests:
@@ -3425,6 +3464,8 @@ def parse_hhr_excel(file_bytes):
 
     stats = {}
     date_cols = {}   # col_index → 'YYYY-MM-DD'
+    total_col = None  # column index for row-total (Total Room Nights)
+    rate_col  = None  # column index for nightly rate
     contracted_block = {}
     final_pickup_by_night = {}
 
@@ -3445,7 +3486,7 @@ def parse_hhr_excel(file_bytes):
             for ci, cell in enumerate(row):
                 cv = _sv(cell.value).lower().rstrip(':')
                 if 'booking #' in cv or 'booking id' in cv or 'booking number' in cv:
-                    for offset in range(1, 4):
+                    for offset in range(1, 7):
                         if ci + offset >= len(row):
                             break
                         bv = _sv(row[ci + offset].value)
@@ -3456,17 +3497,30 @@ def parse_hhr_excel(file_bytes):
                                 stats['booking_id'] = bv
                             break
 
-        # Date header row — find which columns have dates
+        # Date header row — find which columns have dates and where the total column is
         # Some HHRs put dates in DATE row, others put them in DAY row
         elif lbl in ('date', 'day') and not date_cols:
+            past_dates = False
             for i, cell in enumerate(row):
                 if i < 2:
                     continue
                 d = _to_date(cell.value)
                 if d:
                     date_cols[i] = d
-                elif date_cols:
+                elif date_cols and not past_dates:
+                    past_dates = True
+                    # Scan remaining cols for 'Total' and 'Rate' header labels
+                    for j in range(i, len(row)):
+                        cv = _sv(row[j].value).lower()
+                        if 'total' in cv and total_col is None:
+                            total_col = j
+                        elif ('rate' in cv or 'avg' in cv) and rate_col is None and total_col is not None:
+                            rate_col = j
                     break
+            # Fallback: total is one column after the last date
+            if not total_col and date_cols:
+                total_col = max(date_cols.keys()) + 1
+                rate_col  = total_col + 1
 
         # Contracted block row
         elif 'contracted block' in lbl and not contracted_block:
@@ -3475,20 +3529,10 @@ def parse_hhr_excel(file_bytes):
                     v = _num(row[i].value)
                     if v and v > 0:
                         contracted_block[d] = int(v)
-            # Total may be in col 12 or 13 depending on hotel template
-            for _ci in (12, 13):
-                if len(row) > _ci:
-                    _v = _num(row[_ci].value)
-                    if _v and _v > 0:
-                        stats['contracted_total'] = _v
-                        break
-            # Rate is the next non-zero numeric column after the total
-            for _ci in (13, 14, 15):
-                if len(row) > _ci:
-                    _v = _num(row[_ci].value)
-                    if _v and _v > 0 and _v != stats.get('contracted_total'):
-                        stats['contracted_rate'] = _v
-                        break
+            if total_col and len(row) > total_col:
+                stats['contracted_total'] = _num(row[total_col].value)
+            if rate_col and len(row) > rate_col:
+                stats['contracted_rate'] = _num(row[rate_col].value)
 
         # Final total pickup
         elif 'final total pickup' in lbl:
@@ -3497,22 +3541,13 @@ def parse_hhr_excel(file_bytes):
                     v = _num(row[i].value)
                     if v and v > 0:
                         final_pickup_by_night[d] = int(v)
-            # Total may be in col 12 or 13 depending on hotel template
-            for _ci in (12, 13):
-                if len(row) > _ci:
-                    _v = _num(row[_ci].value)
-                    if _v and _v > 0:
-                        stats['final_total_pickup'] = _v
-                        break
+            if total_col and len(row) > total_col:
+                stats['final_total_pickup'] = _num(row[total_col].value)
 
         # Total pickup inside block
         elif 'total pickup inside block' in lbl:
-            for _ci in (12, 13):
-                if len(row) > _ci:
-                    _v = _num(row[_ci].value)
-                    if _v and _v > 0:
-                        stats['pickup_inside_block'] = _v
-                        break
+            if total_col and len(row) > total_col:
+                stats['pickup_inside_block'] = _num(row[total_col].value)
 
         # Audit pickup
         elif 'total audit pickup' in lbl:
@@ -6085,6 +6120,48 @@ def parse_columnar_pickup_pdf(file_bytes, filename=''):
     if not text.strip():
         return {'pairs': [], 'text': text, 'source': '', 'error': 'No text extracted from PDF'}
 
+    # ── "Group Forecast Summary" format (e.g. Cincinnati Fidelity / Springer-Miller) ──
+    # Header: "Between MM/DD/YYYY and MM/DD/YYYY"
+    # Data rows: "Group P/U  0 12 12 12" — one value per event night in range
+    if 'group forecast summary' in text.lower():
+        m_range = re.search(
+            r'Between\s+(\d{1,2}/\d{1,2}/\d{4})\s+and\s+(\d{1,2}/\d{1,2}/\d{4})',
+            text, re.IGNORECASE
+        )
+        if m_range:
+            from datetime import date as _date, timedelta as _td
+            def _parse_mdy(s):
+                mo, dy, yr = s.split('/')
+                return _date(int(yr), int(mo), int(dy))
+            start_d = _parse_mdy(m_range.group(1))
+            end_d   = _parse_mdy(m_range.group(2))
+            event_dates = []
+            cur = start_d
+            while cur <= end_d:
+                event_dates.append(cur.strftime('%Y-%m-%d'))
+                cur += _td(days=1)
+
+            # Look for "Group P/U" row first, then bare "P/U" row.
+            # Strip trailing Total column if present (len == expected + 1).
+            pu_nums = None
+            for pattern in (r'Group\s+P/U\s+([\d\s]+)', r'\bP/U\s+([\d\s]+)'):
+                m_pu = re.search(pattern, text, re.IGNORECASE)
+                if m_pu:
+                    nums = [int(x) for x in m_pu.group(1).split()]
+                    if len(nums) == len(event_dates) + 1:
+                        nums = nums[:-1]   # drop trailing Total column
+                    if len(nums) == len(event_dates):
+                        pu_nums = nums
+                        break
+
+            if pu_nums is not None:
+                pairs = [{'date': d, 'count': c}
+                         for d, c in zip(event_dates, pu_nums)]
+                return {'pairs': pairs, 'text': text,
+                        'source': 'Group Forecast Summary', 'error': None}
+            return {'pairs': [], 'text': text, 'source': 'Group Forecast Summary',
+                    'error': 'Could not find Group P/U row in Group Forecast Summary'}
+
     # ── "Group Pickup Detail" format (Opera/Hilton row-per-date report) ─────────
     if 'group pickup detail' in text.lower():
         _gpd_re = re.compile(
@@ -6136,16 +6213,28 @@ def parse_columnar_pickup_pdf(file_bytes, filename=''):
     year = None
     start_month = None
 
-    for line in lines[:day_row_idx + 6]:
-        m = re.search(r'(?:From Date|Start Date|Filter From Date)\s+(\d{1,2})[/\-]\d{1,2}[/\-](\d{2,4})',
+    # Priority 1: "Filter From Date" anywhere in doc (report range, not block attribute)
+    for line in lines:
+        m = re.search(r'Filter From Date\s+(\d{1,2})[/\-]\d{1,2}[/\-](\d{2,4})',
                       line, re.IGNORECASE)
         if m:
-            if start_month is None:
-                start_month = int(m.group(1))
+            start_month = int(m.group(1))
             yr_raw = int(m.group(2))
-            if year is None:
-                year = 2000 + yr_raw if yr_raw < 100 else yr_raw
+            year = 2000 + yr_raw if yr_raw < 100 else yr_raw
             break
+
+    # Priority 2: "From Date" or "Start Date" near the header (not embedded in block data rows)
+    if start_month is None:
+        for line in lines[:day_row_idx + 3]:
+            m = re.search(r'(?:From Date|Start Date)\s+(\d{1,2})[/\-]\d{1,2}[/\-](\d{2,4})',
+                          line, re.IGNORECASE)
+            if m:
+                if start_month is None:
+                    start_month = int(m.group(1))
+                yr_raw = int(m.group(2))
+                if year is None:
+                    year = 2000 + yr_raw if yr_raw < 100 else yr_raw
+                break
 
     if year is None:
         for line in lines[:10]:
@@ -6221,6 +6310,7 @@ def parse_columnar_pickup_pdf(file_bytes, filename=''):
                     pickup_values = nums
                     source = 'Pickup'
                     break
+
 
     if pickup_values is None:
         return {'pairs': [], 'text': text, 'source': '',
