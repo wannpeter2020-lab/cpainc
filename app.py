@@ -120,6 +120,25 @@ def close_db(e=None):
     if db:
         db.close()
 
+@app.errorhandler(Exception)
+def handle_db_transient_error(e):
+    import sqlite3 as _sq
+    if isinstance(e, _sq.DatabaseError) and 'authorization denied' in str(e).lower():
+        return (
+            '<!doctype html><html><head>'
+            '<meta http-equiv="refresh" content="5">'
+            '<title>Database Busy</title>'
+            '<style>body{font-family:sans-serif;padding:40px;color:#555}'
+            'h2{color:#c0392b}</style></head><body>'
+            '<h2>Database Temporarily Unavailable</h2>'
+            '<p>Dropbox is syncing the database file. The page will reload automatically in 5 seconds.</p>'
+            '<p><a href="javascript:location.reload()">Reload now</a></p>'
+            '</body></html>',
+            503,
+        )
+    raise e
+
+
 # ── Filters ───────────────────────────────────────────────────────────────────
 
 @app.template_filter('fromjson')
@@ -1265,8 +1284,10 @@ def import_payments():
                         'Date':                                               'Date',
                         'Currency':                                           'Currency',
                         'Payment':                                            'Payment',
+                        'Payment Amount':                                     'Payment',
                         'Converted Currency':                                 'Converted Currency',
                         'Payment (converted)':                                'Amount (USD)',
+                        'Payment Amount (USD)':                               'Amount (USD)',
                     }
                     df.columns = [col_map.get(str(c).strip(), str(c).strip()) for c in df.columns]
 
@@ -1347,8 +1368,10 @@ def import_payments():
                         skipped += 1
                         continue
 
+                import re as _re_adv
                 invoice = str(row.get('Invoice Number', '') or '').upper()
-                is_advance = 1 if ('HI INC' in invoice or 'MI INC' in invoice) else 0
+                is_advance = 1 if (_re_adv.search(r'-HI(?:\b|$)|-MI(?:\b|$)', invoice) or
+                                   'HI INC' in invoice or 'MI INC' in invoice) else 0
 
                 booking_exists = db.execute('SELECT 1 FROM ReportPipeline WHERE BookingId = ?', (booking_id,)).fetchone()
                 if not booking_exists:
@@ -1638,10 +1661,13 @@ def import_voucher():
                         'hotel':      row['hotel'],
                     })
 
+                import re as _re_adv2
+                is_advance = 1 if _re_adv2.search(r'-HI(?:\b|$)|-MI(?:\b|$)', invoice_num, _re_adv2.IGNORECASE) else 0
+
                 db.execute('''INSERT INTO ChkRegNote
                     (BookingID, FinalPayment, Check_, DateOnCheck, EntryDate, SpecialNotes, Cancelled, AuditFlag, Advance)
-                    VALUES (?,?,?,?,?,?,0,0,0)''',
-                    (bid, usd_amount, check_num, payment_date, today, special_notes))
+                    VALUES (?,?,?,?,?,?,0,0,?)''',
+                    (bid, usd_amount, check_num, payment_date, today, special_notes, is_advance))
                 file_added += 1
 
             total_added   += file_added
@@ -1931,10 +1957,14 @@ def _commission_report_data(db, date_from, date_to, today, who):
     query_b = base_select + '''
         WHERE ci.invoiced IS NOT NULL AND ci.invoiced > 0
         AND COALESCE(pay.total_paid, 0) > 0
-        AND COALESCE(pay.total_paid, 0) < ci.invoiced * 0.99
         AND (ci.inv_currency IS NULL OR ci.inv_currency = 'USD')
     ''' + assoc_filter + ' ORDER BY r.StartDate'
     set_b = [dict(x) for x in db.execute(query_b).fetchall()]
+
+    default_split  = get_commission_split()
+    account_splits = get_account_splits()
+    kristin_split  = get_kristin_split()
+    kristin_cut    = get_kristin_cut()
 
     seen = {str(x['booking_id']) for x in set_a}
     merged = list(set_a)
@@ -1942,12 +1972,13 @@ def _commission_report_data(db, date_from, date_to, today, who):
         bid = str(x['booking_id'])
         if bid in seen or bid in dismissed:
             continue
-        seen.add(bid); merged.append(x)
+        b_kshare = kristin_split if (x.get('associate') or '').strip().lower() == 'kristin house' else kristin_cut
+        b_inv_full = float(x['invoiced']) if x.get('invoiced') is not None else None
+        b_inv = round(b_inv_full * b_kshare, 2) if b_inv_full is not None else None
+        b_paid = float(x.get('paid_total') or 0)
+        if b_inv and b_inv > 0 and b_paid < b_inv * 0.99:
+            seen.add(bid); merged.append(x)
 
-    default_split  = get_commission_split()
-    account_splits = get_account_splits()
-    kristin_split  = get_kristin_split()
-    kristin_cut    = get_kristin_cut()
     for r in merged:
         bid = str(r['booking_id'])
         split = effective_split(r.get('associate'), r.get('account'), r.get('country'),
@@ -11208,9 +11239,12 @@ def pickup_import_completed_hhr(cid):
     if filename.endswith('.pdf'):
         from pickup_utils import parse_hhr_pdf as _parse_pdf
         parsed = _parse_pdf(file_bytes)
+        pickup_by_night = parsed.get('pickup_by_night') or {}
     elif filename.endswith(('.xlsx', '.xlsm', '.xls')):
         from pickup_utils import parse_hhr_excel as _parse_xl
         parsed = _parse_xl(file_bytes)
+        # parse_hhr_excel returns per-night data under 'final_pickup_by_night'
+        pickup_by_night = parsed.get('final_pickup_by_night') or {}
     else:
         flash('Unsupported file type. Upload a PDF or Excel file.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
@@ -11218,8 +11252,6 @@ def pickup_import_completed_hhr(cid):
     if parsed.get('error'):
         flash(f'Could not parse HHR: {parsed["error"]}', 'error')
         return redirect(url_for('pickup_event', cid=cid))
-
-    pickup_by_night = parsed.get('pickup_by_night') or {}
     if not pickup_by_night:
         flash('No per-night pickup data found in the uploaded file.', 'error')
         return redirect(url_for('pickup_event', cid=cid))
