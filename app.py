@@ -6878,6 +6878,34 @@ def admin_download_db():
     )
 
 
+@app.route('/admin/fix-voucher-1187')
+def admin_fix_voucher_1187():
+    """One-time fix: delete duplicate/wrong ChkRegNote rows for voucher 00001187/104."""
+    user = get_current_user()
+    if not user or not has_permission(user, 'admin_panel'):
+        return 'Forbidden — admin login required.', 403
+    db = get_db()
+    # Verify the bad rows still exist before deleting
+    bad = db.execute(
+        "SELECT ChkRegID, BookingID, FinalPayment FROM ChkRegNote WHERE ChkRegID IN (42360958, 42360966)"
+    ).fetchall()
+    good = db.execute(
+        "SELECT ChkRegID, BookingID, FinalPayment FROM ChkRegNote WHERE ChkRegID IN (42361149, 42361150)"
+    ).fetchall()
+    if not bad:
+        return f'Nothing to fix — rows 42360958 and 42360966 not found. Correct rows present: {list(good)}', 200
+    db.execute("DELETE FROM ChkRegNote WHERE ChkRegID IN (42360958, 42360966)")
+    db.commit()
+    total = db.execute(
+        "SELECT ROUND(SUM(FinalPayment),2) FROM ChkRegNote WHERE Check_='00001187/104'"
+    ).fetchone()[0]
+    return (
+        f'Fixed. Deleted: {[dict(r) for r in bad]}. '
+        f'Correct rows: {[dict(r) for r in good]}. '
+        f'Voucher total now: ${total}'
+    ), 200
+
+
 @app.route('/admin/activity-log')
 def admin_activity_log():
     user = get_current_user()
