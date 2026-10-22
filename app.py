@@ -1,6 +1,7 @@
 import os
 import io
 import json
+import re
 import sqlite3
 import functools
 import tempfile
@@ -82,6 +83,21 @@ def send_email(to_addrs, subject, body_html, attachments=None):
     except Exception as e:
         return False, str(e)
 
+def _sql_norm_date(value):
+    """SQL function NDATE(): return 'YYYY-MM-DD' for ISO or M/D/YYYY text dates.
+    SQLite's DATE() returns NULL for M/D/YYYY, which silently dropped bookings
+    imported in that format from date-range reports."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    m = re.match(r'(\d{4})-(\d{1,2})-(\d{1,2})', s)
+    if m:
+        return f'{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}'
+    m = re.match(r'(\d{1,2})/(\d{1,2})/(\d{4})', s)
+    if m:
+        return f'{int(m.group(3)):04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}'
+    return None
+
 def get_db():
     """
     Open a SQLite connection (cached on flask.g) with a small retry on
@@ -103,6 +119,7 @@ def get_db():
             try:
                 g.db = sqlite3.connect(DATABASE, timeout=10)
                 g.db.row_factory = sqlite3.Row
+                g.db.create_function('NDATE', 1, _sql_norm_date, deterministic=True)
                 return g.db
             except sqlite3.Error as e:
                 last_err = e
@@ -1985,16 +2002,16 @@ def _commission_report_data(db, date_from, date_to, today, who):
              OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
     '''
     query_a = base_select + '''
-        WHERE DATE(r.StartDate) BETWEEN ? AND ?
-        AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR DATE(r.StartDate) > ?)
-    ''' + assoc_filter + ' ORDER BY r.StartDate'
+        WHERE NDATE(r.StartDate) BETWEEN ? AND ?
+        AND (pay.pay_count IS NULL OR pay.pay_count = 0 OR NDATE(r.StartDate) > ?)
+    ''' + assoc_filter + ' ORDER BY NDATE(r.StartDate)'
     set_a = [dict(x) for x in db.execute(query_a, (date_from, date_to, today)).fetchall()]
 
     query_b = base_select + '''
         WHERE ci.invoiced IS NOT NULL AND ci.invoiced > 0
         AND COALESCE(pay.total_paid, 0) > 0
         AND (ci.inv_currency IS NULL OR ci.inv_currency = 'USD')
-    ''' + assoc_filter + ' ORDER BY r.StartDate'
+    ''' + assoc_filter + ' ORDER BY NDATE(r.StartDate)'
     set_b = [dict(x) for x in db.execute(query_b).fetchall()]
 
     default_split  = get_commission_split()
@@ -2151,10 +2168,8 @@ def report_payments():
                 FROM ChkRegNote WHERE (Cancelled IS NULL OR Cancelled = 0)
                 GROUP BY BookingID
             ) all_pay ON all_pay.BookingID = c.BookingID
-            WHERE DATE(c.DateOnCheck) BETWEEN ? AND ?
+            WHERE NDATE(c.DateOnCheck) BETWEEN ? AND ?
             AND (c.Cancelled IS NULL OR c.Cancelled = 0)
-            AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
-                 OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
             ORDER BY c.DateOnCheck DESC
         '''
         raw = db.execute(query, (date_from, date_to)).fetchall()
@@ -2242,10 +2257,8 @@ def report_payments_export():
         LEFT JOIN (SELECT BookingID, COUNT(*) AS pay_count, SUM(COALESCE(FinalPayment,0)) AS pay_total
                    FROM ChkRegNote WHERE (Cancelled IS NULL OR Cancelled = 0) GROUP BY BookingID) all_pay
             ON all_pay.BookingID = c.BookingID
-        WHERE DATE(c.DateOnCheck) BETWEEN ? AND ?
+        WHERE NDATE(c.DateOnCheck) BETWEEN ? AND ?
         AND (c.Cancelled IS NULL OR c.Cancelled = 0)
-        AND (LOWER(COALESCE(r.BookingAssociate,'')) = 'kristin house'
-             OR LOWER(COALESCE(r.BookingType,'')) NOT IN ('other services', 'other', 'conference management', 'cm'))
         ORDER BY c.DateOnCheck DESC
     '''
     raw = db.execute(query, (date_from, date_to)).fetchall()
