@@ -120,23 +120,36 @@ def close_db(e=None):
     if db:
         db.close()
 
+_DROPBOX_TRANSIENT_PAGE = (
+    '<!doctype html><html><head>'
+    '<title>Dropbox Sync</title>'
+    '<style>body{font-family:sans-serif;padding:40px;color:#555}h2{color:#c0392b}'
+    '#c{font-size:2rem;animation:s 1s infinite}@keyframes s{0%,100%{opacity:1}50%{opacity:.3}}</style>'
+    '</head><body>'
+    '<p id="c">&#8635;</p>'
+    '<h2>Dropbox is Syncing</h2>'
+    '<p>A file is temporarily locked. Reloading in <span id="t">5</span> seconds…</p>'
+    '<p><a href="javascript:location.reload()">Reload now</a></p>'
+    '<script>'
+    'var n=5;var i=setInterval(function(){'
+    'n--;document.getElementById("t").textContent=n;'
+    'if(n<=0){clearInterval(i);location.reload();}},1000);'
+    '</script>'
+    '</body></html>'
+)
+
 @app.errorhandler(Exception)
-def handle_db_transient_error(e):
+def handle_dropbox_transient_error(e):
     import sqlite3 as _sq
-    if isinstance(e, _sq.DatabaseError) and 'authorization denied' in str(e).lower():
-        return (
-            '<!doctype html><html><head>'
-            '<meta http-equiv="refresh" content="5">'
-            '<title>Database Busy</title>'
-            '<style>body{font-family:sans-serif;padding:40px;color:#555}'
-            'h2{color:#c0392b}</style></head><body>'
-            '<h2>Database Temporarily Unavailable</h2>'
-            '<p>Dropbox is syncing the database file. The page will reload automatically in 5 seconds.</p>'
-            '<p><a href="javascript:location.reload()">Reload now</a></p>'
-            '</body></html>',
-            503,
-        )
-    raise e
+    _is_db_auth = isinstance(e, _sq.DatabaseError) and 'authorization denied' in str(e).lower()
+    _is_perm    = isinstance(e, PermissionError) and 'CloudStorage' in str(getattr(e, 'filename', '') or '')
+    if _is_db_auth or _is_perm:
+        from flask import Response
+        return Response(_DROPBOX_TRANSIENT_PAGE, status=503, mimetype='text/html')
+    from flask import current_app
+    if current_app.debug:
+        raise e
+    return 'An unexpected error occurred.', 500
 
 
 # ── Filters ───────────────────────────────────────────────────────────────────
@@ -1609,6 +1622,7 @@ def import_voucher():
                 return row['amount']
 
             file_added, file_skipped = 0, 0
+            file_rows = []
 
             for row in booking_rows:
                 bid = row['booking_id']
@@ -1636,6 +1650,11 @@ def import_voucher():
                 ).fetchone()
                 if dup:
                     file_skipped += 1
+                    file_rows.append({
+                        'booking_id': bid, 'invoice': invoice_num,
+                        'usd_amount': usd_amount, 'status': 'skipped',
+                        'new_booking': False, 'account': '', 'event': '', 'hotel': '',
+                    })
                     continue
 
                 notes_parts = []
@@ -1647,8 +1666,11 @@ def import_voucher():
                 notes_parts.append('Voucher Import')
                 special_notes = ' | '.join(notes_parts)
 
-                booking_exists = db.execute('SELECT 1 FROM ReportPipeline WHERE BookingId=?', (bid,)).fetchone()
-                if not booking_exists:
+                booking_data = db.execute(
+                    'SELECT AccountName, EventName, Customer FROM ReportPipeline WHERE BookingId=?', (bid,)
+                ).fetchone()
+                is_new_booking = not booking_data
+                if is_new_booking:
                     db.execute('''INSERT INTO ReportPipeline
                         (BookingId, BookingType, AccountName, EventName, Customer, EndDate, BookingStatus)
                         VALUES (?,?,?,?,?,?,"Definite")''',
@@ -1660,6 +1682,13 @@ def import_voucher():
                         'event':      row['bname'],
                         'hotel':      row['hotel'],
                     })
+                    row_account = row['account'] or ''
+                    row_event   = row['bname'] or ''
+                    row_hotel   = row['hotel'] or ''
+                else:
+                    row_account = booking_data['AccountName'] or ''
+                    row_event   = booking_data['EventName'] or ''
+                    row_hotel   = booking_data['Customer'] or ''
 
                 import re as _re_adv2
                 is_advance = 1 if _re_adv2.search(r'-HI(?:\b|$)|-MI(?:\b|$)', invoice_num, _re_adv2.IGNORECASE) else 0
@@ -1669,6 +1698,12 @@ def import_voucher():
                     VALUES (?,?,?,?,?,?,0,0,?)''',
                     (bid, usd_amount, check_num, payment_date, today, special_notes, is_advance))
                 file_added += 1
+                file_rows.append({
+                    'booking_id': bid, 'invoice': invoice_num,
+                    'usd_amount': usd_amount, 'status': 'added',
+                    'new_booking': is_new_booking,
+                    'account': row_account, 'event': row_event, 'hotel': row_hotel,
+                })
 
             total_added   += file_added
             total_skipped += file_skipped
@@ -1681,6 +1716,7 @@ def import_voucher():
                 'currency':     currency,
                 'amt_usd':      amt_usd,
                 'error':        None,
+                'rows':         file_rows,
             })
 
         db.commit()

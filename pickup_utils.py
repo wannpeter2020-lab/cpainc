@@ -699,7 +699,8 @@ def _ai_parse_rooming_list_vision(images, api_key):
         "- Convert all dates to YYYY-MM-DD regardless of the source format (M/D/YYYY, MM/DD/YYYY, etc.).\n"
         "- Each physical room reservation = one element, even if two guests share (rooms=1).\n"
         "- If a line has an obvious continuation (e.g. 'Res. Notes:'), skip it.\n"
-        "- Include every guest across all pages — do not truncate the list."
+        "- Include every guest across all pages — do not truncate the list.\n"
+        "- Skip any reservation whose STATUS column shows CXL, CANCELLED, CANCEL, or similar — cancelled reservations should not be included."
     )
 
     content = [{'type': 'text', 'text': rooming_prompt}]
@@ -1100,7 +1101,7 @@ def parse_rooming_list_pdf(file_bytes):
                     import os
                     api_key = os.environ.get('ANTHROPIC_API_KEY', '').strip()
                 if api_key:
-                    images = _pdf_pages_to_images(file_bytes, max_pages=20, dpi=150)
+                    images = _pdf_pages_to_images(file_bytes, max_pages=20, dpi=200)
                     if images:
                         ai_guests, ai_error = _ai_parse_rooming_list_vision(images, api_key)
                         if ai_guests:
@@ -3422,6 +3423,124 @@ def _parse_one_grid(ws, sheet_name, start_col):
     }
 
 
+def _parse_group_block_report_excel(ws):
+    """Parse a PMS 'Group Block Report' Excel format.
+    Detected when cell A1 = 'Group Block Report'.
+    Returns same-shape dict as parse_hhr_excel, or None if not this format.
+    """
+    import re
+    from datetime import date as _date, datetime as _dt
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows or str(rows[0][0] or '').strip() != 'Group Block Report':
+        return None
+
+    out = {
+        'error': None, 'hotel': None, 'organization': None, 'event_name': None,
+        'booking_id': None, 'commission_pct': None,
+        'contracted_total': 0, 'contracted_block': {}, 'contracted_rate': None,
+        'final_total_pickup': None, 'final_pickup_by_night': {},
+        'room_revenue': None, 'commissionable_revenue': None,
+    }
+
+    for row in rows[:10]:
+        val = str(row[0] or '').strip()
+        if val.startswith('PROPERTY:'):
+            hotel = val[len('PROPERTY:'):].strip()
+            hotel = re.sub(r'^[A-Z0-9]{2,6}\s*-\s*', '', hotel).strip()
+            out['hotel'] = hotel
+            break
+    if not out['hotel']:
+        for row in reversed(rows):
+            if row[0] and str(row[0]).strip():
+                out['hotel'] = str(row[0]).strip()
+                break
+
+    start_date = None
+    for row in rows[:10]:
+        val = str(row[0] or '').strip()
+        m = re.search(r'Between\s+(\d{1,2}/\d{1,2}/\d{4})\s+and\s+(\d{1,2}/\d{1,2}/\d{4})', val)
+        if m:
+            start_date = _dt.strptime(m.group(1), '%m/%d/%Y').date()
+            break
+
+    if not start_date:
+        out['error'] = 'Group Block Report: could not find date range'
+        return out
+
+    skip_prefixes = ('Group Block', 'Between', 'PROPERTY', 'USER', 'DATE', 'CURRENCY', 'Start Date')
+    for row in rows[6:20]:
+        val = str(row[0] or '').strip()
+        if val and not any(val.startswith(p) for p in skip_prefixes):
+            if not re.match(r'^(Room Type|B\d|S\d)', val):
+                out['event_name'] = val[:80]
+                break
+
+    rt_idx = None
+    for i, row in enumerate(rows):
+        if str(row[0] or '').strip() == 'Room Totals':
+            rt_idx = i
+            break
+    if rt_idx is None:
+        out['error'] = 'Group Block Report: no Room Totals section found'
+        return out
+
+    col_date_map = {}
+    for i in range(rt_idx, min(rt_idx + 4, len(rows))):
+        row = rows[i]
+        day_nums = {j: int(row[j]) for j in range(2, 15)
+                    if j < len(row) and isinstance(row[j], (int, float)) and 1 <= row[j] <= 31}
+        if len(day_nums) >= 2:
+            ref = start_date
+            for col_idx in sorted(day_nums.keys()):
+                dn = day_nums[col_idx]
+                try:
+                    candidate = _date(ref.year, ref.month, dn)
+                except ValueError:
+                    candidate = None
+                if candidate is None or candidate < ref:
+                    mo = ref.month + 1 if ref.month < 12 else 1
+                    yr = ref.year if ref.month < 12 else ref.year + 1
+                    try:
+                        candidate = _date(yr, mo, dn)
+                    except ValueError:
+                        continue
+                col_date_map[col_idx] = candidate
+                ref = candidate
+            break
+
+    if not col_date_map:
+        out['error'] = 'Group Block Report: could not build date column map'
+        return out
+
+    for i in range(rt_idx, len(rows)):
+        if str(rows[i][0] or '').strip() == 'Group P/U':
+            pu_row = rows[i]
+            pbn = {}
+            for col_idx, dt in col_date_map.items():
+                val = pu_row[col_idx] if col_idx < len(pu_row) else None
+                if isinstance(val, (int, float)) and val > 0:
+                    pbn[dt.isoformat()] = int(val)
+            out['final_pickup_by_night'] = pbn
+            out['final_total_pickup']    = sum(pbn.values())
+            break
+
+    if out['final_total_pickup'] is None:
+        out['error'] = 'Group Block Report: could not find Group P/U row'
+        return out
+
+    total_rev = 0.0
+    for row in rows:
+        if len(row) > 14 and row[13] == 'Group Room Revenue:' and isinstance(row[14], (int, float)):
+            total_rev += float(row[14])
+        if len(row) > 14 and row[13] == 'Group ADR:' and isinstance(row[14], (int, float)) and not out['contracted_rate']:
+            out['contracted_rate'] = float(row[14])
+    if total_rev > 0:
+        out['room_revenue'] = total_rev
+
+    return out
+
+
 def parse_hhr_excel(file_bytes):
     """
     Parse a Cvent Client Post Event Housing History Report (.xlsx).
@@ -3432,6 +3551,10 @@ def parse_hhr_excel(file_bytes):
 
     wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
+
+    gbr = _parse_group_block_report_excel(ws)
+    if gbr is not None:
+        return gbr
 
     def _sv(v):
         return str(v).strip() if v is not None else ''
@@ -6458,6 +6581,18 @@ def parse_columnar_pickup_xlsx(file_bytes, filename=''):
                     pairs = [{'date': d, 'count': c} for d, c in sorted(vals.items())]
                     return {'pairs': pairs, 'text': '', 'source': 'Pickup by night', 'error': None}
 
+    # ── Format E: PMS "Group Block Report" (day-number columns, Group P/U row) ──
+    if not date_col_map:
+        cell_a1 = str(all_rows[0][0] if all_rows and all_rows[0] else '').strip()
+        if cell_a1 == 'Group Block Report':
+            gbr = _parse_group_block_report_excel(ws)
+            if gbr and not gbr.get('error') and gbr.get('final_pickup_by_night'):
+                pairs = [{'date': d, 'count': c}
+                         for d, c in sorted(gbr['final_pickup_by_night'].items())]
+                return {'pairs': pairs, 'text': '', 'source': 'Group Block Report (Group P/U)', 'error': None}
+            elif gbr and gbr.get('error'):
+                return {'pairs': [], 'text': '', 'source': '', 'error': gbr['error']}
+
     if not date_col_map:
         return {'pairs': [], 'text': '', 'source': '',
                 'error': 'No date header row found (tried MM/DD and YYYY-MM-DD formats)'}
@@ -6549,6 +6684,89 @@ def _hhr_pdf_parse_currency(val):
     return float(m.group()) if m else None
 
 
+def _parse_pms_group_pickup_text(text, result):
+    """Parse a PMS Group Pickup text report (no-table PDF variant)."""
+    import re
+    from datetime import date as _date, timedelta as _td
+
+    lines = text.split('\n')
+
+    hotel_line = lines[0] if lines else ''
+    result['hotel'] = re.sub(r'\s+\d{2}-\d{2}-\d{2,4}\s*$', '', hotel_line).strip()
+
+    year = None
+    for line in lines:
+        m = re.search(r'(?:Start Date|Filter From Date)\s+(\d{1,2})-(\d{1,2})-(\d{2,4})', line)
+        if m:
+            yr = int(m.group(3))
+            year = (2000 + yr) if yr < 100 else yr
+            break
+
+    if not year:
+        result['error'] = 'PMS Group Pickup: could not determine year'
+        return result
+
+    date_range = []
+    for line in lines:
+        m = re.search(
+            r'Filter From Date\s+(\d{1,2})-(\d{1,2})-(\d{2,4})\s+To Date\s+(\d{1,2})-(\d{1,2})-(\d{2,4})',
+            line)
+        if m:
+            def _to_date(mo, dy, yr_raw):
+                yr = int(yr_raw)
+                if yr < 100: yr += 2000
+                return _date(yr, int(mo), int(dy))
+            from_d = _to_date(m.group(1), m.group(2), m.group(3))
+            to_d   = _to_date(m.group(4), m.group(5), m.group(6))
+            d = from_d
+            while d <= to_d:
+                date_range.append(d)
+                d += _td(days=1)
+            break
+
+    if not date_range:
+        result['error'] = 'PMS Group Pickup: could not parse date range'
+        return result
+
+    in_grand_total = False
+    pickup_values = []
+    for line in lines:
+        if 'Grand Total' in line:
+            in_grand_total = True
+            if re.search(r'\bPickup\b', line, re.IGNORECASE):
+                pickup_values = [int(n) for n in re.findall(r'\b(\d+)\b', line)]
+                break
+        if in_grand_total and re.search(r'\bPickup\b', line, re.IGNORECASE):
+            pickup_values = [int(n) for n in re.findall(r'\b(\d+)\b', line)]
+            break
+
+    if not pickup_values:
+        result['error'] = 'PMS Group Pickup: could not find Grand Total Pickup row'
+        return result
+
+    if len(pickup_values) > len(date_range):
+        pickup_values = pickup_values[:len(date_range)]
+
+    pbn = {}
+    for d, count in zip(date_range, pickup_values):
+        if count > 0:
+            pbn[d.isoformat()] = count
+
+    result['pickup_by_night']    = pbn
+    result['final_total_pickup'] = sum(pbn.values())
+    result['error']              = None
+
+    for line in lines:
+        if 'Grand Total' in line:
+            break
+        m = re.match(r'^(.+?)\s+(?:Orig|Block Code)\b', line)
+        if m and 'Block Name' not in line and 'PMS' not in line:
+            result['event_name'] = m.group(1).strip()
+            break
+
+    return result
+
+
 def parse_hhr_pdf(file_bytes, fallback_year=None):
     """Parse a completed Housing History Report PDF returned by the hotel.
 
@@ -6594,6 +6812,11 @@ def parse_hhr_pdf(file_bytes, fallback_year=None):
                 return result
 
             page = pdf.pages[0]
+
+            page_text = page.extract_text() or ''
+            if 'PMS Group Pickup' in page_text or 'grppickup' in page_text.lower():
+                return _parse_pms_group_pickup_text(page_text, result)
+
             tables = page.extract_tables()
             if not tables:
                 result['error'] = 'No tables found on page 1'
