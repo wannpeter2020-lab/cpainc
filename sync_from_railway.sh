@@ -6,64 +6,69 @@
 set -e
 
 RAILWAY_URL="https://cpainc.up.railway.app/admin/download-db"
+LOGIN_URL="https://cpainc.up.railway.app/login"
 LOCAL_DB="$(dirname "$0")/CPAinc.sqlite"
 BACKUP="$(dirname "$0")/CPAinc_backup_$(date +%Y%m%d_%H%M%S).sqlite"
 
 echo "Syncing database from Railway..."
 echo ""
 
-# Prompt for credentials
 read -p "Username: " USERNAME
 read -s -p "Password: " PASSWORD
 echo ""
 
-# Download using session cookie (log in first, then download)
 COOKIE_JAR=$(mktemp)
+TMP_DB=$(mktemp)
 
-# Step 1: get login page (grab CSRF token if needed — app uses session auth)
-curl -s -c "$COOKIE_JAR" "$RAILWAY_URL" -o /dev/null
+# Step 1: GET login page to seed session cookie
+curl -s -c "$COOKIE_JAR" "$LOGIN_URL" -o /dev/null
 
-# Step 2: log in
-LOGIN_RESP=$(curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
-  -X POST "https://cpainc.up.railway.app/login" \
-  -d "username=$USERNAME&password=$PASSWORD" \
-  -L -w "%{http_code}" -o /dev/null)
+# Step 2: POST credentials — do NOT follow redirect (-L) so the session
+#         cookie from the 302 response is captured before any redirect.
+HTTP_LOGIN=$(curl -s \
+  -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+  -X POST "$LOGIN_URL" \
+  --data-urlencode "username=$USERNAME" \
+  --data-urlencode "password=$PASSWORD" \
+  -w "%{http_code}" -o /dev/null)
 
-if [ "$LOGIN_RESP" != "200" ]; then
-  echo "Login may have failed (HTTP $LOGIN_RESP). Trying download anyway..."
+if [ "$HTTP_LOGIN" != "302" ] && [ "$HTTP_LOGIN" != "200" ]; then
+  echo "Login failed (HTTP $HTTP_LOGIN). Check your username and password."
+  rm -f "$COOKIE_JAR" "$TMP_DB"
+  exit 1
 fi
 
-# Step 3: download the database
+# Step 3: Download the database using the authenticated session cookie
 echo "Downloading database..."
-HTTP_CODE=$(curl -s -b "$COOKIE_JAR" \
+HTTP_CODE=$(curl -s \
+  -b "$COOKIE_JAR" \
   "$RAILWAY_URL" \
-  -o /tmp/cpainc_railway.sqlite \
+  -o "$TMP_DB" \
   -w "%{http_code}")
 
 rm -f "$COOKIE_JAR"
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "Error: server returned HTTP $HTTP_CODE"
-  rm -f /tmp/cpainc_railway.sqlite
+  echo "Login may not have succeeded — try username 'peter' if you used an email."
+  rm -f "$TMP_DB"
   exit 1
 fi
 
 # Verify it's a valid SQLite file
-if ! file /tmp/cpainc_railway.sqlite | grep -q "SQLite"; then
+if ! file "$TMP_DB" | grep -q "SQLite"; then
   echo "Error: downloaded file is not a valid SQLite database."
-  echo "You may need to log in at https://cpainc.up.railway.app first."
-  rm -f /tmp/cpainc_railway.sqlite
+  rm -f "$TMP_DB"
   exit 1
 fi
 
-# Back up the current local DB
+# Back up current local DB
 if [ -f "$LOCAL_DB" ]; then
   cp "$LOCAL_DB" "$BACKUP"
   echo "Backed up local DB to: $(basename "$BACKUP")"
 fi
 
-# Replace local DB
-mv /tmp/cpainc_railway.sqlite "$LOCAL_DB"
+mv "$TMP_DB" "$LOCAL_DB"
 echo ""
 echo "Done! Local database is now in sync with Railway."
 echo "Restart your local server to pick up the changes:"

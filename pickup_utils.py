@@ -3606,9 +3606,16 @@ def parse_hhr_excel(file_bytes):
 
         # Booking # can be anywhere in the row — scan all cells
         if not stats.get('booking_id'):
+            import re as _re
             for ci, cell in enumerate(row):
                 cv = _sv(cell.value).lower().rstrip(':')
                 if 'booking #' in cv or 'booking id' in cv or 'booking number' in cv:
+                    # First: number may be embedded in the same cell (e.g. "CD Booking #235044")
+                    _inline = _re.search(r'#\s*(\d{4,})', _sv(cell.value))
+                    if _inline:
+                        stats['booking_id'] = _inline.group(1)
+                        break
+                    # Otherwise: look in adjacent cells but only accept a numeric value
                     for offset in range(1, 7):
                         if ci + offset >= len(row):
                             break
@@ -3617,7 +3624,7 @@ def parse_hhr_excel(file_bytes):
                             try:
                                 stats['booking_id'] = str(int(float(bv)))
                             except Exception:
-                                stats['booking_id'] = bv
+                                pass  # skip non-numeric adjacent cells
                             break
 
         # Date header row — find which columns have dates and where the total column is
