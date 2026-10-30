@@ -3594,12 +3594,29 @@ def parse_hhr_excel(file_bytes):
 
     import re as _re_hhr
     # All known HHR variants put the booking number in row 1.
-    # Booking numbers are always 6 digits. Scan row 1 for #NNNNNN.
-    for _cell in ws[1]:
-        _m = _re_hhr.search(r'#\s*(\d{6})', _sv(_cell.value))
+    # Booking numbers are always exactly 6 digits.
+    _row1 = list(ws[1])
+    for _i, _cell in enumerate(_row1):
+        _cv = _sv(_cell.value)
+        # Pattern A: #NNNNNN anywhere in the cell (with or without space after #)
+        _m = _re_hhr.search(r'#\s*(\d{6})', _cv)
         if _m:
             stats['booking_id'] = _m.group(1)
             break
+        # Pattern B: cell contains "booking" — number may be in same cell or adjacent
+        if 'booking' in _cv.lower():
+            _m2 = _re_hhr.search(r'(\d{6})', _cv)
+            if _m2:
+                stats['booking_id'] = _m2.group(1)
+                break
+            for _j in range(_i + 1, min(_i + 6, len(_row1))):
+                _nv = _sv(_row1[_j].value)
+                _m3 = _re_hhr.search(r'(\d{6})', _nv)
+                if _m3:
+                    stats['booking_id'] = _m3.group(1)
+                    break
+            if stats.get('booking_id'):
+                break
 
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         lbl = _sv(row[0].value).lower().rstrip(':').strip() if row[0].value else ''
