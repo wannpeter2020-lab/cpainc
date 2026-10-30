@@ -3592,6 +3592,15 @@ def parse_hhr_excel(file_bytes):
     contracted_block = {}
     final_pickup_by_night = {}
 
+    import re as _re_hhr
+    # All known HHR variants put the booking number in row 1.
+    # Scan it first: find any cell containing '#' followed by 4+ digits.
+    for _cell in ws[1]:
+        _m = _re_hhr.search(r'#\s*(\d{4,})', _sv(_cell.value))
+        if _m:
+            stats['booking_id'] = _m.group(1)
+            break
+
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         lbl = _sv(row[0].value).lower().rstrip(':').strip() if row[0].value else ''
         col0 = _sv(row[0].value)
