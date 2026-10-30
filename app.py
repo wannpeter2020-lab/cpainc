@@ -14656,8 +14656,9 @@ Key tables:
   (FinalPayment = amount paid to CPA Inc for that booking; Check_ = voucher reference)
 - Pickup: rowid, BookingID, Brand, ActualPickup, TotalRevenue, EntryDate
 - pickup_config: id, booking_id, organization, event_name, hotel, contracted_block, contracted_rate,
-  contracted_fb, status, cutoff_date, commission_pct, hhr_filename (uploaded HHR filename),
-  hhr_stats (JSON summary of HHR data), hhr_data (binary file — use read_hhr tool, not SQL)
+  contracted_fb, status, cutoff_date, commission_pct
+- housing_history_files: id, booking_id, filename, file_data (BLOB — use read_hhr tool), upload_date
+  (this is where imported HHR files are stored — always use read_hhr tool, never query file_data directly)
 - pickup_weekly: config_id, report_date, total_rooms, pickup_by_night (JSON), pct_of_block, pct_of_attrition
 
 Variance analysis workflow (invoice vs HHR):
@@ -14699,54 +14700,43 @@ _ASSISTANT_TOOLS = [
 
 
 def _run_assistant_read_hhr(booking_id):
-    """Extract and parse an HHR file stored in pickup_config for the given booking_id."""
+    """Extract and parse an HHR file stored in housing_history_files for the given booking_id."""
     try:
         db = get_db()
+        # HHR files are stored in housing_history_files, most recent first
         row = db.execute(
-            'SELECT hhr_filename, hhr_data, hhr_stats FROM pickup_config WHERE booking_id = ? AND hhr_data IS NOT NULL',
+            'SELECT filename, file_data, upload_date FROM housing_history_files WHERE booking_id = ? ORDER BY id DESC LIMIT 1',
             (booking_id,)
         ).fetchone()
         if not row:
             return f'No HHR file found for booking {booking_id}.'
 
-        filename = row['hhr_filename'] or ''
-        hhr_bytes = row['hhr_data']
-        hhr_stats = row['hhr_stats']
-
-        # If pre-parsed stats exist, return them directly
-        if hhr_stats:
-            import json as _json
-            try:
-                stats = _json.loads(hhr_stats)
-                lines = [f'HHR for booking {booking_id} ({filename}):']
-                for k, v in stats.items():
-                    lines.append(f'  {k}: {v}')
-                return '\n'.join(lines)
-            except Exception:
-                pass
+        filename = row['filename'] or ''
+        hhr_bytes = bytes(row['file_data'])
+        upload_date = row['upload_date'] or ''
 
         # Parse the file
         from pickup_utils import parse_hhr_excel, parse_hhr_pdf
         ext = filename.lower().split('.')[-1] if '.' in filename else ''
+        result = None
         if ext in ('xls', 'xlsx'):
             result = parse_hhr_excel(hhr_bytes)
         elif ext == 'pdf':
             result = parse_hhr_pdf(hhr_bytes)
         else:
-            # Try Excel first, then PDF
             result = parse_hhr_excel(hhr_bytes)
             if not result:
                 result = parse_hhr_pdf(hhr_bytes)
 
         if not result:
-            return f'HHR file found for booking {booking_id} ({filename}) but could not be parsed.'
+            return f'HHR file found for booking {booking_id} ({filename}, uploaded {upload_date}) but could not be parsed.'
 
-        lines = [f'HHR for booking {booking_id} ({filename}):']
+        lines = [f'HHR for booking {booking_id} ({filename}, uploaded {upload_date}):']
         for k, v in result.items():
-            if k == 'pickup_by_night' and isinstance(v, dict):
-                lines.append(f'  pickup_by_night: {len(v)} nights recorded')
+            if k in ('final_pickup_by_night', 'pickup_by_night') and isinstance(v, dict):
                 total_nights = sum(v.values()) if v else 0
-                lines.append(f'  total_room_nights_from_hhr: {total_nights}')
+                lines.append(f'  total_room_nights (from HHR): {total_nights}')
+                lines.append(f'  nightly_breakdown: {dict(list(v.items())[:10])}{"..." if len(v) > 10 else ""}')
             elif v is not None:
                 lines.append(f'  {k}: {v}')
         return '\n'.join(lines)
