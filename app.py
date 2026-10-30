@@ -14642,22 +14642,34 @@ except Exception:
     _ANTHROPIC_AVAILABLE = False
 
 _ASSISTANT_SYSTEM = """You are Kristin's personal business assistant for CPAinc, a conference planning and booking company.
-You have access to the booking database (SQLite).
+You have access to the booking database (SQLite) and can read uploaded HHR (Hotel History Report) files.
 
-Your tools let you:
+Your tools:
 - query_database: Run read-only SQL against the bookings database
+- read_hhr: Read and parse an uploaded HHR file for a given booking_id — returns room night counts, rates, revenue, and pickup by date
 
 Key tables:
 - ReportPipeline: BookingId, BookingName, EventName, AccountName, Customer (hotel), BookingAssociate,
   StartDate, EndDate, BookingStatus, Revenue, USDRevenue, CommissionPercent, USDCommissionableAmount,
   PeakRooms, TotalRoomNights, RoomRate, ContractedAmount, City, State, Country
 - ChkRegNote: ChkRegID, BookingID, FinalPayment, Check_, DateOnCheck, DepositDate, EntryDate, Cancelled
+  (FinalPayment = amount paid to CPA Inc for that booking; Check_ = voucher reference)
 - Pickup: rowid, BookingID, Brand, ActualPickup, TotalRevenue, EntryDate
-- pickup_config: id, booking_id, organization, event_name, hotel, contracted_block, contracted_rate, status, cutoff_date
+- pickup_config: id, booking_id, organization, event_name, hotel, contracted_block, contracted_rate,
+  contracted_fb, status, cutoff_date, commission_pct, hhr_filename (uploaded HHR filename),
+  hhr_stats (JSON summary of HHR data), hhr_data (binary file — use read_hhr tool, not SQL)
+- pickup_weekly: config_id, report_date, total_rooms, pickup_by_night (JSON), pct_of_block, pct_of_attrition
+
+Variance analysis workflow (invoice vs HHR):
+1. Look up the booking in ReportPipeline for contracted rate/rooms and commission %
+2. Use read_hhr to get actual pickup rooms and revenue from the HHR
+3. Check ChkRegNote for what was actually paid (FinalPayment)
+4. Compare: expected commission = HHR revenue × commission % vs FinalPayment
+5. Common causes: rate discrepancy, comp rooms not excluded, attrition fees included, date range mismatch
 
 Today's date is {today}.
 
-Be concise and helpful. Format numbers as currency where appropriate.
+Be concise and specific — always look up actual data before explaining. Format numbers as currency.
 """
 
 _ASSISTANT_TOOLS = [
@@ -14672,7 +14684,74 @@ _ASSISTANT_TOOLS = [
             'required': ['sql'],
         },
     },
+    {
+        'name': 'read_hhr',
+        'description': 'Read and parse the uploaded HHR (Hotel History Report) file for a booking. Returns structured pickup data: room nights by date, actual revenue, commission %, and summary stats.',
+        'input_schema': {
+            'type': 'object',
+            'properties': {
+                'booking_id': {'type': 'string', 'description': 'The booking ID to retrieve the HHR for'},
+            },
+            'required': ['booking_id'],
+        },
+    },
 ]
+
+
+def _run_assistant_read_hhr(booking_id):
+    """Extract and parse an HHR file stored in pickup_config for the given booking_id."""
+    try:
+        db = get_db()
+        row = db.execute(
+            'SELECT hhr_filename, hhr_data, hhr_stats FROM pickup_config WHERE booking_id = ? AND hhr_data IS NOT NULL',
+            (booking_id,)
+        ).fetchone()
+        if not row:
+            return f'No HHR file found for booking {booking_id}.'
+
+        filename = row['hhr_filename'] or ''
+        hhr_bytes = row['hhr_data']
+        hhr_stats = row['hhr_stats']
+
+        # If pre-parsed stats exist, return them directly
+        if hhr_stats:
+            import json as _json
+            try:
+                stats = _json.loads(hhr_stats)
+                lines = [f'HHR for booking {booking_id} ({filename}):']
+                for k, v in stats.items():
+                    lines.append(f'  {k}: {v}')
+                return '\n'.join(lines)
+            except Exception:
+                pass
+
+        # Parse the file
+        from pickup_utils import parse_hhr_excel, parse_hhr_pdf
+        ext = filename.lower().split('.')[-1] if '.' in filename else ''
+        if ext in ('xls', 'xlsx'):
+            result = parse_hhr_excel(hhr_bytes)
+        elif ext == 'pdf':
+            result = parse_hhr_pdf(hhr_bytes)
+        else:
+            # Try Excel first, then PDF
+            result = parse_hhr_excel(hhr_bytes)
+            if not result:
+                result = parse_hhr_pdf(hhr_bytes)
+
+        if not result:
+            return f'HHR file found for booking {booking_id} ({filename}) but could not be parsed.'
+
+        lines = [f'HHR for booking {booking_id} ({filename}):']
+        for k, v in result.items():
+            if k == 'pickup_by_night' and isinstance(v, dict):
+                lines.append(f'  pickup_by_night: {len(v)} nights recorded')
+                total_nights = sum(v.values()) if v else 0
+                lines.append(f'  total_room_nights_from_hhr: {total_nights}')
+            elif v is not None:
+                lines.append(f'  {k}: {v}')
+        return '\n'.join(lines)
+    except Exception as e:
+        return f'Error reading HHR for booking {booking_id}: {e}'
 
 
 def _run_assistant_tool(tool_name, tool_input):
@@ -14690,6 +14769,8 @@ def _run_assistant_tool(tool_name, tool_input):
             for r in rows[:100]:
                 lines.append('\t'.join(str(r[c]) if r[c] is not None else '' for c in cols))
             return '\n'.join(lines)
+        if tool_name == 'read_hhr':
+            return _run_assistant_read_hhr(str(tool_input.get('booking_id', '')))
     except Exception as e:
         return f'Error: {e}'
 
