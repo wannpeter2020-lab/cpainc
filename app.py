@@ -4809,9 +4809,17 @@ def import_hhr():
                                 'reason': 'Not an Excel file'})
                 continue
 
-            tmp_path = f'/tmp/cpainc_pickup_{file.filename}'
+            import os as _os, tempfile as _tempfile
+            _safe_name = _os.path.basename(file.filename)
+            _tmp_fd, tmp_path = _tempfile.mkstemp(suffix='_' + _safe_name)
+            _os.close(_tmp_fd)
             file.save(tmp_path)
-            file_bytes = open(tmp_path, 'rb').read()
+            with open(tmp_path, 'rb') as _fh:
+                file_bytes = _fh.read()
+            try:
+                _os.unlink(tmp_path)
+            except Exception:
+                pass
 
             from pickup_utils import parse_hhr_excel as _parse_xl
             try:
@@ -14712,8 +14720,10 @@ def _run_assistant_read_hhr(booking_id):
             return f'No HHR file found for booking {booking_id}.'
 
         filename = row['filename'] or ''
-        hhr_bytes = bytes(row['file_data'])
         upload_date = row['upload_date'] or ''
+        if not row['file_data']:
+            return f'HHR file record found for booking {booking_id} ({filename}) but file data is empty.'
+        hhr_bytes = bytes(row['file_data'])
 
         # Parse the file
         from pickup_utils import parse_hhr_excel, parse_hhr_pdf
