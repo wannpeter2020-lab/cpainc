@@ -4237,11 +4237,14 @@ def _synth_raw_hhr_from_pickup(config, pbn):
             ws.cell(r, 15).value = rev                  # O = Revenue
 
     _inside = lambda d: (int(pbn.get(d, 0) or 0) if d in blk else 0)
+    # Audit per night = pickup on non-contracted (pre/post-block shoulder) nights,
+    # so those nights can show their own rooms and the columns still sum to totals.
+    _audit  = lambda d: (int(pbn.get(d, 0) or 0) if d not in blk else 0)
     _row(7,  'Contracted Block ',          lambda d: int(blk.get(d, 0) or 0), tot_blk, rate_val=rate)
     _row(8,  'Rate 1',                      _inside, inside_total, rate_val=rate,
          rev=(round(inside_total * rate, 2) if (rate and inside_total) else None))
     _row(9,  'Total Pickup Inside Block ',  _inside, inside_total)
-    _row(10, 'Total Audit Pickup',          lambda d: 0, audit_total)
+    _row(10, 'Total Audit Pickup',          _audit, audit_total)
     _row(11, 'FINAL TOTAL PICKUP (ALL)',    lambda d: int(pbn.get(d, 0) or 0), final_total)
 
     out = _io.BytesIO()
@@ -4345,19 +4348,38 @@ def populate_hhr_template(raw_hhr_bytes, template_path=None):
     _n_tmpl_used          = len(sorted_raw_date_cols)
 
     _contracted_by_col = {}
+    _pickup_by_col     = {}
     for _rn in range(1, raw_ws.max_row + 1):
-        if _sv(raw_ws.cell(_rn, 1).value).lower().strip().startswith('contracted block'):
+        _l = _sv(raw_ws.cell(_rn, 1).value).lower().strip()
+        if _l.startswith('contracted block'):
             for rc in sorted_raw_date_cols:
                 _contracted_by_col[rc] = _num(raw_ws.cell(_rn, rc).value) or 0
+        elif _l.startswith('final total pickup'):
+            for rc in sorted_raw_date_cols:
+                _pickup_by_col[rc] = _num(raw_ws.cell(_rn, rc).value) or 0
+        elif 'notes to collections' in _l:
             break
 
-    _contracted_raw_cols = [rc for rc in sorted_raw_date_cols
-                            if _contracted_by_col.get(rc, 0) > 0]
-    if _contracted_raw_cols:
-        _c_dates   = sorted([date_col_map[rc] for rc in _contracted_raw_cols])
+    # Show every contracted night AND every night with actual pickup (so pre- and
+    # post-block shoulder pickup appears), as one contiguous span. Previously only
+    # the contracted nights + a single pre-shoulder night were shown, which dropped
+    # post-block shoulder pickup from the grid and lumped it into the Audit total.
+    _show_raw_cols = [rc for rc in sorted_raw_date_cols
+                      if _contracted_by_col.get(rc, 0) > 0 or _pickup_by_col.get(rc, 0) > 0]
+    if _show_raw_cols:
+        _lo, _hi   = min(_show_raw_cols), max(_show_raw_cols)
+        _span_cols = [rc for rc in sorted_raw_date_cols if _lo <= rc <= _hi]
+        _c_dates   = sorted(date_col_map[rc] for rc in _span_cols)
         _c_start   = datetime.strptime(_c_dates[0], '%Y-%m-%d')
         _pre_dt    = _c_start - timedelta(days=1)
-        _new_dates = [_pre_dt.strftime('%Y-%m-%d')] + _c_dates
+
+        # Add one blank pre-shoulder lead-in night if the template still has room.
+        _add_pre = len(_c_dates) < len(TMPL_DATE_COLS)
+        if _add_pre:
+            _new_dates = [_pre_dt.strftime('%Y-%m-%d')] + _c_dates
+        else:
+            _new_dates = list(_c_dates)
+        _new_dates = _new_dates[:len(TMPL_DATE_COLS)]
 
         # Write corrected date row (5) and day row (6) to template
         for i, _d in enumerate(_new_dates):
@@ -4369,15 +4391,16 @@ def populate_hhr_template(raw_hhr_bytes, template_path=None):
             tmpl_ws.cell(6, tc).value = None
 
         _dates_written        = True
-        pre_shoulder_tmpl_col = TMPL_DATE_COLS[0]
+        _shift                = 1 if _add_pre else 0
+        pre_shoulder_tmpl_col = TMPL_DATE_COLS[0] if _add_pre else None
         _n_tmpl_used          = len(_new_dates)
 
-        # Contracted cols shift right by 1 to make room for pre-shoulder in col C
+        # Map each shown night to its raw column (pre-shoulder blank stays unmapped)
         raw_to_tmpl = {}
-        for i, _d in enumerate(_c_dates):
+        for i, _d in enumerate(_c_dates[:len(TMPL_DATE_COLS) - _shift]):
             for rc, iso in date_col_map.items():
                 if iso == _d:
-                    raw_to_tmpl[rc] = TMPL_DATE_COLS[i + 1]
+                    raw_to_tmpl[rc] = TMPL_DATE_COLS[i + _shift]
                     break
 
     # ── Spend summary lookup (raw HHR notes section) ──────────────────────────
